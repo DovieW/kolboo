@@ -21,7 +21,7 @@ import {
 	useHistoryAll,
 	useHistoryPage,
 	useRecordingsStats,
-	useRequestLogs,
+	useRequestLogIds,
 	useRetryTranscription,
 	useSettings,
 } from "../lib/queries";
@@ -33,11 +33,13 @@ import {
 	tauriAPI,
 } from "../lib/tauri";
 import { useRecordingPlayer } from "../lib/useRecordingPlayer";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
 import { HistoryAnalysisPanel } from "./history/HistoryAnalysisPanel";
 import { HistoryDeleteDialogs } from "./history/HistoryDeleteDialogs";
 import { HistoryFeedFilterToolbar } from "./history/HistoryFeedFilterToolbar";
 import { HistoryFeedList } from "./history/HistoryFeedList";
 import { HistoryFeedPagination } from "./history/HistoryFeedPagination";
+import { prunePendingHistoryDocuments } from "./history/HistoryReader";
 
 export function HistoryFeed({
 	onJumpToLog,
@@ -48,6 +50,7 @@ export function HistoryFeed({
 	const recordingsStats = useRecordingsStats();
 
 	const invalidateHistoryQueries = () => {
+		void prunePendingHistoryDocuments();
 		queryClient.invalidateQueries({ queryKey: ["history"] });
 		queryClient.invalidateQueries({ queryKey: ["historyAll"] });
 		queryClient.invalidateQueries({ queryKey: ["historyPage"] });
@@ -72,6 +75,7 @@ export function HistoryFeed({
 			return deletedRecordings;
 		},
 		onSuccess: (deletedRecordings) => {
+			void prunePendingHistoryDocuments();
 			queryClient.invalidateQueries({ queryKey: ["history"] });
 			queryClient.invalidateQueries({ queryKey: ["historyAll"] });
 			queryClient.invalidateQueries({ queryKey: ["historyPage"] });
@@ -108,9 +112,9 @@ export function HistoryFeed({
 		}
 		return fallback;
 	})();
-	const { data: requestLogs } = useRequestLogs(requestLogsLimit);
+	const { data: requestLogs } = useRequestLogIds(requestLogsLimit);
 	const requestLogIds = useMemo(
-		() => new Set((requestLogs ?? []).map((l) => l.id)),
+		() => new Set(requestLogs ?? []),
 		[requestLogs],
 	);
 
@@ -120,15 +124,7 @@ export function HistoryFeed({
 		return bytes / 1024 ** 3;
 	})();
 
-	const player = useRecordingPlayer({
-		onError: (message) => {
-			notifications.show({
-				title: "Playback",
-				message,
-				color: "red",
-			});
-		},
-	});
+	const player = useRecordingPlayer();
 
 	const isDeleteDialogBusy = deleteAllHistoryAndRecordings.isPending;
 	const [confirmOpened, { open: openConfirm, close: closeConfirm }] =
@@ -237,23 +233,14 @@ export function HistoryFeed({
 	);
 
 	// Listen for history changes from other windows (e.g., overlay after transcription)
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setup = async () => {
-			unlisten = await tauriAPI.onHistoryChanged(() => {
-				queryClient.invalidateQueries({ queryKey: ["history"] });
-				queryClient.invalidateQueries({ queryKey: ["historyAll"] });
-				queryClient.invalidateQueries({ queryKey: ["historyPage"] });
-			});
-		};
-
-		void setup();
-
-		return () => {
-			unlisten?.();
-		};
-	}, [queryClient]);
+	useBackendEvent("history-changed", () => {
+		void prunePendingHistoryDocuments();
+		void queryClient.invalidateQueries({ queryKey: ["historyDetail"] });
+		void queryClient.invalidateQueries({ queryKey: ["history"] });
+		void queryClient.invalidateQueries({ queryKey: ["historyAll"] });
+		void queryClient.invalidateQueries({ queryKey: ["historyPage"] });
+		void queryClient.invalidateQueries({ queryKey: ["requestLogs", "ids"] });
+	});
 
 	const handleDelete = (id: string) => {
 		void (async () => {
@@ -261,23 +248,10 @@ export function HistoryFeed({
 				const outcome = await historyOrchestration.requestDeleteEntry(id);
 
 				switch (outcome.kind) {
+					case "ignored":
 					case "opened_shared_dialog":
-						return;
 					case "deleted_entry":
-						notifications.show({
-							title: "History",
-							message: "Deleted transcript.",
-							color: "green",
-						});
-						return;
 					case "deleted_entry_and_recording":
-						notifications.show({
-							title: "History",
-							message: outcome.result.deleted_recording
-								? "Deleted transcript and recording."
-								: "Deleted transcript.",
-							color: "green",
-						});
 						return;
 				}
 			} catch (e) {
@@ -430,17 +404,11 @@ export function HistoryFeed({
 	};
 
 	const handleRetryEntry = (entryId: string) => {
-		notifications.show({
-			title: "Rerunning",
-			message: "Re-running transcription…",
-			color: "orange",
-		});
-
 		retryMutation.mutate(entryId, {
 			onSuccess: () => {
 				notifications.show({
 					title: "Rerun complete",
-					message: "Check History / Request Logs for the new entry.",
+					message: "New transcript saved.",
 					color: "teal",
 				});
 			},
@@ -463,14 +431,7 @@ export function HistoryFeed({
 	const handleDeleteOnlyThisTranscript = () => {
 		void (async () => {
 			try {
-				const outcome = await historyOrchestration.deleteOnlyThisTranscript();
-				if (outcome.kind !== "deleted_entry") return;
-
-				notifications.show({
-					title: "History",
-					message: "Deleted transcript.",
-					color: "green",
-				});
+				await historyOrchestration.deleteOnlyThisTranscript();
 			} catch (error) {
 				notifications.show({
 					title: "History",
@@ -702,12 +663,7 @@ export function HistoryFeed({
 				onRetryEntry={handleRetryEntry}
 				isRetryPending={retryMutation.isPending}
 				retryPendingEntryId={retryPendingEntryId}
-				recordingExistsById={historyOrchestration.recordingExistsById}
-				isRecordingPlaying={(recordingId) => player.isPlaying(recordingId)}
-				isRecordingLoading={(recordingId) => player.isLoading(recordingId)}
-				onToggleRecording={(recordingId) => {
-					void player.toggle(recordingId);
-				}}
+				player={player}
 				requestLogIds={requestLogIds}
 				onJumpToLog={onJumpToLog}
 				onDeleteEntry={handleDelete}

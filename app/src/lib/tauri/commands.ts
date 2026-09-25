@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { buildCostInvokeParams } from "../costParams";
@@ -7,6 +7,10 @@ import { tauriLicenseAPI } from "./license";
 import { managedInferenceAPI } from "./managedInference";
 import { tauriPolicyAPI } from "./policy";
 import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
+import type { CustomProvider } from "./types.generated";
+
+export type { CustomProvider } from "./types.generated";
+
 import type {
 	AudioCaptureDiagnostics,
 	AudioInputDeviceInfo,
@@ -269,9 +273,22 @@ export const tauriAPI = {
 		return invoke("get_history", { limit });
 	},
 
+	getHistoryActivity: (timeframe: string) =>
+		invoke<import("./types.generated").HistoryActivity>(
+			"get_history_activity",
+			{ timeframe },
+		),
+
 	async getHistoryPage(params: HistoryPageQuery): Promise<HistoryPageResult> {
 		return invoke("get_history_page", { params });
 	},
+
+	getHistoryDetail: (id: string) =>
+		invoke<import("./types").HistoryDetail | null>("get_history_detail", {
+			id,
+		}),
+	saveHistoryEdit: (input: import("./types").HistoryEditInput) =>
+		invoke<import("./types").HistoryEdit>("save_history_edit", { input }),
 
 	async deleteHistoryEntry(id: string): Promise<boolean> {
 		return invoke("delete_history_entry", { id });
@@ -596,6 +613,7 @@ interface ProviderInfo {
 	value: string;
 	label: string;
 	is_local: boolean;
+	models?: string[] | null;
 }
 
 interface OcrProviderStatus {
@@ -620,6 +638,15 @@ interface AvailableProvidersResponse {
 }
 
 export const configAPI = {
+	getCustomProviders: () => invoke<CustomProvider[]>("get_custom_providers"),
+	async saveCustomProvider(provider: CustomProvider): Promise<void> {
+		await invoke<void>("save_custom_provider", { provider });
+		await emitTyped("settings-changed", {});
+	},
+	async deleteCustomProvider(id: string): Promise<void> {
+		await invoke<void>("delete_custom_provider", { id });
+		await emitTyped("settings-changed", {});
+	},
 	// Default prompt sections (from Tauri)
 	getDefaultSections: () =>
 		invoke<DefaultSectionsResponse>("get_default_sections"),
@@ -645,12 +672,25 @@ export const ocrAPI = {
 };
 
 export const recordingControlsAPI = {
+	getPreferences: () =>
+		invoke<import("./types").RecordingPreferences>("recording_get_preferences"),
+	setPreferences: (preferences: import("./types").RecordingPreferences) =>
+		invoke<void>("recording_set_preferences", { preferences }),
 	getSeconds: () => invoke<number>("pipeline_get_recording_seconds"),
 	canPause: () => invoke<boolean>("pipeline_can_pause_recording"),
 	computerAudioAvailable: () =>
 		invoke<boolean>("recording_computer_audio_available"),
 	listRecovery: () => invoke<string[]>("recording_list_recovery"),
-	recover: (id: string) => invoke<void>("recording_recover", { id }),
+	recover: (id: string) =>
+		invoke<import("./types").FileImportResult>("recording_recover", { id }),
+	importFile: (
+		path: string,
+		preferences: import("./types").RecordingPreferences,
+	) =>
+		invoke<import("./types").FileImportResult>("recording_import_file", {
+			path,
+			preferences,
+		}),
 	discardRecovery: (id: string) =>
 		invoke<void>("recording_discard_recovery", { id }),
 	getPaused: () => invoke<boolean>("pipeline_get_recording_paused"),
@@ -696,6 +736,8 @@ export const licenseAPI = {
 };
 
 export const logsAPI = {
+	getRequestLogIds: (limit: number) =>
+		invoke<string[]>("get_request_log_ids", { limit }),
 	getRequestLogs: (limit?: number) =>
 		invoke<RequestLog[]>("get_request_logs", { limit: limit ?? 50 }),
 
@@ -775,18 +817,18 @@ export const backupAPI = {
 
 export const recordingsAPI = {
 	// Returns a URL usable as an <audio src>, or null if no recording exists.
-	getRecordingAssetUrl: async (params: { requestId: string }) => {
-		const path = await invoke<string | null>("recording_get_wav_path", {
-			requestId: params.requestId,
-		});
-		return path ? convertFileSrc(path) : null;
-	},
-
-	// Returns base64 WAV bytes, or null if no recording exists.
-	getRecordingWavBase64: (params: { requestId: string }) =>
-		invoke<string | null>("recording_get_wav_base64", {
+	getRecordingAssetUrl: (params: { requestId: string }) =>
+		invoke<string | null>("recording_get_playback_url", {
 			requestId: params.requestId,
 		}),
+
+	getRecordingWaveform: (params: { requestId: string }) =>
+		invoke<import("./types").RecordingWaveform | null>(
+			"recording_get_waveform",
+			{
+				requestId: params.requestId,
+			},
+		),
 
 	// Open recordings directory in file explorer.
 	openRecordingsFolder: () => invoke<void>("recordings_open_folder"),

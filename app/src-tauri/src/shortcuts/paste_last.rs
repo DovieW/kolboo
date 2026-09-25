@@ -74,7 +74,7 @@ fn output_last_transcription(app: &AppHandle, label: &str) {
     // Keep output intent resolution here so both global shortcuts and modifier-only hook events
     // honor the same persisted output-mode/privacy settings.
     let output_intent =
-        crate::core::output_settings::resolve_output_intent_from_store(app, None, None);
+        crate::core::output_settings::resolve_output_intent_from_store(app, None, None, None);
     let history_storage = app.state::<HistoryStorage>();
 
     if let Ok(entries) = history_storage.get_all(Some(1)) {
@@ -85,6 +85,7 @@ fn output_last_transcription(app: &AppHandle, label: &str) {
                 output_intent.mode(),
                 output_intent.hit_enter(),
                 !output_intent.clipboard_privacy_mode(),
+                crate::core::output_settings::foreground_paste_shortcut(app),
             ) {
                 log::error!("Failed to output last transcription: {}", e);
             }

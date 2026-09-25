@@ -141,7 +141,23 @@ pub(crate) fn complete_current_request_with_cost(
     status: EventStatus,
     wav_bytes: Option<&[u8]>,
 ) {
-    complete_current_request_with_cost_inner(app, pipeline, request_id, status, wav_bytes, false);
+    complete_current_request_with_duration(
+        app,
+        pipeline,
+        request_id,
+        status,
+        wav_bytes.and_then(stats::wav_duration_secs),
+    );
+}
+
+pub(crate) fn complete_current_request_with_duration(
+    app: &AppHandle,
+    pipeline: &SharedPipeline,
+    request_id: Option<&str>,
+    status: EventStatus,
+    duration: Option<f64>,
+) {
+    complete_current_request_with_cost_inner(app, pipeline, request_id, status, duration, false);
 }
 
 /// Same as `complete_current_request_with_cost`, but preserves legacy command paths that emitted
@@ -153,7 +169,14 @@ pub(crate) fn complete_current_request_with_cost_best_effort(
     status: EventStatus,
     wav_bytes: Option<&[u8]>,
 ) {
-    complete_current_request_with_cost_inner(app, pipeline, request_id, status, wav_bytes, true);
+    complete_current_request_with_cost_inner(
+        app,
+        pipeline,
+        request_id,
+        status,
+        wav_bytes.and_then(stats::wav_duration_secs),
+        true,
+    );
 }
 
 /// Complete using the pipeline's last WAV snapshot.
@@ -178,19 +201,28 @@ fn complete_current_request_with_cost_inner(
     pipeline: &SharedPipeline,
     request_id: Option<&str>,
     status: EventStatus,
-    wav_bytes: Option<&[u8]>,
+    duration: Option<f64>,
     emit_without_log_store: bool,
 ) {
     let mut emitted_with_log_store = false;
+    if let (Some(id), Some(duration), Some(history)) = (
+        request_id,
+        duration,
+        app.try_state::<crate::history::HistoryStorage>(),
+    ) {
+        if history.set_recording_duration(id, duration).is_err() {
+            log::warn!("Could not persist History audio duration");
+        }
+    }
 
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        stats::emit_cost_events_for_current_request(app, status, wav_bytes);
+        stats::emit_cost_events_for_current_request_with_duration(app, status, duration);
         emitted_with_log_store = true;
         log_store.complete_current();
     }
 
     if emit_without_log_store && !emitted_with_log_store {
-        stats::emit_cost_events_for_current_request(app, status, wav_bytes);
+        stats::emit_cost_events_for_current_request_with_duration(app, status, duration);
     }
 
     end_ocr_session_for_request(pipeline, request_id);
@@ -321,6 +353,7 @@ mod tests {
 
     fn transcription_result(llm_outcome: LlmOutcome) -> TranscriptionResult {
         TranscriptionResult {
+            speaker_segments: Vec::new(),
             stt_text: "raw".into(),
             final_text: "final".into(),
             stt_duration_ms: 1,

@@ -33,21 +33,30 @@ export function HistoryDeleteDialogs({
 			<Modal
 				opened={confirmOpened}
 				onClose={onCloseConfirm}
+				closeOnClickOutside={!isDeleteAllPending}
+				closeOnEscape={!isDeleteAllPending}
+				withCloseButton={!isDeleteAllPending}
 				title="Delete transcripts and recordings"
 				centered
 				size="sm"
 			>
 				<Text size="sm" mb="lg">
-					This will delete all transcripts in History and all saved .wav
-					recordings from disk. This action cannot be undone.
+					Delete all transcripts and recordings? This cannot be undone.
 				</Text>
 				<Group justify="flex-end">
+					<Button
+						variant="default"
+						onClick={onCloseConfirm}
+						disabled={isDeleteAllPending}
+					>
+						Cancel
+					</Button>
 					<Button
 						color="red"
 						onClick={onDeleteAll}
 						loading={isDeleteAllPending}
 					>
-						Delete transcripts and recordings
+						Delete all
 					</Button>
 				</Group>
 			</Modal>
@@ -65,9 +74,6 @@ export function HistoryDeleteDialogs({
 							This transcript shares its recording with{" "}
 							{Math.max(0, deleteOneContext.refCount - 1)} other history item
 							{Math.max(0, deleteOneContext.refCount - 1) === 1 ? "" : "s"}.
-						</Text>
-						<Text size="sm" c="dimmed" mb="lg">
-							Choose what to delete.
 						</Text>
 
 						<Group justify="flex-end" gap="sm" wrap="wrap">

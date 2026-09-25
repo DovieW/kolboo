@@ -143,17 +143,17 @@ describe("tauri invoke wrappers", () => {
 		});
 	});
 
-	it("recordingsAPI.getRecordingAssetUrl uses recording_get_wav_path", async () => {
+	it("recordingsAPI.getRecordingAssetUrl returns the scoped playback stream", async () => {
 		const { recordingsAPI } = await import("./tauri");
-		invokeMock.mockResolvedValueOnce("C:/tmp/file.wav");
+		invokeMock.mockResolvedValueOnce("http://127.0.0.1:1234/token/req-1");
 
 		const url = await recordingsAPI.getRecordingAssetUrl({
 			requestId: "req-1",
 		});
 
-		expect(invokeMock).toHaveBeenCalledWith("recording_get_wav_path", {
+		expect(invokeMock).toHaveBeenCalledWith("recording_get_playback_url", {
 			requestId: "req-1",
 		});
-		expect(url).toBe("C:/tmp/file.wav");
+		expect(url).toBe("http://127.0.0.1:1234/token/req-1");
 	});
 });

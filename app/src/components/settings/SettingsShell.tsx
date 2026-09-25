@@ -1,20 +1,20 @@
 import {
 	ActionIcon,
+	Center,
+	Loader,
 	Select,
 	type SelectProps,
 	Tabs,
-	Title,
+	Text,
 	Tooltip,
 } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { CircleHelp, Cog, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Cog, Plus } from "lucide-react";
+import { lazy, Suspense, startTransition, useEffect, useState } from "react";
 import { API_KEY_STORE_KEYS } from "../../lib/apiKeys";
 import { useLicenseAuthContext, useSettings } from "../../lib/queries";
 import { hasManagedInferenceAccess, tauriAPI } from "../../lib/tauri";
-import { ApiKeysSettings } from "./ApiKeysSettings";
 import { AudioSettings } from "./AudioSettings";
-import { DataSettings } from "./DataSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { NetworkSettings } from "./NetworkSettings";
 import { PolicySettings } from "./PolicySettings";
@@ -22,6 +22,23 @@ import { PrivacySettings } from "./PrivacySettings";
 import { ProfileConfigModal } from "./ProgramsModal";
 import { PromptSettings } from "./PromptSettings";
 import { UiSettings } from "./UiSettings";
+
+const loadApiKeysSettings = () => import("./ApiKeysSettings");
+const loadDataSettings = () => import("./DataSettings");
+const LazyApiKeysSettings = lazy(async () => ({
+	default: (await loadApiKeysSettings()).ApiKeysSettings,
+}));
+const LazyDataSettings = lazy(async () => ({
+	default: (await loadDataSettings()).DataSettings,
+}));
+
+function SettingsPanelLoading({ label }: { label: string }) {
+	return (
+		<Center mih={180} role="status" aria-label={`Loading ${label} settings`}>
+			<Loader size="sm" />
+		</Center>
+	);
+}
 
 export type SettingsShellProps = {
 	onRunSetupGuide?: () => void;
@@ -33,7 +50,7 @@ type EditingOption = {
 	isDisabledProfile?: boolean;
 };
 
-export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
+export function SettingsShell(_props: SettingsShellProps) {
 	const { data: settings } = useSettings();
 	const { data: licenseAuthContext, isFetched: licenseAuthContextResolved } =
 		useLicenseAuthContext();
@@ -61,6 +78,26 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 
 	const [activeSettingsTab, setActiveSettingsTab] = useState<string>("ai");
 	const [hasUserSelectedTab, setHasUserSelectedTab] = useState(false);
+	const [mountedHeavyTabs, setMountedHeavyTabs] = useState<Set<string>>(
+		() => new Set(),
+	);
+
+	useEffect(() => {
+		if (
+			(activeSettingsTab !== "api-keys" && activeSettingsTab !== "data") ||
+			mountedHeavyTabs.has(activeSettingsTab)
+		)
+			return;
+		const timeout = window.setTimeout(() => {
+			startTransition(() => {
+				setMountedHeavyTabs((current) => {
+					if (current.has(activeSettingsTab)) return current;
+					return new Set(current).add(activeSettingsTab);
+				});
+			});
+		}, 0);
+		return () => window.clearTimeout(timeout);
+	}, [activeSettingsTab, mountedHeavyTabs]);
 
 	useEffect(() => {
 		if (hasUserSelectedTab) return;
@@ -124,149 +161,147 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 	};
 
 	return (
-		<div className="main-content">
-			<header
-				className="tv-page-header animate-in"
-				style={{
-					display: "flex",
-					alignItems: "flex-end",
-					justifyContent: "space-between",
-					gap: 16,
-					flexWrap: "wrap",
+		<div className="main-content settings-page">
+			<Tabs
+				value={activeSettingsTab}
+				onChange={(value) => {
+					if (!value) return;
+					setHasUserSelectedTab(true);
+					setActiveSettingsTab(value);
 				}}
+				classNames={{ root: "settings-tabs" }}
+				keepMounted={false}
 			>
-				<div>
-					<Title order={1}>Settings</Title>
-				</div>
+				<header className="settings-tabs-toolbar">
+					<div className="settings-header-row">
+						<div className="settings-header-actions">
+							{/* Setup guide button intentionally hidden for now.
+							{onRunSetupGuide ? (
+								<Tooltip label="Run setup guide" withArrow>
+									<ActionIcon
+										variant="subtle"
+										color="orange"
+										size={32}
+										aria-label="Run setup guide"
+										onClick={onRunSetupGuide}
+									>
+										<CircleHelp size={14} />
+									</ActionIcon>
+								</Tooltip>
+							) : null}
+							*/}
 
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						gap: 10,
-					}}
-				>
-					<div
-						style={{
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-						}}
-					>
-						{onRunSetupGuide ? (
-							<Tooltip label="Run setup guide" withArrow>
+							<Text
+								component="label"
+								htmlFor="settings-profile"
+								size="xs"
+								c="dimmed"
+							>
+								Profile
+							</Text>
+							<Tooltip label="New profile" withArrow>
 								<ActionIcon
 									variant="subtle"
 									color="orange"
-									size="sm"
-									aria-label="Run setup guide"
-									onClick={onRunSetupGuide}
+									size={32}
+									aria-label="New profile"
+									onClick={() => {
+										setAutoCreateProfileOnOpen(true);
+										setProgramsModalOpen(true);
+									}}
 								>
-									<CircleHelp size={14} />
+									<Plus size={14} />
 								</ActionIcon>
 							</Tooltip>
-						) : null}
 
-						<Tooltip label="New profile" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="orange"
+							<Select
+								id="settings-profile"
+								aria-label="Editing profile"
+								className="settings-profile-select"
+								data={editingOptions}
+								value={editingProfileId}
+								onChange={(v) => setEditingProfileId(v ?? "default")}
+								renderOption={renderEditingOption}
+								withCheckIcon={false}
 								size="sm"
-								aria-label="New profile"
-								onClick={() => {
-									setAutoCreateProfileOnOpen(true);
-									setProgramsModalOpen(true);
+								styles={{
+									input: {
+										backgroundColor: "transparent",
+										border: "1px solid var(--border-default)",
+										borderRadius: 6,
+										color: selectedProfileDisabled
+											? "var(--text-secondary)"
+											: "var(--text-primary)",
+										textDecoration: selectedProfileDisabled
+											? "line-through"
+											: "none",
+										paddingLeft: 8,
+										paddingRight: 4,
+									},
+									dropdown: {
+										backgroundColor: "var(--bg-elevated)",
+										borderColor: "var(--border-default)",
+									},
 								}}
-							>
-								<Plus size={14} />
-							</ActionIcon>
-						</Tooltip>
+							/>
 
-						<Select
-							data={editingOptions}
-							value={editingProfileId}
-							onChange={(v) => setEditingProfileId(v ?? "default")}
-							renderOption={renderEditingOption}
-							withCheckIcon={false}
-							size="xs"
-							styles={{
-								input: {
-									backgroundColor: "transparent",
-									border: "1px solid var(--border-default)",
-									borderRadius: 6,
-									color: selectedProfileDisabled
-										? "var(--text-secondary)"
-										: "var(--text-primary)",
-									textDecoration: selectedProfileDisabled
-										? "line-through"
-										: "none",
-									minWidth: 140,
-									paddingLeft: 8,
-									paddingRight: 4,
-								},
-								dropdown: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-								},
-							}}
-						/>
-
-						<Tooltip
-							label={
-								editingProfileId === "default"
-									? "Select a none-default profile to configure programs"
-									: "Profile config"
-							}
-							withArrow
-						>
-							<ActionIcon
-								variant="subtle"
-								color="orange"
-								size="sm"
-								aria-label="Profile config"
-								onClick={() => setProgramsModalOpen(true)}
-								disabled={editingProfileId === "default"}
+							<Tooltip
+								label={
+									editingProfileId === "default"
+										? "Choose a profile to configure its app rules"
+										: "Profile config"
+								}
+								withArrow
 							>
-								<Cog size={14} />
-							</ActionIcon>
-						</Tooltip>
+								<ActionIcon
+									variant="subtle"
+									color="orange"
+									size={32}
+									aria-label="Profile config"
+									onClick={() => setProgramsModalOpen(true)}
+									disabled={editingProfileId === "default"}
+								>
+									<Cog size={14} />
+								</ActionIcon>
+							</Tooltip>
+						</div>
 					</div>
-				</div>
-			</header>
-
-			<div className="main-content-inner">
-				<ProfileConfigModal
-					opened={programsModalOpen}
-					onClose={() => {
-						setProgramsModalOpen(false);
-						setAutoCreateProfileOnOpen(false);
-					}}
-					editingProfileId={editingProfileId}
-					onEditingProfileChange={setEditingProfileId}
-					autoCreateProfile={autoCreateProfileOnOpen}
-				/>
-
-				<Tabs
-					value={activeSettingsTab}
-					onChange={(value) => {
-						if (!value) return;
-						setHasUserSelectedTab(true);
-						setActiveSettingsTab(value);
-					}}
-					classNames={{ root: "settings-tabs" }}
-					keepMounted={false}
-				>
-					<Tabs.List>
+					<Tabs.List aria-label="Settings categories">
 						<Tabs.Tab value="ai">AI</Tabs.Tab>
 						<Tabs.Tab value="ui">UI</Tabs.Tab>
 						<Tabs.Tab value="audio">Audio</Tabs.Tab>
 						<Tabs.Tab value="hotkeys">Hotkeys</Tabs.Tab>
-						<Tabs.Tab value="api-keys">Providers</Tabs.Tab>
-						<Tabs.Tab value="data">Data</Tabs.Tab>
+						<Tabs.Tab
+							value="api-keys"
+							onMouseEnter={() => void loadApiKeysSettings()}
+							onFocus={() => void loadApiKeysSettings()}
+						>
+							Providers
+						</Tabs.Tab>
+						<Tabs.Tab
+							value="data"
+							onMouseEnter={() => void loadDataSettings()}
+							onFocus={() => void loadDataSettings()}
+						>
+							Data
+						</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
 						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
+				</header>
+
+				<div className="main-content-inner">
+					<ProfileConfigModal
+						opened={programsModalOpen}
+						onClose={() => {
+							setProgramsModalOpen(false);
+							setAutoCreateProfileOnOpen(false);
+						}}
+						editingProfileId={editingProfileId}
+						onEditingProfileChange={setEditingProfileId}
+						autoCreateProfile={autoCreateProfileOnOpen}
+					/>
 
 					<Tabs.Panel value="ai" pt="md">
 						<div className="settings-card">
@@ -292,15 +327,38 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 						</div>
 					</Tabs.Panel>
 
-					<Tabs.Panel value="api-keys" pt="md">
+					<Tabs.Panel
+						value="api-keys"
+						pt="md"
+						keepMounted={mountedHeavyTabs.has("api-keys")}
+					>
 						<div className="settings-card">
-							<ApiKeysSettings editingProfileId={editingProfileId} />
+							{mountedHeavyTabs.has("api-keys") ? (
+								<Suspense fallback={<SettingsPanelLoading label="Providers" />}>
+									<LazyApiKeysSettings editingProfileId={editingProfileId} />
+								</Suspense>
+							) : (
+								<SettingsPanelLoading label="Providers" />
+							)}
 						</div>
 					</Tabs.Panel>
 
-					<Tabs.Panel value="data" pt="md">
+					<Tabs.Panel
+						value="data"
+						pt="md"
+						keepMounted={mountedHeavyTabs.has("data")}
+					>
 						<div className="settings-card">
-							<DataSettings editingProfileId={editingProfileId} />
+							{mountedHeavyTabs.has("data") ? (
+								<Suspense fallback={<SettingsPanelLoading label="Data" />}>
+									<LazyDataSettings
+										editingProfileId={editingProfileId}
+										active={activeSettingsTab === "data"}
+									/>
+								</Suspense>
+							) : (
+								<SettingsPanelLoading label="Data" />
+							)}
 						</div>
 					</Tabs.Panel>
 
@@ -326,8 +384,8 @@ export function SettingsShell({ onRunSetupGuide }: SettingsShellProps) {
 							<PolicySettings />
 						</div>
 					</Tabs.Panel>
-				</Tabs>
-			</div>
+				</div>
+			</Tabs>
 		</div>
 	);
 }

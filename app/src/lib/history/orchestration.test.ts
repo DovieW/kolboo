@@ -1,13 +1,95 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { describe, expect, it, vi } from "vitest";
 import type { HistoryDeleteOptions, HistoryEntry } from "../tauri";
 import {
 	addHiddenHistoryEntryIds,
-	buildRecordingProbePlan,
 	classifyHistoryDeleteOptions,
 	collectHistoryEntryIdsUsingRecording,
 	getRetryLastFailedActionState,
 	removeHiddenHistoryEntryIds,
+	useHistoryFeedOrchestration,
 } from "./orchestration";
+
+it("owns deletion across lookup, shared confirmation and mutation", async () => {
+	let resolveOptions!: (value: HistoryDeleteOptions) => void;
+	let resolveDelete!: (value: never) => void;
+	const getDeleteOptions = vi.fn(
+		() =>
+			new Promise<HistoryDeleteOptions>((resolve) => {
+				resolveOptions = resolve;
+			}),
+	);
+	const deleteHistoryEntry = vi.fn(
+		() =>
+			new Promise<never>((resolve) => {
+				resolveDelete = resolve;
+			}),
+	);
+	let controls!: ReturnType<typeof useHistoryFeedOrchestration>;
+	function Harness() {
+		controls = useHistoryFeedOrchestration({
+			pageEntries: [],
+			retryActionEntries: [],
+			copyToClipboard: vi.fn(),
+			getRecordingAssetUrl: async () => null,
+			getDeleteOptions,
+			deleteHistoryEntry,
+			retryEntry: async () => "",
+		});
+		return null;
+	}
+	const root = createRoot(document.createElement("div"));
+	try {
+		await act(async () => {
+			root.render(createElement(Harness));
+		});
+		let first!: ReturnType<typeof controls.requestDeleteEntry>;
+		await act(async () => {
+			first = controls.requestDeleteEntry("first");
+			expect(await controls.requestDeleteEntry("second")).toEqual({
+				kind: "ignored",
+			});
+		});
+		expect(controls.deleteOneBusy).toBe(true);
+		expect(getDeleteOptions).toHaveBeenCalledTimes(1);
+		await act(async () => {
+			resolveOptions({
+				recording_id: "recording",
+				recording_exists: true,
+				recording_ref_count: 2,
+			});
+			await first;
+		});
+		expect(controls.deleteOneBusy).toBe(false);
+		expect(await controls.requestDeleteEntry("second")).toEqual({
+			kind: "ignored",
+		});
+		let deletion!: ReturnType<typeof controls.deleteOnlyThisTranscript>;
+		await act(async () => {
+			deletion = controls.deleteOnlyThisTranscript();
+			expect(await controls.deleteAllUsingRecording()).toEqual({
+				kind: "no_context",
+			});
+			controls.closeDeleteOneDialog();
+		});
+		expect(controls.deleteOneOpened).toBe(true);
+		expect(deleteHistoryEntry).toHaveBeenCalledTimes(1);
+		expect(deleteHistoryEntry).toHaveBeenCalledWith({
+			id: "first",
+			mode: "entry_only",
+		});
+		await act(async () => {
+			resolveDelete({} as never);
+			await deletion;
+		});
+		expect(controls.deleteOneOpened).toBe(false);
+		expect(controls.deleteOneBusy).toBe(false);
+	} finally {
+		await act(async () => root.unmount());
+	}
+});
 
 function entry(
 	overrides: Partial<
@@ -24,37 +106,6 @@ function entry(
 }
 
 describe("History Feed orchestration helpers", () => {
-	it("prioritizes recent or in-progress recording probes and de-dupes shared ids", () => {
-		const now = new Date("2026-05-07T10:00:20.000Z").getTime();
-		const recordingExistsById = new Map([
-			["already-there", { exists: true, checkedAt: now - 1000 }],
-			["retry-me", { exists: false, checkedAt: now - 1000 }],
-		]);
-
-		const plan = buildRecordingProbePlan(
-			[
-				entry({
-					id: "a",
-					recording_request_id: "shared",
-					status: "in_progress",
-				}),
-				entry({
-					id: "b",
-					recording_request_id: "shared",
-					status: "in_progress",
-				}),
-				entry({ id: "c", recording_request_id: "retry-me" }),
-				entry({ id: "d", recording_request_id: "already-there" }),
-				entry({ id: "e", recording_request_id: "first-seen" }),
-			],
-			recordingExistsById,
-			now,
-		);
-
-		expect(plan.shouldPollAgain).toBe(true);
-		expect(plan.batch).toEqual(["shared", "retry-me", "first-seen"]);
-	});
-
 	it("supports optimistic hidden-entry rollback without mutating previous sets", () => {
 		const hidden = addHiddenHistoryEntryIds(new Set(["keep-me"]), [
 			"a",

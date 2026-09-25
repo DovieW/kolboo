@@ -2,11 +2,12 @@ import {
 	ActionIcon,
 	Alert,
 	Button,
-	Divider,
 	Group,
 	Loader,
+	Modal,
 	Paper,
 	Popover,
+	SegmentedControl,
 	Stack,
 	Switch,
 	Text,
@@ -14,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+	Archive,
 	CircleAlert,
 	Ellipsis,
 	Mic,
@@ -25,12 +27,44 @@ import {
 import { useEffect, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { recordingControlsAPI } from "../lib/tauri/commands";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
+import type {
+	FileImportResult,
+	RecordingPreferences,
+} from "../lib/tauri/types";
+import { MeetingModelDialog } from "./MeetingModelDialog";
 
 /** Uses the backend pipeline as owner, including recordings started with F3. */
 export function RecordingBar() {
 	const client = useQueryClient();
 	const [computerAudio, setComputerAudio] = useState(false);
 	const [optionsOpen, setOptionsOpen] = useState(false);
+	const [recoveryOpen, setRecoveryOpen] = useState(false);
+	const [discardId, setDiscardId] = useState<string | null>(null);
+	const [recoveryResult, setRecoveryResult] = useState<FileImportResult | null>(
+		null,
+	);
+	const [modelOpen, setModelOpen] = useState(false);
+	const preferences = useQuery({
+		queryKey: ["recording-preferences"],
+		queryFn: recordingControlsAPI.getPreferences,
+	});
+	const recordingPreferences = preferences.data ?? {
+		mode: "dictation" as const,
+		meeting_model: null,
+	};
+	const preferencesReady = preferences.isSuccess && !!preferences.data;
+	const savePreferences = useMutation({
+		mutationFn: recordingControlsAPI.setPreferences,
+		onSuccess: (_, value) => {
+			client.setQueryData(["recording-preferences"], value);
+			setModelOpen(false);
+		},
+	});
+	const updatePreferences = (patch: Partial<RecordingPreferences>) => {
+		if (!preferencesReady || savePreferences.isPending) return;
+		savePreferences.mutate({ ...recordingPreferences, ...patch });
+	};
 	const capability = useQuery({
 		queryKey: ["computer-audio-capability"],
 		queryFn: recordingControlsAPI.computerAudioAvailable,
@@ -39,13 +73,18 @@ export function RecordingBar() {
 	const state = useQuery({
 		queryKey: ["home-recording-state"],
 		queryFn: recordingControlsAPI.getState,
-		refetchInterval: 500,
+		refetchInterval: (query) =>
+			query.state.data === "idle" || query.state.data === "error" ? 5000 : 500,
 	});
 	const action = useMutation({
 		mutationFn: async (operation: "start" | "stop" | "cancel") => {
-			if (operation === "start")
-				await recordingControlsAPI.start(computerAudio);
-			else await recordingControlsAPI[operation]();
+			if (operation === "start") {
+				if (!preferencesReady)
+					throw new Error("Load recording preferences before starting");
+				await recordingControlsAPI.start(
+					recordingPreferences.mode === "meeting" && computerAudio,
+				);
+			} else await recordingControlsAPI[operation]();
 		},
 		onSettled: async () => {
 			await client.invalidateQueries({ queryKey: ["home-recording-state"] });
@@ -55,32 +94,64 @@ export function RecordingBar() {
 	const progress = useQuery({
 		queryKey: ["recording-seconds"],
 		queryFn: recordingControlsAPI.getSeconds,
+		enabled: recording,
 		refetchInterval: 1000,
 		retry: false,
 	});
 	const canPause = useQuery({
 		queryKey: ["recording-can-pause"],
 		queryFn: recordingControlsAPI.canPause,
-		refetchInterval: 500,
+		enabled: recording,
+		staleTime: 0,
 	});
 	const recovery = useQuery({
 		queryKey: ["recording-recovery"],
 		queryFn: recordingControlsAPI.listRecovery,
-		refetchInterval: 3000,
+		refetchInterval: recoveryOpen ? 3000 : false,
 	});
+	const refreshRecording = () => {
+		for (const queryKey of [
+			"recording-recovery",
+			"home-recording-state",
+			"recording-can-pause",
+		])
+			void client.invalidateQueries({ queryKey: [queryKey] });
+	};
+	useBackendEvent("pipeline-cancelled", refreshRecording);
+	useBackendEvent("pipeline-state-changed", refreshRecording);
 	const recover = useMutation({
 		mutationFn: recordingControlsAPI.recover,
-		onSettled: () =>
-			client.invalidateQueries({ queryKey: ["recording-recovery"] }),
+		onSuccess: (result) => {
+			setRecoveryResult(result);
+			if (result.message) {
+				setOptionsOpen(false);
+				setRecoveryOpen(true);
+			}
+		},
+		onSettled: async () => {
+			await Promise.all(
+				[
+					"recording-recovery",
+					"home-recording-state",
+					"historyPage",
+					"historyAll",
+				].map((queryKey) => client.invalidateQueries({ queryKey: [queryKey] })),
+			);
+		},
 	});
 	const discard = useMutation({
 		mutationFn: recordingControlsAPI.discardRecovery,
+		onSuccess: (_, id) => {
+			setDiscardId(null);
+			if (recoveryResult?.recovery_id === id) setRecoveryResult(null);
+		},
 		onSettled: () =>
 			client.invalidateQueries({ queryKey: ["recording-recovery"] }),
 	});
 	const paused = useQuery({
 		queryKey: ["home-recording-paused"],
 		queryFn: recordingControlsAPI.getPaused,
+		enabled: recording,
 		refetchInterval: 500,
 	});
 	const pause = useMutation({
@@ -90,11 +161,18 @@ export function RecordingBar() {
 	});
 	const cancel = useMutation({
 		mutationFn: recordingControlsAPI.cancel,
-		onSettled: () =>
-			client.invalidateQueries({ queryKey: ["home-recording-state"] }),
+		onSettled: async () => {
+			await Promise.all([
+				client.invalidateQueries({ queryKey: ["home-recording-state"] }),
+				client.invalidateQueries({ queryKey: ["recording-recovery"] }),
+				client.invalidateQueries({ queryKey: ["recording-can-pause"] }),
+			]);
+		},
 	});
 	const idle = state.data === "idle" || state.data === "error";
 	const error =
+		preferences.error ??
+		(modelOpen ? null : savePreferences.error) ??
 		progress.error ??
 		recover.error ??
 		discard.error ??
@@ -106,16 +184,33 @@ export function RecordingBar() {
 
 	const errorMessage = error ? formatErrorMessage(error) : null;
 	useEffect(() => {
-		if (errorMessage) setOptionsOpen(true);
+		if (errorMessage) {
+			setOptionsOpen(false);
+			setRecoveryOpen(true);
+		}
 	}, [errorMessage]);
-	const savedCount = recovery.data?.length ?? 0;
-	const pending = action.isPending || recover.isPending;
+	const recoveryMessage = recoveryResult?.message;
+	const recoveryIds = [...(recovery.data ?? [])];
+	// Cleanup can fail after the PCM was already removed. Retain the returned
+	// recovery handle even if the disk listing only contains remaining audio.
+	if (
+		recoveryResult?.recovery_id &&
+		!recoveryIds.includes(recoveryResult.recovery_id)
+	)
+		recoveryIds.push(recoveryResult.recovery_id);
+	const savedCount = recoveryIds.length;
+	const pending = action.isPending || recover.isPending || cancel.isPending;
 	const busy = !idle && !recording;
+	const canSaveForLater =
+		recording && canPause.data === true && !canPause.isError;
+	const cancelLabel = canSaveForLater ? "Stop & save for later" : "Cancel";
 	const optionsLabel = errorMessage
 		? "Recording options: error"
-		: savedCount
-			? `Recording options: ${savedCount} saved recordings`
-			: "Recording options";
+		: recoveryMessage
+			? "Recording options: recovery needs attention"
+			: savedCount
+				? `Recording options: ${savedCount} saved ${savedCount === 1 ? "recording" : "recordings"}`
+				: "Recording options";
 
 	return (
 		<Paper
@@ -186,30 +281,34 @@ export function RecordingBar() {
 						</span>
 					</Tooltip>
 				) : (
-					<Tooltip label="Record · saved locally until you stop and transcribe">
-						<ActionIcon
-							size={34}
-							variant="filled"
-							radius="xl"
-							aria-label="Record"
-							disabled={state.isError || !idle || discard.isPending}
-							onClick={() => action.mutate("start")}
-						>
-							<Mic size={17} />
-						</ActionIcon>
-					</Tooltip>
+					<ActionIcon
+						size={34}
+						variant="filled"
+						radius="xl"
+						aria-label="Record"
+						disabled={
+							state.isError ||
+							!idle ||
+							discard.isPending ||
+							!preferencesReady ||
+							savePreferences.isPending
+						}
+						onClick={() => action.mutate("start")}
+					>
+						<Mic size={17} />
+					</ActionIcon>
 				)}
 				{(!idle && state.data) || pending ? (
-					<Tooltip label="Cancel">
+					<Tooltip label={cancelLabel}>
 						<ActionIcon
 							size={34}
 							variant="subtle"
 							color="gray"
-							aria-label="Cancel"
+							aria-label={cancelLabel}
 							disabled={cancel.isPending}
 							onClick={() => cancel.mutate()}
 						>
-							<X size={17} />
+							{canSaveForLater ? <Archive size={17} /> : <X size={17} />}
 						</ActionIcon>
 					</Tooltip>
 				) : null}
@@ -227,7 +326,13 @@ export function RecordingBar() {
 							size={34}
 							variant="subtle"
 							radius="xl"
-							color={errorMessage ? "red" : savedCount ? "orange" : "gray"}
+							color={
+								errorMessage
+									? "red"
+									: savedCount || recoveryMessage
+										? "orange"
+										: "gray"
+							}
 							aria-label={optionsLabel}
 							onClick={() => setOptionsOpen((open) => !open)}
 						>
@@ -241,62 +346,190 @@ export function RecordingBar() {
 					<Popover.Dropdown
 						style={{
 							maxWidth: "calc(100vw - 32px)",
-							maxHeight: "60vh",
-							overflowY: "auto",
 						}}
 					>
 						<Stack gap="sm">
-							{errorMessage ? (
-								<Alert color="red" role="alert">
-									{errorMessage}
-								</Alert>
-							) : null}
-							<Switch
-								label="Computer audio"
-								checked={computerAudio}
-								onChange={(event) =>
-									setComputerAudio(event.currentTarget.checked)
+							<SegmentedControl
+								aria-label="Recording mode"
+								size="xs"
+								fullWidth
+								data={[
+									{ value: "dictation", label: "Dictation" },
+									{ value: "meeting", label: "Meeting" },
+								]}
+								value={recordingPreferences.mode}
+								disabled={
+									!idle ||
+									pending ||
+									!preferencesReady ||
+									savePreferences.isPending
 								}
-								disabled={!idle || !capability.data || pending}
-								description={
-									capability.data ? undefined : "Unavailable on this device"
+								onChange={(mode) =>
+									updatePreferences({
+										mode: mode === "meeting" ? "meeting" : "dictation",
+									})
 								}
 							/>
-							{savedCount ? (
+							{recordingPreferences.mode === "meeting" && (
 								<>
-									<Divider />
-									<Text size="sm" fw={600}>
-										Saved recordings ({savedCount})
-									</Text>
+									<Button
+										size="compact-xs"
+										variant="subtle"
+										onClick={() => {
+											savePreferences.reset();
+											setOptionsOpen(false);
+											setModelOpen(true);
+										}}
+										disabled={
+											!idle ||
+											pending ||
+											!preferencesReady ||
+											savePreferences.isPending
+										}
+									>
+										Meeting model
+									</Button>
+									<Switch
+										label="Computer audio"
+										checked={computerAudio}
+										onChange={(event) =>
+											setComputerAudio(event.currentTarget.checked)
+										}
+										disabled={
+											!idle || !capability.data || pending || !preferencesReady
+										}
+										description={
+											capability.data ? undefined : "Unavailable on this device"
+										}
+									/>
 								</>
-							) : null}
-							{recovery.data?.map((id, index) => (
-								<Stack key={id} gap={4}>
-									<Text size="xs">Saved audio {index + 1}</Text>
-									<Group gap={6}>
-										<Button
-											size="compact-xs"
-											disabled={!idle || pending || discard.isPending}
-											onClick={() => recover.mutate(id)}
-										>
-											Transcribe
-										</Button>
-										<Button
-											size="compact-xs"
-											color="red"
-											variant="subtle"
-											disabled={!idle || pending || discard.isPending}
-											onClick={() => discard.mutate(id)}
-										>
-											Discard
-										</Button>
-									</Group>
-								</Stack>
-							))}
+							)}
+							{savedCount > 0 && (
+								<Button
+									variant="subtle"
+									size="compact-xs"
+									onClick={() => {
+										setOptionsOpen(false);
+										setRecoveryOpen(true);
+									}}
+								>
+									Saved recordings ({savedCount})
+								</Button>
+							)}
 						</Stack>
 					</Popover.Dropdown>
 				</Popover>
 			</Group>
+			{modelOpen && (
+				<MeetingModelDialog
+					preferences={recordingPreferences}
+					onClose={() => {
+						if (savePreferences.isPending) return;
+						savePreferences.reset();
+						setModelOpen(false);
+					}}
+					onSave={(value) => {
+						if (!preferencesReady || savePreferences.isPending) return;
+						savePreferences.mutate(value);
+					}}
+					saving={savePreferences.isPending}
+					error={
+						savePreferences.error
+							? formatErrorMessage(savePreferences.error)
+							: null
+					}
+				/>
+			)}
+			<Modal
+				opened={recoveryOpen}
+				onClose={() => {
+					setRecoveryOpen(false);
+					setDiscardId(null);
+				}}
+				title="Saved recordings"
+				centered
+			>
+				<Stack gap="md">
+					{errorMessage && <Alert color="red">{errorMessage}</Alert>}
+					{preferences.isError && (
+						<Button
+							variant="default"
+							loading={preferences.isFetching}
+							onClick={() => void preferences.refetch()}
+						>
+							Retry recording preferences
+						</Button>
+					)}
+					{recoveryMessage && (
+						<Alert
+							color={recoveryResult?.transcription_complete ? "orange" : "red"}
+							title={
+								recoveryResult?.transcription_complete
+									? "Transcript saved; cleanup needs attention"
+									: "Recovery needs attention"
+							}
+						>
+							{recoveryMessage}
+						</Alert>
+					)}
+					{recovery.isSuccess && !savedCount && (
+						<Text size="sm">No saved recordings found.</Text>
+					)}
+					{recoveryIds.map((id, index) => (
+						<Stack key={id} gap={4}>
+							<Text size="xs">Saved recording {index + 1}</Text>
+							{discardId === id ? (
+								<Stack gap="xs">
+									<Text size="sm">
+										Remove this recording from recovery? This cannot be undone.
+									</Text>
+									<Group gap={6}>
+										<Button
+											size="compact-xs"
+											variant="default"
+											disabled={discard.isPending}
+											onClick={() => setDiscardId(null)}
+										>
+											Keep recording
+										</Button>
+										<Button
+											size="compact-xs"
+											color="red"
+											disabled={!idle || pending}
+											loading={discard.isPending}
+											onClick={() => discard.mutate(id)}
+										>
+											Discard recording
+										</Button>
+									</Group>
+								</Stack>
+							) : (
+								<Group gap={6}>
+									<Button
+										size="compact-xs"
+										disabled={!idle || pending || discard.isPending}
+										onClick={() => recover.mutate(id)}
+									>
+										{recoveryResult?.recovery_id === id &&
+										recoveryResult.transcription_complete
+											? "Finish cleanup"
+											: "Transcribe"}
+									</Button>
+									<Button
+										size="compact-xs"
+										color="red"
+										variant="subtle"
+										disabled={!idle || pending || discard.isPending}
+										onClick={() => setDiscardId(id)}
+									>
+										Discard
+									</Button>
+								</Group>
+							)}
+						</Stack>
+					))}
+				</Stack>
+			</Modal>
 		</Paper>
 	);
 }

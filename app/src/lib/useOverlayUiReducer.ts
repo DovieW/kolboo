@@ -101,7 +101,9 @@ export function overlayUiReducer(
 			};
 		}
 		case "ANIM_SET":
-			return { ...state, animState: action.next };
+			return state.animState === action.next
+				? state
+				: { ...state, animState: action.next };
 		case "ERROR_CLEAR":
 			return {
 				...state,

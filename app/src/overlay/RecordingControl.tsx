@@ -27,8 +27,9 @@ import {
 	type RewriteProgramPromptProfile,
 	tauriAPI,
 } from "../lib/tauri";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
 import { useOverlayUiReducer } from "../lib/useOverlayUiReducer";
-import { AudioWave, BackendAudioWave } from "./AudioWave";
+import { BackendAudioWave } from "./BackendAudioWave";
 import { applyAnimatedHideGate } from "./overlayHideGate";
 import { useOverlayActiveProfilePolling } from "./useOverlayActiveProfilePolling";
 import { useOverlayController } from "./useOverlayController";
@@ -233,30 +234,6 @@ function ErrorIcon() {
 	);
 }
 
-function RecordingDot({ state }: { state: PipelineState }) {
-	const dotState =
-		state === "recording" || state === "arming"
-			? "recording"
-			: state === "transcribing" || state === "routing" || state === "rewriting"
-				? "processing"
-				: "idle";
-
-	return (
-		<div
-			className="overlay-dot"
-			data-state={dotState}
-			role="img"
-			aria-label={
-				dotState === "recording"
-					? "Recording"
-					: dotState === "processing"
-						? "Processing"
-						: "Idle"
-			}
-		/>
-	);
-}
-
 export default function RecordingControl() {
 	const queryClient = useQueryClient();
 	const {
@@ -372,11 +349,12 @@ export default function RecordingControl() {
 		hoverHasPresets &&
 		rewriteIsEnabled;
 
+	const getWidgetElement = useCallback(() => widgetRef.current, []);
 	const { markOverlayShownForHoverGating, handleMouseEnter, handleMouseLeave } =
 		useOverlayHoverGating({
 			enabled: hoverPanelEnabled,
 			shouldShowPresets: shouldShowHoverPresets,
-			getWidgetElement: () => widgetRef.current,
+			getWidgetElement,
 		});
 
 	const _toggleRouterEnabled = useCallback(async () => {
@@ -497,7 +475,12 @@ export default function RecordingControl() {
 		setOverlayState,
 	});
 
-	useOverlayActiveProfilePolling({ enabled: expanded, setActiveProfile });
+	useOverlayActiveProfilePolling({
+		enabled:
+			expanded &&
+			(settings?.overlay_mode === "always" || pipelineState !== "idle"),
+		setActiveProfile,
+	});
 
 	// If presets change (e.g. user deleted one), avoid keeping an invalid selection.
 	useEffect(() => {
@@ -693,6 +676,7 @@ export default function RecordingControl() {
 	}, [pipelineState, setExpanded, settings?.overlay_mode]);
 
 	const requestAnimatedHide = useCallback(() => {
+		if (settings?.overlay_mode === "always") return;
 		const now = Date.now();
 		const pipelineActive =
 			pipelineState === "arming" ||
@@ -738,6 +722,7 @@ export default function RecordingControl() {
 		pipelineState,
 		setAnimState,
 		setHoldPhaseText,
+		settings?.overlay_mode,
 	]);
 
 	const requestAnimatedHideWithReason = useCallback(
@@ -767,7 +752,9 @@ export default function RecordingControl() {
 			controllerRef.current.exitTimer = null;
 		}
 
-		if (animState === "exit") {
+		// The native hide may have been rejected because another recording started.
+		// Both exit and the prepared (transparent) entrance must recover immediately.
+		if (animState !== "visible") {
 			setAnimState("visible");
 		}
 	}, [
@@ -1099,19 +1086,7 @@ export default function RecordingControl() {
 		},
 	});
 
-	// Listen for settings changes from main window
-	useEffect(() => {
-		let unlisten: (() => void) | undefined;
-
-		const setup = async () => {
-			unlisten = await tauriAPI.onSettingsChanged(onSettingsChanged);
-		};
-
-		void setup();
-		return () => {
-			unlisten?.();
-		};
-	}, [onSettingsChanged]);
+	useBackendEvent("settings-changed", onSettingsChanged);
 
 	// Click behavior:
 	// - idle + collapsed: expand and start recording immediately
@@ -1294,7 +1269,7 @@ export default function RecordingControl() {
 			);
 		}
 
-		return <RecordingDot state={pipelineState} />;
+		return <div className="overlay-dot" role="img" aria-label="Idle" />;
 	};
 
 	return (
@@ -1321,9 +1296,7 @@ export default function RecordingControl() {
 						onClick={handleClick}
 						disabled={isBusy}
 						className="overlay-button overlay-button--collapsed"
-						style={
-							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-						}
+						data-error={isError}
 					>
 						<div className="overlay-icon">{renderLeftIndicator()}</div>
 					</button>
@@ -1336,11 +1309,12 @@ export default function RecordingControl() {
 						onClick={handleClick}
 						disabled={isBusy}
 						className="overlay-button overlay-button--expanded"
-						style={
-							isError ? { background: "rgba(127, 29, 29, 0.92)" } : undefined
-						}
+						data-error={isError}
+						data-has-ocr={showOcrPill}
 					>
-						<div className="overlay-icon">{renderLeftIndicator()}</div>
+						{isError ? (
+							<div className="overlay-icon">{renderLeftIndicator()}</div>
+						) : null}
 						<div
 							className={`overlay-center${
 								isError && lastError ? " overlay-center--error" : ""
@@ -1367,28 +1341,16 @@ export default function RecordingControl() {
 									{centerPhaseText}
 								</div>
 							) : (
-								<>
-									{/* Backend-driven waveform (no getUserMedia startup lag).
-                      While "arming" (UI-only), keep an idle animation so the overlay
-                      doesn't look dead before recording actually starts. */}
-									{isWaveActive ? (
-										<BackendAudioWave
-											isActive={true}
-											isVisible={true}
-											className={isArming ? "overlay-wave--arming" : undefined}
-										/>
-									) : (
-										<AudioWave
-											isActive={false}
-											isVisible={true}
-											selectedMicId={settings?.selected_mic_id ?? null}
-											className={isArming ? "overlay-wave--arming" : undefined}
-										/>
-									)}
-								</>
+								<BackendAudioWave
+									isActive={isWaveActive}
+									isProcessing={isLoading}
+									className={isArming ? "overlay-wave--arming" : undefined}
+								/>
 							)}
 						</div>
-						<div className="overlay-meta">
+						<div
+							className={`overlay-meta${showOcrPill ? " overlay-meta--ocr" : ""}`}
+						>
 							{isError ? (
 								<>
 									{lastFailedRequestId ? (

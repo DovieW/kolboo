@@ -60,10 +60,10 @@ export function DataCloudSyncSection({
 		cloudSyncAccess.status === "loading" ||
 		(!cloudSyncAccess.canUseCloudSync && !cloudSyncDisplay.autoPush);
 	const analyticsDescription = analyticsPolicyEnforced
-		? "Privacy-safe, event-only analytics stay disabled because your organization enforces that posture. No transcripts, prompts, audio, OCR payloads, or session replay are sent."
+		? "Your organization has disabled all product analytics."
 		: cloudSyncDisplay.telemetryDisclosureResolved
-			? "Privacy-safe, event-only analytics. No transcripts, prompts, audio, OCR payloads, or session replay. You can change this later in Settings → Data."
-			: "Privacy-safe, event-only analytics. No transcripts, prompts, audio, OCR payloads, or session replay. Analytics stay paused until you review the first-run disclosure.";
+			? "Basic usage counts have no persistent ID. With this on, events use your account ID while signed in or a random installation ID while signed out. No content is sent."
+			: "No analytics are sent until you review the first-run disclosure.";
 
 	return (
 		<>
@@ -160,7 +160,7 @@ export function DataCloudSyncSection({
 			/>
 
 			<SettingsRow
-				label="Product analytics (PostHog)"
+				label="Linked analytics (PostHog)"
 				description={analyticsDescription}
 				right={
 					<Stack gap={6} align="flex-end">
@@ -179,7 +179,7 @@ export function DataCloudSyncSection({
 
 						<Group gap="md" justify="flex-end" wrap="nowrap">
 							<Checkbox
-								label="Enable privacy-safe analytics"
+								label="Enable linked analytics"
 								checked={cloudSyncDisplay.posthogAnalyticsEnabled}
 								disabled={
 									isProfileScope ||
@@ -194,7 +194,8 @@ export function DataCloudSyncSection({
 
 						{analyticsPolicyEnforced ? (
 							<Text size="xs" c="dimmed" ta="right">
-								Organization policy currently keeps product analytics disabled.
+								Organization policy currently keeps all product analytics
+								disabled.
 							</Text>
 						) : null}
 

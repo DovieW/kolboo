@@ -44,13 +44,14 @@ export function useRecordingsStats() {
 	});
 }
 
-export function useDataStorageSummary() {
+export function useDataStorageSummary(enabled = true) {
 	return useQuery({
 		queryKey: ["dataStorageSummary"],
+		enabled,
 		queryFn: createDataStorageSummaryQueryFn(queryFnDeps),
 		staleTime: 0,
 		refetchOnWindowFocus: true,
-		refetchInterval: 10000,
+		refetchInterval: enabled ? 10000 : false,
 	});
 }
 

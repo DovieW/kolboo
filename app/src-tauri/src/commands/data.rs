@@ -46,8 +46,7 @@ fn file_size_bytes(path: &std::path::Path) -> u64 {
 ///
 /// Useful for the Settings -> Data "Danger zone" UI so users can see what would be deleted.
 #[cfg(desktop)]
-#[tauri::command]
-pub fn get_data_storage_summary(app: AppHandle) -> CommandResult<DataStorageSummary> {
+fn collect_data_storage_summary(app: &AppHandle) -> CommandResult<DataStorageSummary> {
     // Recordings
     let (recordings_count, recordings_bytes) = if let Some(recs) = app.try_state::<RecordingStore>()
     {
@@ -144,6 +143,14 @@ pub fn get_data_storage_summary(app: AppHandle) -> CommandResult<DataStorageSumm
         settings_bytes,
         api_keys_set_count,
     })
+}
+
+#[cfg(desktop)]
+#[tauri::command]
+pub async fn get_data_storage_summary(app: AppHandle) -> CommandResult<DataStorageSummary> {
+    tauri::async_runtime::spawn_blocking(move || collect_data_storage_summary(&app))
+        .await
+        .map_err(|error| format!("Data storage summary task failed: {error}"))?
 }
 
 #[cfg(not(desktop))]

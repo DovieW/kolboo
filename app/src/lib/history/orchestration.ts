@@ -19,18 +19,6 @@ export type RetryLastFailedCandidate = {
 	recordingRequestId: string;
 };
 
-export interface RecordingExistenceProbeState {
-	exists: boolean;
-	checkedAt: number;
-}
-
-export type RecordingExistenceById = Map<string, RecordingExistenceProbeState>;
-
-export interface RecordingProbePlan {
-	batch: string[];
-	shouldPollAgain: boolean;
-}
-
 export type HistoryDeletePlan =
 	| {
 			kind: "delete_entry_only";
@@ -60,6 +48,7 @@ export type RetryLastFailedOutcome =
 	  };
 
 export type RequestDeleteEntryOutcome =
+	| { kind: "ignored" }
 	| { kind: "opened_shared_dialog"; context: HistoryDeleteOneContext }
 	| { kind: "deleted_entry"; result: HistoryDeleteResult }
 	| { kind: "deleted_entry_and_recording"; result: HistoryDeleteResult };
@@ -94,10 +83,6 @@ type UseHistoryFeedOrchestrationArgs = {
 	retryEntry: (entryId: string) => Promise<string>;
 };
 
-const RECENT_RECORDING_WINDOW_MS = 30_000;
-const RETRY_MISSING_RECORDING_AFTER_MS = 650;
-const RECORDING_PROBE_POLL_INTERVAL_MS = 650;
-const MAX_RECORDING_PROBES_PER_TICK = 12;
 export const COPIED_ENTRY_FEEDBACK_MS = 900;
 
 function trimOrNull(value: string | null | undefined): string | null {
@@ -153,91 +138,6 @@ export function getRetryLastFailedActionState(
 				canRetry: false,
 				tooltip: "No failed requests with saved audio found",
 			};
-}
-
-function isRecentOrInProgressHistoryEntry(
-	entry: Pick<HistoryEntry, "timestamp" | "status">,
-	now: number,
-): boolean {
-	const status = (entry.status ?? "success").toString();
-	if (status === "in_progress") return true;
-	if (status === "error") return false;
-
-	const timestampMs = entry.timestamp
-		? new Date(entry.timestamp).getTime()
-		: Number.NaN;
-	return Number.isFinite(timestampMs)
-		? now - timestampMs < RECENT_RECORDING_WINDOW_MS
-		: false;
-}
-
-export function buildRecordingProbePlan(
-	entries: Array<
-		Pick<HistoryEntry, "id" | "recording_request_id" | "timestamp" | "status">
-	>,
-	recordingExistsById: RecordingExistenceById,
-	now = Date.now(),
-): RecordingProbePlan {
-	const candidates: Array<{ id: string; priority: number; order: number }> = [];
-	let shouldPollAgain = false;
-
-	for (const [index, entry] of entries.entries()) {
-		const recordingId = getHistoryEntryRecordingRequestId(entry);
-		if (!recordingId) continue;
-
-		const shouldPoll = isRecentOrInProgressHistoryEntry(entry, now);
-		const cached = recordingExistsById.get(recordingId);
-
-		if (shouldPoll && (!cached || !cached.exists)) {
-			shouldPollAgain = true;
-		}
-
-		// Probe immediately the first time an entry becomes visible.
-		if (!cached) {
-			candidates.push({
-				id: recordingId,
-				priority: shouldPoll ? 2 : 1,
-				order: index,
-			});
-			continue;
-		}
-
-		// Keep polling a little for recent/in-progress entries when the WAV may not exist yet.
-		if (
-			shouldPoll &&
-			!cached.exists &&
-			now - cached.checkedAt > RETRY_MISSING_RECORDING_AFTER_MS
-		) {
-			candidates.push({ id: recordingId, priority: 2, order: index });
-		}
-	}
-
-	const selected: string[] = [];
-	const seen = new Set<string>();
-
-	candidates
-		.sort((a, b) => b.priority - a.priority || a.order - b.order)
-		.forEach((candidate) => {
-			if (seen.has(candidate.id)) return;
-			seen.add(candidate.id);
-			selected.push(candidate.id);
-		});
-
-	return {
-		batch: selected.slice(0, MAX_RECORDING_PROBES_PER_TICK),
-		shouldPollAgain,
-	};
-}
-
-export function setRecordingProbeResult(
-	prev: RecordingExistenceById,
-	id: string,
-	exists: boolean,
-	checkedAt = Date.now(),
-): RecordingExistenceById {
-	const next = new Map(prev);
-	next.set(id, { exists, checkedAt });
-	return next;
 }
 
 export function addHiddenHistoryEntryIds(
@@ -345,9 +245,6 @@ export function useHistoryFeedOrchestration({
 	deleteHistoryEntry,
 	retryEntry,
 }: UseHistoryFeedOrchestrationArgs) {
-	const [recordingExistsById, setRecordingExistsById] =
-		useState<RecordingExistenceById>(() => new Map());
-	const [recordingsProbeTick, setRecordingsProbeTick] = useState(0);
 	const [hiddenEntryIds, setHiddenEntryIds] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -357,6 +254,8 @@ export function useHistoryFeedOrchestration({
 	const [deleteOneContext, setDeleteOneContext] =
 		useState<HistoryDeleteOneContext | null>(null);
 	const [deleteOneBusy, setDeleteOneBusy] = useState(false);
+	const deleteBusyRef = useRef(false);
+	const deleteContextRef = useRef<HistoryDeleteOneContext | null>(null);
 
 	const pageHistory = useMemo(
 		() => filterVisibleHistoryEntries(pageEntries, hiddenEntryIds),
@@ -409,59 +308,6 @@ export function useHistoryFeedOrchestration({
 		}, COPIED_ENTRY_FEEDBACK_MS);
 	};
 
-	useEffect(() => {
-		void recordingsProbeTick;
-
-		let cancelled = false;
-		let timeout: ReturnType<typeof setTimeout> | null = null;
-
-		const { batch, shouldPollAgain } = buildRecordingProbePlan(
-			pageHistory,
-			recordingExistsById,
-		);
-
-		if (shouldPollAgain) {
-			timeout = setTimeout(() => {
-				setRecordingsProbeTick((tick) => tick + 1);
-			}, RECORDING_PROBE_POLL_INTERVAL_MS);
-		}
-
-		if (batch.length === 0) {
-			return () => {
-				cancelled = true;
-				if (timeout !== null) clearTimeout(timeout);
-			};
-		}
-
-		void (async () => {
-			await Promise.all(
-				batch.map(async (recordingId) => {
-					try {
-						const url = await getRecordingAssetUrl(recordingId);
-						if (cancelled) return;
-
-						setRecordingExistsById((prev) =>
-							setRecordingProbeResult(prev, recordingId, Boolean(url)),
-						);
-					} catch {
-						// Treat errors as "unknown" so the UI does not permanently hide
-						// playback/rerun actions because of a transient lookup failure.
-					}
-				}),
-			);
-		})();
-
-		return () => {
-			cancelled = true;
-			if (timeout !== null) clearTimeout(timeout);
-		};
-	}, [
-		pageHistory,
-		recordingExistsById,
-		recordingsProbeTick,
-		getRecordingAssetUrl,
-	]);
-
 	const retryLastFailed = async (): Promise<RetryLastFailedOutcome> => {
 		const candidate = retryLastFailedCandidate;
 		if (!candidate) {
@@ -486,47 +332,62 @@ export function useHistoryFeedOrchestration({
 	const requestDeleteEntry = async (
 		entryId: string,
 	): Promise<RequestDeleteEntryOutcome> => {
-		const options = await getDeleteOptions(entryId);
-		const plan = classifyHistoryDeleteOptions(entryId, options);
-
-		if (plan.kind === "confirm_shared_recording") {
-			setDeleteOneContext(plan.context);
-			setDeleteOneOpened(true);
-
-			return {
-				kind: "opened_shared_dialog",
-				context: plan.context,
-			};
-		}
-
-		hideEntries([entryId]);
-
+		if (deleteBusyRef.current || deleteContextRef.current)
+			return { kind: "ignored" };
+		deleteBusyRef.current = true;
+		setDeleteOneBusy(true);
 		try {
-			const result = await deleteHistoryEntry({ id: entryId, mode: plan.mode });
+			const options = await getDeleteOptions(entryId);
+			const plan = classifyHistoryDeleteOptions(entryId, options);
 
-			return plan.kind === "delete_entry_and_recording"
-				? { kind: "deleted_entry_and_recording", result }
-				: { kind: "deleted_entry", result };
-		} catch (error) {
-			unhideEntries([entryId]);
-			throw error;
+			if (plan.kind === "confirm_shared_recording") {
+				deleteContextRef.current = plan.context;
+				setDeleteOneContext(plan.context);
+				setDeleteOneOpened(true);
+
+				return {
+					kind: "opened_shared_dialog",
+					context: plan.context,
+				};
+			}
+
+			hideEntries([entryId]);
+
+			try {
+				const result = await deleteHistoryEntry({
+					id: entryId,
+					mode: plan.mode,
+				});
+
+				return plan.kind === "delete_entry_and_recording"
+					? { kind: "deleted_entry_and_recording", result }
+					: { kind: "deleted_entry", result };
+			} catch (error) {
+				unhideEntries([entryId]);
+				throw error;
+			}
+		} finally {
+			deleteBusyRef.current = false;
+			setDeleteOneBusy(false);
 		}
 	};
 
 	const closeDeleteOneDialog = () => {
-		if (deleteOneBusy) return;
+		if (deleteBusyRef.current) return;
 
+		deleteContextRef.current = null;
 		setDeleteOneOpened(false);
 		setDeleteOneContext(null);
 	};
 
 	const deleteOnlyThisTranscript =
 		async (): Promise<DeleteOneTranscriptOutcome> => {
-			const context = deleteOneContext;
-			if (!context) {
+			const context = deleteContextRef.current;
+			if (!context || deleteBusyRef.current) {
 				return { kind: "no_context" };
 			}
 
+			deleteBusyRef.current = true;
 			setDeleteOneBusy(true);
 			hideEntries([context.entryId]);
 
@@ -536,6 +397,7 @@ export function useHistoryFeedOrchestration({
 					mode: "entry_only",
 				});
 
+				deleteContextRef.current = null;
 				setDeleteOneOpened(false);
 				setDeleteOneContext(null);
 
@@ -544,17 +406,19 @@ export function useHistoryFeedOrchestration({
 				unhideEntries([context.entryId]);
 				throw error;
 			} finally {
+				deleteBusyRef.current = false;
 				setDeleteOneBusy(false);
 			}
 		};
 
 	const deleteAllUsingRecording =
 		async (): Promise<DeleteAllUsingRecordingOutcome> => {
-			const context = deleteOneContext;
-			if (!context) {
+			const context = deleteContextRef.current;
+			if (!context || deleteBusyRef.current) {
 				return { kind: "no_context" };
 			}
 
+			deleteBusyRef.current = true;
 			setDeleteOneBusy(true);
 
 			const idsToHide = collectHistoryEntryIdsUsingRecording(
@@ -570,6 +434,7 @@ export function useHistoryFeedOrchestration({
 					mode: "recording_and_all_entries",
 				});
 
+				deleteContextRef.current = null;
 				setDeleteOneOpened(false);
 				setDeleteOneContext(null);
 
@@ -583,6 +448,7 @@ export function useHistoryFeedOrchestration({
 				unhideEntries(idsToHide);
 				throw error;
 			} finally {
+				deleteBusyRef.current = false;
 				setDeleteOneBusy(false);
 			}
 		};
@@ -590,7 +456,6 @@ export function useHistoryFeedOrchestration({
 	return {
 		copiedEntryId,
 		handleCopyEntry,
-		recordingExistsById,
 		pageHistory,
 		retryLastFailedCandidate,
 		canRetryLastFailed: retryLastFailedAction.canRetry,

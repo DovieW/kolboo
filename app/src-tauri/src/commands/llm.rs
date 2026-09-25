@@ -168,7 +168,24 @@ pub struct DefaultPromptsResponse {
 
 /// Get available LLM providers
 #[tauri::command]
-pub fn get_llm_providers() -> Vec<LlmProviderInfo> {
+pub fn get_llm_providers(app: tauri::AppHandle) -> Vec<LlmProviderInfo> {
+    let mut providers = builtin_llm_providers();
+    for provider in crate::custom_providers::load(&app) {
+        if provider.llm_models.is_empty() {
+            continue;
+        }
+        providers.push(LlmProviderInfo {
+            id: provider.id,
+            name: provider.name,
+            requires_api_key: true,
+            default_model: provider.llm_models[0].clone(),
+            models: provider.llm_models,
+        });
+    }
+    providers
+}
+
+fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
     vec![
         LlmProviderInfo {
             id: "cerebras".to_string(),
@@ -346,6 +363,7 @@ pub async fn test_llm_rewrite(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -498,6 +516,7 @@ pub async fn iterate_rewrite_prompt(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -692,6 +711,7 @@ pub async fn test_rewrite_with_prompt(
         .create_without_timeout(
             &config.llm_config,
             &config.llm_api_keys,
+            &config.proxy_settings,
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
@@ -810,7 +830,11 @@ pub async fn llm_complete(
     );
 
     let provider = provider_request
-        .create_unstructured(&config.llm_config, &config.llm_api_keys)
+        .create_unstructured(
+            &config.llm_config,
+            &config.llm_api_keys,
+            &config.proxy_settings,
+        )
         .map_err(|e| llm_error(e.to_string()))?;
     let output = provider
         .complete(system_prompt.as_str(), user_prompt.as_str())
@@ -847,6 +871,9 @@ pub fn update_llm_config(
     // Note: This is a simplified approach - in a full implementation,
     // we'd want to preserve other config and only update LLM settings
     let llm_config = LlmConfig {
+        custom_providers: get_current_pipeline_config(&pipeline)?
+            .llm_config
+            .custom_providers,
         enabled: config.enabled,
         provider: config.provider,
         api_key: config.api_key.unwrap_or_default(),
@@ -940,7 +967,7 @@ mod tests {
 
     #[test]
     fn test_get_llm_providers() {
-        let providers = get_llm_providers();
+        let providers = builtin_llm_providers();
         assert_eq!(providers.len(), 8);
         assert!(providers.iter().any(|p| p.id == "cerebras"));
         assert!(providers.iter().any(|p| p.id == "openai"));

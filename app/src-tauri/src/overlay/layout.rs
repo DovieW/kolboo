@@ -22,8 +22,8 @@ impl WidgetLayout {
 
     pub(crate) fn logical_size(self) -> LogicalSize {
         match self {
-            Self::Compact => LogicalSize::new(56.0, 56.0),
-            Self::Expanded => LogicalSize::new(224.0, 56.0),
+            Self::Compact => LogicalSize::new(48.0, 48.0),
+            Self::Expanded => LogicalSize::new(200.0, 48.0),
         }
     }
 }
@@ -85,9 +85,10 @@ impl PhysicalRect {
     }
 }
 
-// Preserve the established visual offset from the screen edge. The work-area
-// clamp still keeps the widget clear when a dock or taskbar consumes more room.
+// Keep the established side/top offset while bringing bottom-anchored widgets
+// closer to the work-area edge. Both offsets are clamped inside the work area.
 const WIDGET_EDGE_MARGIN_LOGICAL: f64 = 50.0;
+const WIDGET_BOTTOM_MARGIN_LOGICAL: f64 = 30.0;
 
 fn valid_scale(scale: f64) -> f64 {
     if scale.is_finite() && scale > 0.0 {
@@ -175,13 +176,27 @@ pub(crate) fn widget_rect(
     layout: WidgetLayout,
     anchor: WidgetAnchor,
 ) -> PhysicalRect {
-    anchored_rect(
+    let mut rect = anchored_rect(
         work_area,
         layout.logical_size(),
         scale,
         anchor,
         WIDGET_EDGE_MARGIN_LOGICAL,
-    )
+    );
+    if matches!(
+        anchor,
+        WidgetAnchor::BottomLeft | WidgetAnchor::BottomCenter | WidgetAnchor::BottomRight
+    ) {
+        let top = work_area.y as i64;
+        let bottom = top + work_area.height as i64;
+        let margin = (WIDGET_BOTTOM_MARGIN_LOGICAL * valid_scale(scale)).round() as i64;
+        rect.y = as_i32(clamp_i64(
+            bottom - rect.height as i64 - margin,
+            top,
+            bottom - rect.height as i64,
+        ));
+    }
+    rect
 }
 
 /// Place a panel above a widget when possible, otherwise below it, then clamp
@@ -254,7 +269,7 @@ mod tests {
             WidgetAnchor::BottomCenter,
         );
 
-        assert_eq!(rect, PhysicalRect::new(1244, 1534, 392, 98));
+        assert_eq!(rect, PhysicalRect::new(1265, 1583, 350, 84));
         assert_eq!(rect.x + rect.width as i32 / 2, 1440);
     }
 
@@ -276,7 +291,7 @@ mod tests {
             WidgetAnchor::BottomRight,
         );
 
-        assert_eq!(rect, PhysicalRect::new(-106, 974, 56, 56));
+        assert_eq!(rect, PhysicalRect::new(-98, 1002, 48, 48));
     }
 
     #[test]
@@ -289,8 +304,8 @@ mod tests {
             WidgetAnchor::BottomCenter,
         );
 
-        assert_eq!(rect.y + rect.height as i32, 1325);
-        assert_eq!(1400 - (rect.y + rect.height as i32), 75);
+        assert_eq!(rect.y + rect.height as i32, 1355);
+        assert_eq!(1400 - (rect.y + rect.height as i32), 45);
     }
 
     #[test]

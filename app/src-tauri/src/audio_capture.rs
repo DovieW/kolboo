@@ -699,6 +699,10 @@ pub trait AudioCaptureBackend: Send {
     fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
         Ok(())
     }
+    /// Sync a stopped Home recording without deleting its recovery bundle.
+    fn finish_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        Ok(())
+    }
     fn set_recovery_path(
         &mut self,
         _path: Option<std::path::PathBuf>,
@@ -794,6 +798,8 @@ pub struct AudioCapture {
     buffer: Arc<StdMutex<AudioBuffer>>,
     pre_roll: Arc<StdMutex<RollingBuffer>>,
     capture_handle: Option<CaptureHandle>,
+    // An unclean recovery-worker shutdown must not reuse its buffer for a new session.
+    recovery_shutdown_failed: bool,
     sample_rate: u32,
     channels: u16,
     vad_config: VadAutoStopConfig,
@@ -828,6 +834,7 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            recovery_shutdown_failed: false,
             computer_audio_enabled: false,
             computer_capture: None,
             sample_rate: 44100,
@@ -851,6 +858,7 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            recovery_shutdown_failed: false,
             computer_audio_enabled: false,
             computer_capture: None,
             sample_rate: 44100,
@@ -941,6 +949,7 @@ impl AudioCapture {
         max_duration_secs: f32,
         input_device_name: Option<&str>,
     ) -> Result<(), AudioCaptureError> {
+        self.ensure_recovery_worker_stopped()?;
         if self.computer_audio_enabled {
             self.stop();
             self.sample_rate = 16000;
@@ -988,7 +997,8 @@ impl AudioCapture {
         self.recording_active.store(true, Ordering::Relaxed);
     }
 
-    /// Stop recording. In Hot Mic mode, keeps the stream open.
+    /// Stop recording. Ordinary Hot Mic dictation keeps the stream open; a Home
+    /// journal requires draining the worker before its audio can be finalized.
     pub fn stop_recording(&mut self) {
         self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
@@ -998,8 +1008,16 @@ impl AudioCapture {
         // it is closed. The pipeline takes ownership of the StreamingSttSession
         // and its audio_tx is dropped during finalize(), which naturally signals
         // end-of-audio. The pipeline clears live_audio_tx after the session is taken.
-        if !self.hot_mic_enabled {
+        let journal_backed = self.recovery_path().is_some();
+        if !self.hot_mic_enabled || journal_backed {
             self.stop();
+        }
+        if journal_backed {
+            // Home closes Hot Mic's stream. Its pre-roll is no longer recent and
+            // must not be prepended to the next session after a long idle period.
+            if let Ok(mut pre_roll) = self.pre_roll.lock() {
+                pre_roll.clear();
+            }
         }
     }
 
@@ -1053,6 +1071,7 @@ impl AudioCapture {
     ) -> Result<(), AudioCaptureError> {
         // Stop any existing stream (defensive)
         self.stop();
+        self.ensure_recovery_worker_stopped()?;
 
         let host = cpal::default_host();
 
@@ -1204,6 +1223,7 @@ impl AudioCapture {
         noise_gate_strength: u8,
     ) -> Result<(Vec<u8>, AudioLevelStats), AudioCaptureError> {
         self.stop_recording();
+        self.ensure_recovery_worker_stopped()?;
 
         let buffer = self
             .buffer
@@ -1233,6 +1253,7 @@ impl AudioCapture {
         cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
         self.stop_recording();
+        self.ensure_recovery_worker_stopped()?;
 
         let buffer = self
             .buffer
@@ -1252,6 +1273,7 @@ impl AudioCapture {
         after_cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
         self.stop_recording();
+        self.ensure_recovery_worker_stopped()?;
 
         let buffer = self
             .buffer
@@ -1293,25 +1315,48 @@ impl AudioCapture {
                 let _ = join_tx.send(res);
             });
 
-            match join_rx.recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS)) {
-                Ok(Ok(Ok(()))) => {}
+            let stopped_cleanly = match join_rx
+                .recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS))
+            {
+                Ok(Ok(Ok(()))) => true,
                 Ok(Ok(Err(e))) => {
                     log::warn!("Audio capture thread stopped with error: {}", e);
+                    false
                 }
                 Ok(Err(_panic)) => {
                     log::warn!("Audio capture thread panicked while stopping");
+                    false
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     log::warn!(
                         "AudioCapture::stop() timed out after {}ms; continuing without blocking",
                         STOP_JOIN_TIMEOUT_MS
                     );
+                    false
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     log::warn!("AudioCapture::stop(): join waiter disconnected unexpectedly");
+                    false
+                }
+            };
+            if !stopped_cleanly && self.recovery_path().is_some() {
+                self.recovery_shutdown_failed = true;
+                // Freeze this journal before it can be offered for recovery. A
+                // detached worker may still drain old chunks after a timeout.
+                if let Ok(mut buffer) = self.buffer.lock() {
+                    buffer.journal_failed = true;
                 }
             }
         }
+    }
+
+    fn ensure_recovery_worker_stopped(&self) -> Result<(), AudioCaptureError> {
+        if self.recovery_shutdown_failed {
+            return Err(AudioCaptureError::ThreadError(
+                "Audio capture did not shut down cleanly. Restart Kolboo before recording again; saved audio is retained.".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Check if currently recording
@@ -1388,21 +1433,53 @@ impl AudioCaptureBackend for AudioCapture {
             .and_then(|buffer| buffer.recovery_path.clone())
     }
     fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.ensure_recovery_worker_stopped()?;
         let mut buffer = self
             .buffer
             .lock()
             .map_err(|_| AudioCaptureError::ThreadError("Recovery buffer unavailable".into()))?;
         buffer.journal = None;
         if let Some(path) = buffer.recovery_path.take() {
-            match std::fs::remove_file(&path) {
-                Ok(()) => (),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-                Err(_) => {
-                    buffer.recovery_path = Some(path);
-                    return Err(AudioCaptureError::ThreadError(
-                        "Could not discard recovery audio".into(),
-                    ));
-                }
+            if journal::discard(&path).is_err() {
+                buffer.recovery_path = Some(path);
+                return Err(AudioCaptureError::ThreadError(
+                    "Could not discard recovery audio".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+    fn finish_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.ensure_recovery_worker_stopped()?;
+        let mut buffer = self
+            .buffer
+            .lock()
+            .map_err(|_| AudioCaptureError::ThreadError("Recovery buffer unavailable".into()))?;
+        if buffer.journal_failed {
+            return Err(AudioCaptureError::Encoding(
+                "Recovery storage failed; retained audio may be incomplete".into(),
+            ));
+        }
+        if let Some(writer) = &buffer.journal {
+            writer
+                .lock()
+                .map_err(|_| AudioCaptureError::Encoding("Recovery storage unavailable".into()))?
+                .finish()
+                .map_err(|_| {
+                    AudioCaptureError::Encoding("Recovery audio could not be synchronized".into())
+                })?;
+        }
+        // Capture is stopped and its worker drained before releasing the writer.
+        // Keep the path and options so the stopped recording remains recoverable.
+        buffer.journal = None;
+        if let Some(path) = &buffer.recovery_path {
+            if !path.exists() {
+                // Escape can beat the first audio callback. There is no audio to
+                // recover in that case, so don't accumulate orphan preferences.
+                journal::discard(path).map_err(|_| {
+                    AudioCaptureError::ThreadError("Could not clean up empty recording".into())
+                })?;
+                buffer.recovery_path = None;
             }
         }
         Ok(())
@@ -1411,6 +1488,7 @@ impl AudioCaptureBackend for AudioCapture {
         &mut self,
         path: Option<std::path::PathBuf>,
     ) -> Result<(), AudioCaptureError> {
+        self.ensure_recovery_worker_stopped()?;
         let mut buffer = self
             .buffer
             .lock()
@@ -2102,6 +2180,9 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         }
     }
 
+    // Close the producer first; otherwise a callback can enqueue an old recording
+    // chunk after the worker has finished its final drain.
+    drop(stream);
     // Stop the worker and flush any pending chunks into the buffers before we shut down.
     worker_stop.store(true, Ordering::Relaxed);
     let _ = worker_handle.join();
@@ -2114,7 +2195,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let _ = handle.join();
     }
 
-    // Stream is dropped here, stopping capture
     Ok(())
 }
 
@@ -2137,8 +2217,12 @@ mod tests {
             buffer.to_wav_bytes().unwrap();
         }
         assert_eq!(journal::read_chunk(&path, 0, 16000).unwrap().2.len(), 16000);
+        crate::recordings::options::RecordingPreferences::default()
+            .save_journal(&path)
+            .unwrap();
         AudioCaptureBackend::discard_recovery(&mut capture).unwrap();
         assert!(!path.exists());
+        assert!(!path.with_extension("options.json").exists());
         assert!(capture.buffer.lock().unwrap().recovery_path.is_none());
     }
 
@@ -2392,6 +2476,111 @@ mod tests {
 
         capture.stop();
         assert!(stopped.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn home_stop_drains_hot_mic_tail_and_preserves_recovery_until_explicit_discard() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("home.pcm");
+        let mut capture = AudioCapture::new();
+        capture.hot_mic_enabled = true;
+        capture.recording_active.store(true, Ordering::Relaxed);
+        capture.pre_roll.lock().unwrap().set_capacity(2);
+        capture.pre_roll.lock().unwrap().push(&[0.5, -0.5]);
+        capture.set_recovery_path(Some(path.clone())).unwrap();
+        crate::recordings::options::RecordingPreferences::default()
+            .save_journal(&path)
+            .unwrap();
+        {
+            let mut buffer = capture.buffer.lock().unwrap();
+            buffer.set_format(16000, 1);
+            buffer.append(&[0.25, -0.25]);
+        }
+        let (command_tx, command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        let buffer = capture.buffer.clone();
+        capture.capture_handle = Some(CaptureHandle {
+            command_tx,
+            event_rx,
+            thread_handle: thread::spawn(move || {
+                command_rx.recv().unwrap();
+                // Simulate an already-queued recording callback drained on Stop.
+                buffer.lock().unwrap().append(&[0.125]);
+                Ok(())
+            }),
+        });
+
+        capture.stop_recording();
+        capture.finish_recovery().unwrap();
+
+        assert!(capture.capture_handle.is_none());
+        assert!(!capture.is_recording());
+        assert!(capture.pre_roll.lock().unwrap().snapshot().is_empty());
+        assert_eq!(
+            journal::read_chunk(&path, 0, 10).unwrap().2,
+            vec![0.25, -0.25, 0.125]
+        );
+        assert!(path.with_extension("options.json").exists());
+        assert!(capture.buffer.lock().unwrap().journal.is_none());
+
+        capture.discard_recovery().unwrap();
+        assert!(!path.exists());
+        assert!(!path.with_extension("options.json").exists());
+    }
+
+    #[test]
+    fn unclean_home_worker_shutdown_keeps_audio_and_rejects_buffer_reuse() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("home.pcm");
+        let mut capture = AudioCapture::new();
+        capture.hot_mic_enabled = true;
+        capture.set_recovery_path(Some(path.clone())).unwrap();
+        {
+            let mut buffer = capture.buffer.lock().unwrap();
+            buffer.set_format(16000, 1);
+            buffer.append(&[0.25]);
+        }
+        let (command_tx, command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        capture.capture_handle = Some(CaptureHandle {
+            command_tx,
+            event_rx,
+            thread_handle: thread::spawn(move || {
+                command_rx.recv().unwrap();
+                Err(AudioCaptureError::ThreadError(
+                    "Synthetic worker failure".into(),
+                ))
+            }),
+        });
+
+        capture.stop_recording();
+
+        assert!(capture.finish_recovery().is_err());
+        assert!(capture.set_recovery_path(None).is_err());
+        assert!(capture.start_recording_session(1.0, None).is_err());
+        assert!(capture.discard_recovery().is_err());
+        // Even a detached worker draining late chunks cannot alter recovery audio.
+        capture.buffer.lock().unwrap().append(&[-0.5]);
+        assert_eq!(journal::read_chunk(&path, 0, 10).unwrap().2, vec![0.25]);
+        assert_eq!(capture.recovery_path().as_deref(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn cancelling_before_first_audio_callback_cleans_up_only_empty_recording_options() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("empty.pcm");
+        let mut capture = AudioCapture::new();
+        capture.set_recovery_path(Some(path.clone())).unwrap();
+        crate::recordings::options::RecordingPreferences::default()
+            .save_journal(&path)
+            .unwrap();
+
+        capture.stop_recording();
+        capture.finish_recovery().unwrap();
+
+        assert!(capture.recovery_path().is_none());
+        assert!(!path.exists());
+        assert!(!path.with_extension("options.json").exists());
     }
 
     #[test]

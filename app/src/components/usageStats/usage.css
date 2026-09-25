@@ -1,0 +1,48 @@
+.usage-toolbar {
+	margin-bottom: 28px;
+}
+.usage-toolbar .mantine-Tabs-list {
+	border-bottom: 0;
+}
+.usage-number {
+	font-size: clamp(24px, 3vw, 32px);
+	font-weight: 500;
+	font-variant-numeric: tabular-nums;
+	margin-top: 8px;
+}
+.usage-chart {
+	margin: 0;
+	display: flex;
+	gap: 4px;
+	height: 210px;
+	align-items: stretch;
+	border-bottom: 1px solid var(--border-subtle);
+}
+.usage-bar-column {
+	display: flex;
+	align-items: flex-end;
+	flex: 1;
+	min-width: 0;
+	outline-offset: 3px;
+}
+.usage-bar {
+	width: 100%;
+	background: var(--mantine-primary-color-filled);
+	border-radius: 3px 3px 0 0;
+}
+.usage-bar-column:hover .usage-bar,
+.usage-bar-column:focus-visible .usage-bar {
+	filter: brightness(1.3);
+}
+.usage-spend {
+	position: relative;
+}
+.usage-spend .usage-controls {
+	top: 0;
+	right: 0;
+	padding: 0;
+	position: absolute;
+}
+.usage-spend-content {
+	padding: 0;
+}

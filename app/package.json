@@ -1,6 +1,6 @@
 {
 	"name": "kolboo",
-	"version": "0.2.5-beta.1",
+	"version": "0.3.0",
 	"description": "Customizable AI-powered voice dictation",
 	"engines": {
 		"node": ">=24"
@@ -8,13 +8,17 @@
 	"packageManager": "pnpm@10.26.2",
 	"scripts": {
 		"prepare": "cd .. && husky app/.husky",
+		"setup:check": "node scripts/check-rust-build-tools.mjs",
 		"dev": "node --env-file-if-exists=.env scripts/dev.mjs",
-		"dev:sccache": "node scripts/dev-sccache.mjs",
+		"dev:sccache": "pnpm dev",
 		"dev:local-whisper": "node --env-file-if-exists=.env scripts/dev.mjs --features local-whisper",
 		"dev:local-whisper:cuda": "node --env-file-if-exists=.env scripts/dev.mjs --features local-whisper-cuda",
 		"dev:vite": "vite",
 		"build": "node scripts/run-with-timing.mjs tauri build --no-sign",
 		"build:release": "node scripts/run-with-timing.mjs tauri build",
+		"build:linux:fast": "node scripts/fast-linux-package.mjs",
+		"deploy:ideapad": "node scripts/fast-linux-package.mjs --host dovie-ideapad-linux",
+		"deploy:ideapad:install": "node scripts/fast-linux-package.mjs --host dovie-ideapad-linux --install",
 		"build:local-whisper": "node scripts/run-with-timing.mjs tauri build --no-sign --features local-whisper",
 		"build:release:local-whisper": "node scripts/run-with-timing.mjs tauri build --features local-whisper",
 		"build:local-whisper:cuda": "node scripts/run-with-timing.mjs tauri build --no-sign --features local-whisper-cuda",
@@ -26,6 +30,8 @@
 		"test": "node scripts/run-with-timing.mjs vitest run --reporter=dot",
 		"coverage": "node scripts/run-with-timing.mjs vitest run --coverage",
 		"coverage:evidence": "node scripts/run-with-timing.mjs node scripts/coverage-evidence.mjs",
+		"coverage:patch:check": "node scripts/run-with-timing.mjs node scripts/patch-coverage.mjs",
+		"coverage:patch": "node scripts/run-with-timing.mjs --shell \"pnpm coverage && pnpm cargo:coverage -- --lcov --output-path coverage/rust-lcov.info && pnpm coverage:patch:check\"",
 		"audit:js": "pnpm audit --audit-level high",
 		"audit:rust": "cargo audit --file src-tauri/Cargo.lock",
 		"audit": "pnpm audit:js && pnpm audit:rust",
@@ -88,6 +94,7 @@
 		"react-markdown": "^10.1.0",
 		"remark-gfm": "^4.0.1",
 		"tailwindcss": "^4.3.3",
+		"wavesurfer.js": "^7.12.11",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {
@@ -99,6 +106,7 @@
 		"@types/react-dom": "19.2.4",
 		"@vitejs/plugin-react": "6.0.5",
 		"@vitest/coverage-v8": "4.1.10",
+		"happy-dom": "20.12.0",
 		"husky": "^9.1.7",
 		"json-schema-to-typescript": "^15.0.4",
 		"knip": "^6.31.0",
@@ -109,6 +117,7 @@
 	},
 	"pnpm": {
 		"overrides": {
+			"js-yaml@>=4.0.0 <4.3.2": "4.3.2",
 			"nanoid@<3.3.18": "3.3.18",
 			"rollup@>=4.0.0 <4.59.0": "4.59.0"
 		}

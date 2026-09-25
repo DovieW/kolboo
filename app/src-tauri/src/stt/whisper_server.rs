@@ -21,12 +21,59 @@ use std::time::Duration;
 
 /// Whisper Server STT provider for OpenAI-compatible transcription servers.
 pub struct WhisperServerSttProvider {
+    provider_name: &'static str,
     client: reqwest::Client,
     base_url: String,
     model: String,
     default_prompt: Option<String>,
     default_language: Option<String>,
     request_log_store: Option<RequestLogStore>,
+    api_key: Option<String>,
+}
+
+#[cfg(test)]
+mod custom_tests {
+    use super::*;
+    #[tokio::test]
+    async fn custom_transcription_uses_key_and_model_on_selected_endpoint() {
+        use wiremock::matchers::{header, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .and(header("authorization", "Bearer fake-key"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"text":"transcribed"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let provider =
+            WhisperServerSttProvider::with_client(
+                crate::network::build_custom_provider_client(
+                    &crate::settings::ProxySettings::default(),
+                )
+                .unwrap(),
+                format!("{}/v1", server.uri()),
+                Some("my-stt".into()),
+                None,
+                None,
+            )
+            .unwrap()
+            .with_api_key("fake-key".into());
+        assert_eq!(provider.name(), "custom");
+        assert_eq!(
+            provider
+                .transcribe(b"fake audio", &AudioFormat::default())
+                .await
+                .unwrap(),
+            "transcribed"
+        );
+        let requests = server.received_requests().await.unwrap();
+        let body = String::from_utf8_lossy(&requests[0].body);
+        assert!(body.contains("my-stt"));
+        assert!(!body.contains("fake-key"));
+    }
 }
 
 impl WhisperServerSttProvider {
@@ -96,17 +143,25 @@ impl WhisperServerSttProvider {
         default_prompt: Option<String>,
     ) -> Result<Self, SttError> {
         Ok(Self {
+            provider_name: "whisper-server",
             client,
             base_url: Self::normalize_base_url(&base_url)?,
             model: Self::normalize_model(model),
             default_prompt,
             default_language: Self::normalize_language(language),
             request_log_store: None,
+            api_key: None,
         })
     }
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
+        self
+    }
+
+    pub fn with_api_key(mut self, key: String) -> Self {
+        self.provider_name = "custom";
+        self.api_key = Some(key);
         self
     }
 
@@ -124,21 +179,24 @@ impl SttProvider for WhisperServerSttProvider {
         let language = self.default_language.as_deref();
         openai_compat::transcribe_wav_multipart_openai_compat(
             &self.client,
-            "whisper-server",
-            "Whisper server API error",
+            self.provider_name,
+            "Transcription server error",
             &endpoint,
             audio,
             &self.model,
             prompt.as_deref(),
             language,
             self.request_log_store.as_ref(),
-            |rb| rb,
+            |rb| match &self.api_key {
+                Some(key) => rb.bearer_auth(key),
+                None => rb,
+            },
             SttError::Network,
         )
         .await
     }
 
     fn name(&self) -> &'static str {
-        "whisper-server"
+        self.provider_name
     }
 }

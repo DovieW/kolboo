@@ -19,13 +19,23 @@ Tests should protect important behavior, risky boundaries, or known regressions.
 - Node.js 24 or newer
 - pnpm 10.26.2 through the `packageManager` field
 - stable Rust with `rustfmt` and `clippy`
+- `cargo-llvm-cov` 0.9.1 and the `llvm-tools-preview` Rust component
+- `sccache` on every development platform
+- `mold` on Linux
 - platform-specific Tauri build prerequisites
 
 Install JavaScript dependencies from `app/`:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm setup:check
 ```
+
+Rust/Tauri commands launched through the package scripts use `sccache` with
+`CARGO_INCREMENTAL=0` automatically. Linux builds also use `mold`; the setup
+check fails with the platform-specific installation command when either required
+accelerator is missing. Keep direct Cargo invocations for troubleshooting only so
+normal development does not silently bypass the shared build environment.
 
 ## Fast focused checks
 
@@ -36,6 +46,7 @@ pnpm lint:ci
 pnpm typecheck
 pnpm test
 pnpm coverage
+pnpm coverage:patch
 pnpm knip
 ```
 
@@ -117,7 +128,60 @@ Cover permutations beneath those journeys with API integration and rendered comp
 
 ## Coverage policy
 
-Coverage thresholds are enforced for declared frontend files and must not be lowered to make a change pass. Add focused tests for uncovered branches or explicitly exclude generated/entrypoint code when it has no meaningful executable behavior.
+Coverage thresholds are enforced for declared frontend files and must not be lowered to make a change pass. In addition, pull requests require 100% coverage of changed executable lines and functions. Frontend branch records on changed lines must also be fully covered. Rust branch coverage remains excluded because LLVM's support is unstable.
+
+The patch gate intentionally applies to new behavior rather than pretending the
+legacy repository already has 100% global coverage. It fails closed when a
+changed production source file is missing from coverage reports. Tests,
+declarations, generated contracts, and trivial renderer entrypoints are excluded
+explicitly; do not expand that list merely to make a patch pass. Coverage proves
+execution, not correctness, so changed behavior still needs meaningful assertions
+and the appropriate unit, component, integration, or native-platform test.
+
+When the remote merge base predates `.coverage-patch-v1`, enforcement starts at
+the first policy-introduction commit on the branch, not at HEAD and not only
+after merging to master. This grandfathers pre-policy code, **not subsequent
+committed or working-tree changes**. Untracked production files are included.
+Use `coverage:patch` for a fresh sequential frontend/Rust run: V8 clears its
+report directory, so running the two writers concurrently can delete Rust LCOV.
+
+On 2026-09-24 the maintainer authorized necessary exceptions for the accumulated
+desktop patch. `app/scripts/patch-coverage-exceptions.json` records exact Rust
+line/function locations, whole-source SHA-256 fingerprints, rationale and
+related test evidence. There are no frontend or branch waivers and no blanket
+file/directory exclusions. A source edit that still needs an exception fails
+until it is tested or explicitly re-reviewed; do not regenerate these snapshots
+from a failing report. Remove entries as native integration coverage becomes
+available, and re-review them before a public release or toolchain upgrade.
+
+These exceptions cover concrete Wry/OS clipboard/window-manager integration,
+late cancellation/poisoned-lock defensive paths, target-gated declarations,
+and selected LLVM generic-instantiation duplicates. A compiler-instance waiver
+requires both executed source lines and an executed Rust function record at
+the same definition. It cannot excuse an unexecuted function body. Native
+acceptance (real recording, paste/focus, overlay visibility and each supported
+desktop's program picker) remains required; related unit tests do not prove
+that integration. Tests have been moved out of inline production modules where
+coverage was incorrectly counting test-only panic sentinels as production gaps.
+
+The 2026-09-24 audit passed with 1,646 covered changed executable lines, 405
+explicit native/race line exceptions across 25 source snapshots, plus the
+Tauri annotation exception below. It ran 851 frontend and 924 Rust tests;
+57 frontend tests and 13 native/optional Rust tests remain skipped/ignored.
+This is **100% of non-exempt patch code**, not 100% global or native-platform
+coverage. Exceptions are printed separately in every gate result.
+
+An additional explicitly approved exception (2026-09-23) covers counterless Tauri async
+wrapper metadata at the standalone `#[tauri::command]` annotation of
+`commands/history.rs::get_history_activity` (observed with rustc 1.98.1 and
+Tauri 2.11.5). The gate names this exception in its output. It requires the exact
+source declaration, zero-hit Rust closure records on the annotation, no branch
+records there, and a covered command function on the following line. Unknown
+record shapes fail closed. This annotation exception never waives command
+bodies or their closures. IPC tests cover
+successful serialization, invalid arguments, storage errors, and content-safe
+responses. Recheck and remove this exception when upgrading Rust or Tauri;
+it is not permission to exempt other generated wrappers.
 
 Rust coverage evidence is available through:
 

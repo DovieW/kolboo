@@ -4,6 +4,7 @@
 //! Wayland expose different global-input capabilities. Keep environment parsing
 //! pure so fallbacks can be tested without mutating the process environment.
 
+#[cfg(any(test, target_os = "linux"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinuxDisplayServer {
     X11,
@@ -16,6 +17,7 @@ pub(crate) enum LinuxDisplayServer {
 /// This is intentionally separate from `LinuxDisplayServer`: an app can run
 /// through XWayland inside a Wayland desktop session. The session classification
 /// must remain Wayland for input and clipboard security decisions.
+#[cfg(any(test, target_os = "linux"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LinuxWindowBackendChoice {
     PreserveEnvironment,
@@ -23,6 +25,7 @@ pub(crate) enum LinuxWindowBackendChoice {
     Wayland,
 }
 
+#[cfg(target_os = "linux")]
 impl LinuxDisplayServer {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -33,10 +36,12 @@ impl LinuxDisplayServer {
     }
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn non_empty(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.trim().is_empty())
 }
 
+#[cfg(any(test, target_os = "linux"))]
 pub(crate) fn desktop_scale_from_dpi(dpi: f64) -> Option<f64> {
     let scale = dpi / 96.0;
     (scale.is_finite() && (0.5..=8.0).contains(&scale)).then_some(scale)
@@ -52,6 +57,7 @@ pub(crate) fn current_linux_desktop_scale() -> Option<f64> {
     gdk::Screen::default().and_then(|screen| desktop_scale_from_dpi(screen.resolution()))
 }
 
+#[cfg(any(test, target_os = "linux"))]
 pub(crate) fn detect_linux_display_server(
     session_type: Option<&str>,
     wayland_display: Option<&str>,
@@ -74,6 +80,7 @@ pub(crate) fn detect_linux_display_server(
     LinuxDisplayServer::Unknown
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn normalized_backend(value: Option<&str>) -> Option<&str> {
     value
         .map(str::trim)
@@ -89,6 +96,7 @@ fn normalized_backend(value: Option<&str>) -> Option<&str> {
         })
 }
 
+#[cfg(any(test, target_os = "linux"))]
 pub(crate) fn choose_linux_window_backend(
     display_server: LinuxDisplayServer,
     x11_display: Option<&str>,
@@ -204,6 +212,7 @@ pub(crate) fn should_use_clipboard_fallback(automatic_insertion_requested: bool)
     }
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn should_use_clipboard_fallback_for(
     display_server: LinuxDisplayServer,
     automatic_insertion_requested: bool,

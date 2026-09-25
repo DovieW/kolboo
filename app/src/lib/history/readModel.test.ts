@@ -74,6 +74,7 @@ describe("History Feed read model", () => {
 		const grouped = groupHistoryForDisplay([
 			{
 				id: "error",
+				title: "Voice recording",
 				text: "",
 				timestamp: "2024-01-01T10:00:00Z",
 				status: "error",
@@ -83,8 +84,10 @@ describe("History Feed read model", () => {
 			},
 			{
 				id: "empty",
+				title: "Team planning",
 				text: "   ",
 				timestamp: "2024-01-01T10:05:00Z",
+				recording_mode: "meeting",
 				profile_name: "Default",
 				preset_name: "Default",
 			},
@@ -95,6 +98,8 @@ describe("History Feed read model", () => {
 			{
 				id: "error",
 				contentKind: "error",
+				recordingMode: "dictation",
+				title: null,
 				displayText: "Backend said nope",
 				hasCopyValue: true,
 				profilePresetLabel: "custom-profile: draft",
@@ -103,6 +108,8 @@ describe("History Feed read model", () => {
 			{
 				id: "empty",
 				contentKind: "empty",
+				recordingMode: "meeting",
+				title: "Team planning",
 				displayText: "No transcript",
 				hasCopyValue: false,
 				profilePresetLabel: null,

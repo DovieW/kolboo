@@ -4,7 +4,6 @@ import {
 	Card,
 	Group,
 	PasswordInput,
-	SegmentedControl,
 	Stack,
 	Text,
 	TextInput,
@@ -44,64 +43,32 @@ export function AccountActionsCard(props: {
 		onManage,
 		onSignOut,
 	} = props;
+
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
-	const [formMode, setFormMode] = useState<"sign_up" | "sign_in">("sign_up");
-
+	const [formMode, setFormMode] = useState<"sign_up" | "sign_in">("sign_in");
 	const showSignIn = !signedIn || reauthRequired;
-	const actionTitle = signedIn ? "Manage your session" : "Sign in to Kolboo";
-	const introCopy = signedIn
-		? "Refresh your managed access, open account management, or sign out. If organization access or billing changed recently, use Refresh access to pull the latest state."
-		: "Create a free Kolboo account or sign in to save a Community/BYOK session now, then upgrade to Personal/Pro or Managed Business later for settings sync and managed inference.";
-	const browserCopy = reauthRequired
-		? "Kolboo will reopen your browser so you can restore managed access without re-entering everything in-app."
-		: "Browser auth opens the hosted Kolboo account page, where you can sign in, create an account, or use a magic link. That page rechecks any ready organization or paid-access claims before returning to the desktop app.";
-	const signInLabel =
-		reauthRequired && signedIn ? "Re-authenticate" : "Sign in";
-	const effectiveFormMode = signedIn ? "sign_in" : formMode;
-	const formPending =
-		effectiveFormMode === "sign_up" ? signupPending : loginPending;
-
+	const creating = !signedIn && formMode === "sign_up";
+	const formPending = loginPending || signupPending;
 	const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
-		if (effectiveFormMode === "sign_up") {
-			onPasswordSignUp(email, password);
-			return;
-		}
-
-		onPasswordSignIn(email, password);
+		if (formPending) return;
+		if (creating) onPasswordSignUp(email.trim(), password);
+		else onPasswordSignIn(email.trim(), password);
 	};
-
 	return (
-		<Card withBorder radius="lg" className="account-panel">
-			<Stack gap="md">
-				<Text className="account-panel-kicker">Actions</Text>
-				<Title order={3}>{actionTitle}</Title>
-				<Text c="dimmed" size="sm">
-					{introCopy}
-				</Text>
-
-				{showSignIn ? (
+		<Card withBorder radius="lg" className="account-panel account-actions">
+			<Stack gap="lg">
+				<Title order={2} size="h3">
+					{showSignIn
+						? creating
+							? "Create your account"
+							: "Sign in to Kolboo"
+						: "Your account"}
+				</Title>
+				{showSignIn && (
 					<Box component="form" onSubmit={handleSubmit}>
-						<Stack gap="sm">
-							{!signedIn ? (
-								<SegmentedControl
-									value={formMode}
-									onChange={(value) =>
-										setFormMode(value as "sign_up" | "sign_in")
-									}
-									data={[
-										{ value: "sign_up", label: "Create account" },
-										{ value: "sign_in", label: "Sign in" },
-									]}
-									disabled={loginPending || signupPending}
-								/>
-							) : null}
-							<Text c="dimmed" size="sm">
-								{effectiveFormMode === "sign_up"
-									? "Create a free self-serve account. If email confirmation is required, confirm the email first, then come back here or use browser auth to finish sign-in."
-									: "Sign in with the email and password for your account. This works for self-serve accounts you created yourself or accounts an operator created for you."}
-							</Text>
+						<Stack gap="md">
 							<TextInput
 								label="Email"
 								type="email"
@@ -115,94 +82,83 @@ export function AccountActionsCard(props: {
 								label="Password"
 								value={password}
 								onChange={(event) => setPassword(event.currentTarget.value)}
-								autoComplete={
-									effectiveFormMode === "sign_up"
-										? "new-password"
-										: "current-password"
-								}
+								autoComplete={creating ? "new-password" : "current-password"}
 								disabled={formPending}
 								required
 							/>
-
-							<Group gap="sm" wrap="wrap">
-								<Button type="submit" loading={formPending}>
-									{effectiveFormMode === "sign_up"
-										? "Create free account"
-										: signInLabel}
-								</Button>
-								{signedIn ? (
+							{!creating && (
+								<Group justify="flex-end">
 									<Button
+										variant="subtle"
+										size="compact-xs"
+										onClick={onBrowserSignIn}
+										disabled={formPending}
 										type="button"
-										variant="default"
-										onClick={onSignOut}
-										loading={logoutPending}
 									>
-										Sign out
+										Forgot password?
 									</Button>
-								) : null}
-							</Group>
-
-							<Text c="dimmed" size="sm">
-								{browserCopy}
-							</Text>
-
-							<Group gap="sm" wrap="wrap">
+								</Group>
+							)}
+							<Button type="submit" fullWidth loading={formPending}>
+								{creating ? "Create account" : "Sign in"}
+							</Button>
+							<Button
+								type="button"
+								variant="default"
+								fullWidth
+								onClick={onBrowserSignIn}
+								disabled={formPending}
+							>
+								Continue in browser
+							</Button>
+							{!signedIn && (
 								<Button
 									type="button"
 									variant="subtle"
-									onClick={onBrowserSignIn}
-									loading={loginPending}
-									disabled={signupPending}
+									color="gray"
+									disabled={formPending}
+									onClick={() => setFormMode(creating ? "sign_in" : "sign_up")}
 								>
-									Use browser auth instead
+									{creating
+										? "Already have an account? Sign in"
+										: "Create an account"}
 								</Button>
-							</Group>
+							)}
 						</Stack>
 					</Box>
-				) : null}
-
-				<Group gap="sm" wrap="wrap">
-					{signedIn ? (
-						<>
-							<Button
-								variant="default"
-								onClick={onRefresh}
-								loading={refreshPending}
-							>
-								Refresh access
-							</Button>
+				)}
+				{signedIn ? (
+					<Group gap="sm">
+						<Button
+							variant="default"
+							onClick={onRefresh}
+							loading={refreshPending}
+						>
+							Refresh access
+						</Button>
+						{manageAvailable && (
 							<Button
 								variant="light"
 								onClick={onManage}
 								loading={managePending}
-								disabled={!manageAvailable}
 							>
 								Manage account
 							</Button>
-							<Button
-								color="red"
-								variant="subtle"
-								onClick={onSignOut}
-								loading={logoutPending}
-							>
-								Sign out
-							</Button>
-						</>
-					) : (
-						<Text c="dimmed" size="sm">
-							Sign in to save a Community/BYOK session now, then upgrade to
-							Personal/Pro or Managed Business later for settings sync and
-							managed inference.
-						</Text>
-					)}
-				</Group>
-
-				{signedIn && !manageAvailable ? (
-					<Text c="dimmed" size="sm">
-						Billing portal access is intentionally deferred in this shared-dev
-						pilot.
+						)}
+						<Button
+							color="gray"
+							variant="subtle"
+							onClick={onSignOut}
+							loading={logoutPending}
+						>
+							Sign out
+						</Button>
+					</Group>
+				) : (
+					<Text size="xs" c="dimmed" ta="center">
+						Local models and your own keys work without an account.
 					</Text>
-				) : null}
+				)}
 			</Stack>
 		</Card>
 	);

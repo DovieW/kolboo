@@ -3,7 +3,7 @@
 	"productName": "Kolboo",
 	"identifier": "com.kolboo.app",
 	"mainBinaryName": "kolboo",
-	"version": "0.2.5-beta.1",
+	"version": "0.3.0",
 	"build": {
 		"beforeDevCommand": "pnpm dev:vite",
 		"devUrl": "http://localhost:5173",
@@ -27,8 +27,8 @@
 			}
 		],
 		"security": {
-			"csp": "default-src 'self'; img-src 'self' asset: https: data: blob:; media-src 'self' asset: data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.github.com https://models.dev https://*.ingest.sentry.io https://*.ingest.us.sentry.io; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
-			"devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' asset: https: data: blob:; media-src 'self' asset: data: blob:; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 https://api.github.com https://models.dev https://*.ingest.sentry.io https://*.ingest.us.sentry.io; form-action 'self'; frame-ancestors 'none';"
+			"csp": "default-src 'self'; img-src 'self' https: data: blob:; media-src 'self' data: blob: http://127.0.0.1:*; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.github.com https://models.dev https://us.i.posthog.com https://eu.i.posthog.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io; frame-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+			"devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src 'self' https: data: blob:; media-src 'self' data: blob: http://127.0.0.1:*; connect-src 'self' ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173 https://api.github.com https://models.dev https://us.i.posthog.com https://eu.i.posthog.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io; form-action 'self'; frame-ancestors 'none';"
 		}
 	},
 	"plugins": {

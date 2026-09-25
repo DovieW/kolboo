@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { configureRustBuildEnv } from "./rust-build-env.mjs";
 
 export function conservativeCargoJobs(cpuCount = os.cpus().length) {
 	return Math.min(8, Math.max(1, Math.floor(cpuCount / 2)));
@@ -11,7 +12,13 @@ export function conservativeCargoJobs(cpuCount = os.cpus().length) {
 
 export function buildRustCoverageArgs(options = {}) {
 	const manifestPath = options.manifestPath ?? "src-tauri/Cargo.toml";
-	const args = ["llvm-cov", "--manifest-path", manifestPath, "--summary-only"];
+	const args = ["llvm-cov", "--manifest-path", manifestPath];
+	if (options.lcov) {
+		args.push("--lcov");
+		if (options.outputPath) args.push("--output-path", options.outputPath);
+	} else {
+		args.push("--summary-only");
+	}
 
 	for (const packageName of options.packages ?? []) {
 		args.push("--package", packageName);
@@ -43,7 +50,7 @@ export function validateRustCoverageOptions(options = {}) {
 
 	return [
 		"cargo llvm-cov must be installed before Rust in-scope coverage can be claimed.",
-		"Install with: cargo install cargo-llvm-cov",
+		"Install with: cargo +stable install cargo-llvm-cov --locked --version 0.9.1",
 	];
 }
 
@@ -71,6 +78,8 @@ function parseArgs(argv) {
 		packages: [],
 		tests: [],
 		allFeatures: false,
+		lcov: false,
+		outputPath: undefined,
 	};
 
 	while (args.length > 0) {
@@ -89,6 +98,10 @@ function parseArgs(argv) {
 			}
 		} else if (arg === "--all-features") {
 			options.allFeatures = true;
+		} else if (arg === "--lcov") {
+			options.lcov = true;
+		} else if (arg === "--output-path") {
+			options.outputPath = args.shift();
 		}
 	}
 
@@ -98,7 +111,9 @@ function parseArgs(argv) {
 export function runRustCoverageCli(argv = process.argv.slice(2)) {
 	const options = parseArgs(argv);
 	const cargoArgs = buildRustCoverageArgs(options);
-	const env = createRustCoverageEnvironment();
+	const env = configureRustBuildEnv(createRustCoverageEnvironment(), {
+		requireTools: true,
+	}).env;
 
 	console.log(`[rust-coverage] cargo ${cargoArgs.join(" ")}`);
 	console.log(`[rust-coverage] CARGO_BUILD_JOBS=${env.CARGO_BUILD_JOBS}`);

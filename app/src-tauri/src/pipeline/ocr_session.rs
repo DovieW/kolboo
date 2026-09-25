@@ -679,6 +679,7 @@ impl SharedPipeline {
     pub(crate) async fn get_ocr_result_with_timeout(
         &self,
         timeout: Duration,
+        cancel: Option<&tokio_util::sync::CancellationToken>,
     ) -> Option<crate::ocr::OcrResult> {
         // IMPORTANT: Do not permanently take/drop the OCR task handle when timing out.
         // If we drop the JoinHandle on timeout, the OCR task will keep running in the background
@@ -686,6 +687,9 @@ impl SharedPipeline {
         // the result.
         let mut task = {
             let mut inner = self.inner.lock().ok()?;
+            if cancel.is_some_and(|token| token.is_cancelled()) {
+                return None;
+            }
             if let Some(result) = inner.ocr.cached_result() {
                 return Some(result);
             }

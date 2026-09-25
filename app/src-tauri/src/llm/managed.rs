@@ -73,6 +73,7 @@ impl ManagedLlmProvider {
         }
     }
 
+    #[cfg(test)]
     pub fn new(access_token: String, model: Option<String>, api_url: String) -> Self {
         Self::with_client(Client::new(), access_token, model, api_url)
     }

@@ -100,7 +100,12 @@ pub fn get_default_sections() -> DefaultSectionsResponse {
 #[tauri::command]
 pub fn get_runtime_config() -> RuntimeConfigResponse {
     RuntimeConfigResponse {
-        app_version: read_first_non_empty_env(&["TAURI_APP_VERSION"]),
+        // A cloud-free development launch is still a valid runtime response.
+        // Keep it distinguishable from the renderer's all-null IPC fallback.
+        app_version: Some(
+            read_first_non_empty_env(&["TAURI_APP_VERSION"])
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
+        ),
         api_base_url: normalize_optional_base_url(read_first_non_empty_env(&[
             "TAURI_API_BASE_URL",
         ])),
@@ -125,16 +130,98 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
         // it only for rehearsal launches without normalizing fake crashes in
         // regular desktop sessions.
         sentry_smoke: read_optional_bool_env(&["TAURI_SENTRY_SMOKE"]),
-        posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"]),
-        posthog_host: normalize_optional_base_url(read_first_non_empty_env(&[
-            "TAURI_POSTHOG_HOST",
-        ])),
+        // This is a public PostHog project ingestion token, never a personal
+        // API key. Release bundles need it embedded because their environment
+        // will not inherit GitHub Actions variables at runtime.
+        posthog_api_key: read_first_non_empty_env(&["TAURI_POSTHOG_API_KEY"])
+            .or_else(|| compiled_non_empty(option_env!("TAURI_POSTHOG_API_KEY"))),
+        posthog_host: normalize_optional_base_url(
+            read_first_non_empty_env(&["TAURI_POSTHOG_HOST"])
+                .or_else(|| compiled_non_empty(option_env!("TAURI_POSTHOG_HOST"))),
+        ),
     }
 }
 
 // ============================================================================
 // Available Providers
 // ============================================================================
+static CUSTOM_PROVIDER_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[tauri::command]
+pub fn get_custom_providers(
+    app: AppHandle,
+) -> CommandResult<Vec<crate::custom_providers::CustomProvider>> {
+    crate::custom_providers::load_checked(&app).map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn save_custom_provider(
+    app: AppHandle,
+    provider: crate::custom_providers::CustomProvider,
+) -> CommandResult<()> {
+    let _guard = CUSTOM_PROVIDER_WRITE
+        .lock()
+        .map_err(|_| "Provider settings are unavailable")?;
+    let provider = provider.validate()?;
+    let mut providers = crate::custom_providers::load_checked(&app)?;
+    if let Some(current) = providers.iter_mut().find(|p| p.id == provider.id) {
+        *current = provider;
+    } else {
+        if providers.len() >= 50 {
+            return Err("At most 50 custom providers are supported".into());
+        }
+        providers.push(provider);
+    }
+    let store = app
+        .store("settings.json")
+        .map_err(|_| "Could not open provider settings")?;
+    let old = store.get("custom_providers");
+    store.set(
+        "custom_providers",
+        serde_json::to_value(providers).map_err(|_| "Could not encode providers")?,
+    );
+    if store.save().is_err() {
+        if let Some(old) = old {
+            store.set("custom_providers", old);
+        } else {
+            store.delete("custom_providers");
+        }
+        return Err("Could not save providers; previous settings are preserved".into());
+    }
+    sync_pipeline_config(app)
+}
+
+#[tauri::command]
+pub fn delete_custom_provider(app: AppHandle, id: String) -> CommandResult<()> {
+    let _guard = CUSTOM_PROVIDER_WRITE
+        .lock()
+        .map_err(|_| "Provider settings are unavailable")?;
+    let mut providers = crate::custom_providers::load_checked(&app)?;
+    let provider = providers
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or("Custom provider was not found")?;
+    crate::secrets::clear_api_key(&app, &provider.key_name())?;
+    providers.retain(|p| p.id != id);
+    let store = app
+        .store("settings.json")
+        .map_err(|_| "Could not open provider settings")?;
+    let old = store.get("custom_providers");
+    store.set(
+        "custom_providers",
+        serde_json::to_value(providers).map_err(|_| "Could not encode providers")?,
+    );
+    if store.save().is_err() {
+        if let Some(old) = old {
+            store.set("custom_providers", old);
+        }
+        // The keyring removal already succeeded. Drop any cached provider that
+        // still holds it even though metadata could not be removed from disk.
+        let _ = sync_pipeline_config(app.clone());
+        return Err("Key removed, but provider could not be removed. Retry removal".into());
+    }
+    sync_pipeline_config(app)
+}
 
 /// Information about a provider
 #[derive(Debug, Serialize, JsonSchema)]
@@ -142,6 +229,8 @@ pub struct ProviderInfo {
     pub value: String,
     pub label: String,
     pub is_local: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<String>>,
 }
 
 /// OCR provider availability status
@@ -298,6 +387,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 value: id.to_string(),
                 label: label.to_string(),
                 is_local: *is_local,
+                models: None,
             });
         }
     }
@@ -317,10 +407,32 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 value: id.to_string(),
                 label: label.to_string(),
                 is_local: *is_local,
+                models: None,
             });
         }
     }
 
+    for provider in crate::custom_providers::load(&app) {
+        if !has_api_key(&app, &provider.key_name()) {
+            continue;
+        }
+        if !provider.stt_models.is_empty() {
+            stt_providers.push(ProviderInfo {
+                value: provider.id.clone(),
+                label: provider.name.clone(),
+                is_local: false,
+                models: Some(provider.stt_models),
+            });
+        }
+        if !provider.llm_models.is_empty() {
+            llm_providers.push(ProviderInfo {
+                value: provider.id,
+                label: provider.name,
+                is_local: false,
+                models: Some(provider.llm_models),
+            });
+        }
+    }
     AvailableProvidersResponse {
         stt: stt_providers,
         llm: llm_providers,
@@ -666,6 +778,14 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         let key: String = get_api_key(&app, &key_name);
         if !key.is_empty() {
             llm_api_keys.insert(provider.to_string(), key);
+        }
+    }
+
+    for provider in crate::custom_providers::load(&app) {
+        let key = get_api_key(&app, &provider.key_name());
+        if !key.is_empty() {
+            stt_api_keys.insert(provider.id.clone(), key.clone());
+            llm_api_keys.insert(provider.id, key);
         }
     }
 
@@ -1129,6 +1249,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         mic_auto_recover_enabled,
 
         llm_config: crate::llm::LlmConfig {
+            custom_providers: crate::custom_providers::load(&app),
             enabled: llm_enabled,
             provider: effective_llm_provider.clone(),
             api_key: effective_llm_api_key,
@@ -1274,6 +1395,21 @@ pub fn set_vad_settings(_app: AppHandle, _settings: VadSettings) -> CommandResul
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_config_always_identifies_the_app_without_optional_cloud_settings() {
+        let config = super::get_runtime_config();
+        assert!(config
+            .app_version
+            .as_deref()
+            .is_some_and(|version| !version.trim().is_empty()));
+        if super::read_first_non_empty_env(&["TAURI_APP_VERSION"]).is_none() {
+            assert_eq!(
+                config.app_version.as_deref(),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

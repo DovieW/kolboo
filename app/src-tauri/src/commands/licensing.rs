@@ -1363,8 +1363,11 @@ pub async fn license_request_password_reset(email: String) -> CommandResult<()> 
 
 #[tauri::command]
 pub async fn license_logout(app: AppHandle) -> CommandResult<LicenseState> {
-    clear_session_material(&app)
-        .map_err(|e| CommandError::new("Failed to clear session", "auth").with_code(e))?;
+    if let Err(error) = clear_session_material(&app) {
+        log::warn!("Logout could not clear secure session material: {}", error);
+        return Err(CommandError::new("Failed to clear session", "auth")
+            .with_code("auth_session_clear_failed"));
+    }
 
     if let Err(e) = crate::commands::policy::clear_cached_policy_state(&app) {
         log::warn!(

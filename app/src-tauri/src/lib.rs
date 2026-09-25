@@ -18,6 +18,7 @@ mod active_window_capture;
 mod app_paths;
 mod audio;
 mod audio_capture;
+mod audio_import;
 mod audio_mute;
 mod audio_normalization;
 mod bootstrap;
@@ -25,6 +26,7 @@ mod cli;
 mod clipboard_context;
 mod commands;
 mod cost;
+mod custom_providers;
 mod embeddings;
 pub mod events;
 mod fs;
@@ -42,6 +44,7 @@ mod platform_capabilities;
 mod policy;
 mod prompt_builders;
 mod recording_completion;
+mod recording_media_protocol;
 mod recording_orchestration;
 mod recording_request_initialization;
 mod recordings;
@@ -101,6 +104,7 @@ pub use commands::pricing::LlmModelPricing;
 pub use commands::pricing::ModelPricingResponse;
 pub use commands::pricing::SttModelPricing;
 pub use commands::recording::AudioSettingsTestWavs;
+pub use commands::recording::FileImportResult;
 pub use commands::router::CacheRouterEmbeddingsResponse;
 pub use commands::stats::CostByProviderResponse;
 pub use commands::stats::CostSummaryResponse;
@@ -112,8 +116,13 @@ pub use commands::whisper::LocalWhisperModelLoadStatus;
 pub use commands::whisper::WhisperModelDownloadProgress;
 pub use commands::whisper::WhisperModelDownloadStatus;
 pub use commands::whisper::WhisperModelInfo;
+pub use custom_providers::CustomProvider;
+pub use history::HistoryActivity;
 pub use history::HistoryPageQuery;
 pub use history::HistoryPageResult;
+pub use history::{HistoryDetail, HistoryEdit, HistoryEditInput};
+pub use recordings::options::{RecordingMode, RecordingPreferences};
+pub use recordings::RecordingWaveform;
 pub use recordings::RecordingsStats;
 pub use request_log::RequestLog;
 pub use settings::HotkeyConfig;
@@ -238,6 +247,7 @@ pub(crate) fn stop_recording(
     // The explicit "default" marker is for UI/log semantics and should not change runtime behavior.
     let output_intent = {
         let (mut profile_output_mode, mut profile_output_hit_enter) = (None::<String>, None);
+        let mut profile_paste_shortcut = None;
         if let Some(pid) = session_profile_id.as_deref() {
             if pid != "default" {
                 let profiles: Vec<crate::settings::RewriteProgramPromptProfile> =
@@ -245,6 +255,7 @@ pub(crate) fn stop_recording(
                 if let Some(p) = profiles.iter().find(|p| p.id == pid) {
                     profile_output_mode = p.output_mode.clone();
                     profile_output_hit_enter = p.output_hit_enter;
+                    profile_paste_shortcut = p.output_paste_shortcut.clone();
                 }
             }
         }
@@ -253,6 +264,7 @@ pub(crate) fn stop_recording(
             app,
             profile_output_mode.as_deref(),
             profile_output_hit_enter,
+            profile_paste_shortcut.as_deref(),
         )
     };
 
@@ -622,7 +634,12 @@ pub(crate) fn stop_recording(
 
             let mut complete_request_log_after_output = false;
 
-            match pipeline_clone.stop_and_transcribe_detailed().await {
+            let epoch = pipeline_clone.session_epoch();
+            let outcome = pipeline_clone.stop_and_transcribe_detailed().await;
+            if epoch.is_none() || epoch != pipeline_clone.session_epoch() {
+                return;
+            }
+            match outcome {
                 Ok(result) => {
                     log::info!("Transcription complete: {} chars", result.final_text.len());
 
@@ -860,6 +877,7 @@ pub(crate) fn stop_recording(
                                 );
                                 if current_mode == "recording_only"
                                     && current_epoch == expected_epoch
+                                    && overlay::may_hide(&current_mode, pipeline_state)
                                 {
                                     let visible_before = window_clone.is_visible().ok();
                                     log::debug!(
@@ -917,7 +935,14 @@ pub(crate) fn stop_recording(
                                     visible_before,
                                     pipeline_state
                                 );
-                                let _ = window.hide();
+                                let current_mode: String = get_setting_from_store(
+                                    &app_clone,
+                                    "overlay_mode",
+                                    "recording_only".to_string(),
+                                );
+                                if overlay::may_hide(&current_mode, pipeline_state) {
+                                    let _ = window.hide();
+                                }
                             }
                         }
 
@@ -1102,6 +1127,9 @@ pub fn run() {
             commands::history::add_history_entry,
             commands::history::get_history,
             commands::history::get_history_page,
+            commands::history::get_history_activity,
+            commands::history::get_history_detail,
+            commands::history::save_history_edit,
             commands::history::delete_history_entry,
             commands::history::get_history_delete_options,
             commands::history::delete_history_entry_ex,
@@ -1125,6 +1153,7 @@ pub fn run() {
             commands::recording::pipeline_can_pause_recording,
             commands::recording::recording_list_recovery,
             commands::recording::recording_recover,
+            commands::recording::recording_import_file,
             commands::recording::recording_discard_recovery,
             commands::recording::pipeline_set_recording_paused,
             commands::recording::pipeline_get_recording_paused,
@@ -1149,8 +1178,10 @@ pub fn run() {
             commands::recording::pipeline_test_audio_settings_stop_recording,
             commands::recording::pipeline_retry_transcription,
             // Recording file access (for playback)
-            commands::recording::recording_get_wav_path,
-            commands::recording::recording_get_wav_base64,
+            commands::recording::recording_get_playback_url,
+            commands::recording::recording_get_waveform,
+            commands::recording::recording_get_preferences,
+            commands::recording::recording_set_preferences,
             // Recording folder helpers
             commands::recording::recordings_open_folder,
             commands::recording::recordings_get_storage_bytes,
@@ -1183,6 +1214,9 @@ pub fn run() {
             commands::config::get_default_sections,
             commands::config::get_runtime_config,
             commands::config::get_available_providers,
+            commands::config::get_custom_providers,
+            commands::config::save_custom_provider,
+            commands::config::delete_custom_provider,
             commands::config::sync_pipeline_config,
             // Network commands
             commands::network::get_system_proxy_info,
@@ -1218,6 +1252,7 @@ pub fn run() {
             commands::whisper::cancel_whisper_model_download,
             // Request logging commands
             commands::logs::get_request_logs,
+            commands::logs::get_request_log_ids,
             commands::logs::clear_request_logs,
             commands::logs::export_request_logs_to_file,
             commands::logs::frontend_log,
@@ -1428,7 +1463,12 @@ pub fn run() {
 
             // Initialize recording store (saved WAVs for retry)
             let recording_store = RecordingStore::new(app_data_dir.clone());
+            let recording_media_server = recording_media_protocol::RecordingMediaServer::start(
+                recording_store.directory().to_owned(),
+            )
+            .map_err(std::io::Error::other)?;
             app.manage(recording_store);
+            app.manage(recording_media_server);
 
             let history_storage = HistoryStorage::new(app_data_dir.clone());
             app.manage(history_storage);

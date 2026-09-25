@@ -1,44 +1,18 @@
-import {
-	Accordion,
-	ActionIcon,
-	Box,
-	Button,
-	Checkbox,
-	Divider,
-	Group,
-	Indicator,
-	Kbd,
-	NavLink,
-	Popover,
-	ScrollArea,
-	SegmentedControl,
-	Select,
-	Stack,
-	Tabs,
-	Text,
-	Title,
-	Tooltip,
-} from "@mantine/core";
+import { NavLink, Text, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	BarChart2,
+	FileAudio,
 	FileText,
-	Filter,
 	Home,
 	Settings,
 	UserRound,
 } from "lucide-react";
-import {
-	type CSSProperties,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import appPackageJson from "../package.json";
 import { AccountView } from "./components/account";
+import { FileTranscription } from "./components/FileTranscription";
 import { HistoryFeed } from "./components/HistoryFeed";
 import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
@@ -47,7 +21,7 @@ import { RecordingBar } from "./components/RecordingBar";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { TelemetryDisclosureModal } from "./components/settings/TelemetryDisclosureModal";
-import { CostTab, type StatsKindFilter } from "./components/usageStats/CostTab";
+import { UsageStatsView } from "./components/usageStats/UsageStatsView";
 import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { applyAccentColor } from "./lib/accentColor";
 import {
@@ -57,24 +31,14 @@ import {
 } from "./lib/bootStorage";
 import { frontendLog } from "./lib/frontendLog";
 import {
-	DEFAULT_HOLD_HOTKEY,
-	DEFAULT_PASTE_LAST_HOTKEY,
-	DEFAULT_TOGGLE_HOTKEY,
-} from "./lib/hotkeyDefaults";
-import { listAllLlmModelKeys, listAllSttModelKeys } from "./lib/modelOptions";
-import {
 	useSetSettingsGuideState,
 	useSettings,
 	useSettingsGuideState,
 } from "./lib/queries";
 import { isTelemetryDisclosureResolved } from "./lib/settings/telemetryDisclosure";
-import {
-	type CostTimeframe,
-	getPolicyPathEnforcement,
-	type HotkeyConfig,
-	tauriAPI,
-} from "./lib/tauri";
+import { getPolicyPathEnforcement, tauriAPI } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
+import { AggregateAnalyticsBridge } from "./lib/telemetry/AggregateAnalyticsBridge";
 import {
 	checkSignedUpdateVersion,
 	compareSemver,
@@ -83,7 +47,13 @@ import {
 } from "./lib/updates";
 import "./styles.css";
 
-type View = "home" | "settings" | "logs" | "usage-stats" | "account";
+type View =
+	| "home"
+	| "transcribe-file"
+	| "settings"
+	| "logs"
+	| "usage-stats"
+	| "account";
 
 function Sidebar({
 	activeView,
@@ -121,59 +91,46 @@ function Sidebar({
 	};
 
 	return (
-		<aside className="sidebar">
+		<aside className="sidebar" aria-label="Kolboo">
 			<header className="sidebar-header">
 				<div className="sidebar-logo">
 					<Logo size={32} />
+					<span className="sidebar-brand">Kolboo</span>
 				</div>
 			</header>
 
-			<nav className="sidebar-nav">
-				<Tooltip label="Home" position="right" withArrow>
-					<NavLink
-						leftSection={<Home size={20} />}
-						active={activeView === "home"}
-						onClick={() => onViewChange("home")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Settings" position="right" withArrow>
-					<NavLink
-						leftSection={<Settings size={20} />}
-						active={activeView === "settings"}
-						onClick={() => onViewChange("settings")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Stats" position="right" withArrow>
-					<NavLink
-						leftSection={<BarChart2 size={20} />}
-						active={activeView === "usage-stats"}
-						onClick={() => onViewChange("usage-stats")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Account" position="right" withArrow>
-					<NavLink
-						leftSection={<UserRound size={20} />}
-						active={activeView === "account"}
-						onClick={() => onViewChange("account")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
-				<Tooltip label="Logs" position="right" withArrow>
-					<NavLink
-						leftSection={<FileText size={20} />}
-						active={activeView === "logs"}
-						onClick={() => onViewChange("logs")}
-						variant="filled"
-						className="sidebar-nav-link"
-					/>
-				</Tooltip>
+			<nav className="sidebar-nav" aria-label="Main navigation">
+				{(
+					[
+						{ view: "home", label: "Home", icon: Home },
+						{
+							view: "transcribe-file",
+							label: "Transcribe file",
+							icon: FileAudio,
+						},
+						{ view: "settings", label: "Settings", icon: Settings },
+						{ view: "usage-stats", label: "Usage", icon: BarChart2 },
+						{ view: "account", label: "Account", icon: UserRound },
+						{ view: "logs", label: "Logs", icon: FileText },
+					] as const
+				).map(({ view, label, icon: Icon }) => (
+					<Tooltip key={view} label={label} position="right" withArrow>
+						<NavLink
+							component="button"
+							type="button"
+							label={label}
+							aria-label={label}
+							aria-current={activeView === view ? "page" : undefined}
+							leftSection={
+								<Icon size={20} strokeWidth={1.5} aria-hidden="true" />
+							}
+							active={activeView === view}
+							onClick={() => onViewChange(view)}
+							variant="filled"
+							className="sidebar-nav-link"
+						/>
+					</Tooltip>
+				))}
 			</nav>
 
 			<footer className="sidebar-footer">
@@ -219,510 +176,14 @@ function Sidebar({
 	);
 }
 
-function HotkeyDisplay({ config }: { config: HotkeyConfig | null }) {
-	if (!config) {
-		return <Kbd className="hotkey-placeholder">Unassigned</Kbd>;
-	}
-
-	const parts = [
-		...config.modifiers.map((m) => m.charAt(0).toUpperCase() + m.slice(1)),
-		config.key,
-	];
-
-	return (
-		<span className="kbd-combo">
-			{parts.map((part, index) => (
-				<span key={part}>
-					<Kbd>{part}</Kbd>
-					{index < parts.length - 1 && <span className="kbd-plus">+</span>}
-				</span>
-			))}
-		</span>
-	);
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: retained as a disabled design reference
-function InstructionsCard() {
-	const { data: settings } = useSettings();
-
-	const toggleHotkey = settings
-		? settings.toggle_hotkey
-		: DEFAULT_TOGGLE_HOTKEY;
-	const holdHotkey = settings ? settings.hold_hotkey : DEFAULT_HOLD_HOTKEY;
-	const pasteLastHotkey = settings
-		? settings.paste_last_hotkey
-		: DEFAULT_PASTE_LAST_HOTKEY;
-
-	return (
-		<div className="instructions-card animate-in">
-			<h2 className="instructions-card-title">Dictate with your voice</h2>
-			<div className="instructions-methods">
-				<div className="instruction-method">
-					<span className="instruction-label">Toggle:</span>
-					<HotkeyDisplay config={toggleHotkey} />
-					<span className="instruction-desc">Press to start/stop</span>
-				</div>
-				<div className="instruction-method">
-					<span className="instruction-label">Hold:</span>
-					<HotkeyDisplay config={holdHotkey} />
-					<span className="instruction-desc">Hold to record</span>
-				</div>
-				<div className="instruction-method">
-					<span className="instruction-label">Paste:</span>
-					<HotkeyDisplay config={pasteLastHotkey} />
-					<span className="instruction-desc">Paste last result</span>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
-	const homeHeaderRef = useRef<HTMLElement | null>(null);
-	const [homeHeaderHeight, setHomeHeaderHeight] = useState(0);
-
-	useLayoutEffect(() => {
-		const header = homeHeaderRef.current;
-		if (!header) return;
-
-		// Keep the History sticky bar aligned to the *actual* header height.
-		// The Home header is taller than other pages, so a guessed magic number
-		// will clip the History toolbar under it as soon as fonts/layout shift.
-		const updateHistoryStickyTop = () => {
-			// Preserve sub-pixel height instead of rounding up. Rounding can create
-			// a tiny visible seam between the page header and the sticky History bar.
-			const nextHeight = Number.parseFloat(
-				header.getBoundingClientRect().height.toFixed(2),
-			);
-			setHomeHeaderHeight((current) =>
-				current === nextHeight ? current : nextHeight,
-			);
-		};
-
-		updateHistoryStickyTop();
-
-		if (typeof ResizeObserver === "undefined") {
-			window.addEventListener("resize", updateHistoryStickyTop);
-			return () => {
-				window.removeEventListener("resize", updateHistoryStickyTop);
-			};
-		}
-
-		const observer = new ResizeObserver(() => {
-			updateHistoryStickyTop();
-		});
-		observer.observe(header);
-
-		return () => {
-			observer.disconnect();
-		};
-	}, []);
-
-	const homeStickyStyle = useMemo(
-		() =>
-			({
-				"--history-feed-sticky-top": `${homeHeaderHeight}px`,
-			}) as CSSProperties,
-		[homeHeaderHeight],
-	);
-
 	return (
-		<div className="main-content" style={homeStickyStyle}>
-			<header ref={homeHeaderRef} className="tv-page-header animate-in">
-				<Title order={1} mb={4}>
-					Welcome to Kolboo
-				</Title>
-				<Text c="dimmed" size="sm">
-					~-~-~-~-~-~
-				</Text>
-			</header>
-
-			<div className="main-content-inner">
-				{/* <InstructionsCard /> */}
+		<div className="main-content home-page">
+			<div className="main-content-inner page-content-start">
 				<MicStatusCard />
 				<HistoryFeed onJumpToLog={onJumpToLog} />
 				<RecordingBar />
 				<div aria-hidden="true" style={{ height: 80 }} />
-			</div>
-		</div>
-	);
-}
-
-function UsageStatsView() {
-	const [activeStatsTab, setActiveStatsTab] = useState<string>("cost");
-	const [timeframe, setTimeframe] = useState<CostTimeframe>("30d");
-	const [filtersOpened, setFiltersOpened] = useState(false);
-
-	const [statsKind, setStatsKind] = useState<StatsKindFilter>("all");
-	const [selectedSttModelKeys, setSelectedSttModelKeys] = useState<string[]>(
-		[],
-	);
-	const [selectedLlmModelKeys, setSelectedLlmModelKeys] = useState<string[]>(
-		[],
-	);
-
-	// Enabled by default: hide any calls we marked as free-tier.
-	const [excludeFreeTier, setExcludeFreeTier] = useState(true);
-
-	const timeframeOptions: Array<{ value: CostTimeframe; label: string }> = [
-		{ value: "24h", label: "Last 24 hours" },
-		{ value: "7d", label: "Last 7 days" },
-		{ value: "30d", label: "Last 30 days" },
-		{ value: "90d", label: "Last 90 days" },
-		{ value: "all", label: "All time" },
-	];
-
-	const sttModelOptions = listAllSttModelKeys();
-	const llmModelOptions = listAllLlmModelKeys();
-
-	const hasAnyModelFilter =
-		selectedSttModelKeys.length > 0 || selectedLlmModelKeys.length > 0;
-
-	const hasNonDefaultFilters =
-		statsKind !== "all" || hasAnyModelFilter || excludeFreeTier !== true;
-
-	return (
-		<div className="main-content">
-			<header className="tv-page-header animate-in">
-				<Group justify="space-between" align="center" wrap="wrap">
-					<Title order={1} mb={0}>
-						Stats
-					</Title>
-
-					<Group gap={8} align="center" wrap="nowrap">
-						<Popover
-							opened={filtersOpened}
-							onChange={setFiltersOpened}
-							position="bottom-start"
-							shadow="lg"
-							radius="md"
-						>
-							<Popover.Target>
-								<Indicator
-									disabled={!hasNonDefaultFilters}
-									size={8}
-									offset={3}
-									position="top-end"
-									color="orange"
-								>
-									<ActionIcon
-										variant="default"
-										size={36}
-										onClick={() => setFiltersOpened((v) => !v)}
-										title="Filters"
-										aria-label="Filters"
-										styles={{
-											root: {
-												backgroundColor: "var(--bg-elevated)",
-												borderColor: "var(--border-default)",
-											},
-										}}
-									>
-										<Filter size={16} />
-									</ActionIcon>
-								</Indicator>
-							</Popover.Target>
-
-							<Popover.Dropdown
-								p={0}
-								w={360}
-								styles={{
-									dropdown: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-									},
-								}}
-							>
-								<Group
-									justify="space-between"
-									align="center"
-									gap={8}
-									px="xs"
-									py={10}
-									wrap="nowrap"
-									style={{ minHeight: 32 }}
-								>
-									<Text size="xs" fw={700}>
-										Filters
-									</Text>
-									{hasNonDefaultFilters ? (
-										<Button
-											variant="subtle"
-											size="compact-xs"
-											color="gray"
-											onClick={() => {
-												setStatsKind("all");
-												setSelectedSttModelKeys([]);
-												setSelectedLlmModelKeys([]);
-												setExcludeFreeTier(true);
-											}}
-											styles={{ root: { height: 20, padding: "0 6px" } }}
-										>
-											Reset
-										</Button>
-									) : (
-										// Keep header height stable when Reset is hidden
-										<Box w={44} />
-									)}
-								</Group>
-
-								<Divider color="var(--border-default)" />
-
-								<Box p="xs">
-									<SegmentedControl
-										value={statsKind}
-										onChange={(value) => setStatsKind(value as StatsKindFilter)}
-										data={[
-											{ value: "all", label: "All" },
-											{ value: "stt", label: "STT" },
-											{ value: "llm", label: "LLM" },
-										]}
-										size="xs"
-										fullWidth
-									/>
-								</Box>
-
-								<Box px="xs" pb={10}>
-									<Checkbox
-										label={<Text size="xs">Exclude free tier</Text>}
-										size="xs"
-										checked={excludeFreeTier}
-										onChange={(e) =>
-											setExcludeFreeTier(e.currentTarget.checked)
-										}
-										styles={{
-											body: { alignItems: "center" },
-											label: {
-												color: "var(--text-primary)",
-												paddingLeft: 6,
-											},
-										}}
-									/>
-								</Box>
-
-								<Divider color="var(--border-default)" />
-
-								<Box px="xs" py={8}>
-									<Accordion
-										multiple
-										defaultValue={[]}
-										variant="separated"
-										radius="md"
-										chevronPosition="left"
-										styles={{
-											item: {
-												backgroundColor: "transparent",
-												border: "1px solid var(--border-default)",
-												overflow: "hidden",
-											},
-											control: {
-												backgroundColor: "transparent",
-												padding: "6px 10px",
-											},
-											chevron: {
-												color: "var(--text-muted)",
-											},
-											panel: {
-												padding: "0 10px 8px 10px",
-											},
-										}}
-									>
-										<Accordion.Item value="stt_models">
-											<Accordion.Control>
-												<Group justify="space-between" wrap="nowrap" w="100%">
-													<Text size="xs" fw={600}>
-														STT models
-													</Text>
-													{selectedSttModelKeys.length > 0 ? (
-														<Button
-															component="span"
-															role="button"
-															tabIndex={0}
-															variant="subtle"
-															size="compact-xs"
-															color="gray"
-															onClick={(e) => {
-																e.preventDefault();
-																e.stopPropagation();
-																setSelectedSttModelKeys([]);
-															}}
-															onKeyDown={(e) => {
-																if (e.key !== "Enter" && e.key !== " ") return;
-																e.preventDefault();
-																e.stopPropagation();
-																setSelectedSttModelKeys([]);
-															}}
-															styles={{
-																root: { height: 20, padding: "0 6px" },
-															}}
-														>
-															Reset
-														</Button>
-													) : null}
-												</Group>
-											</Accordion.Control>
-											<Accordion.Panel>
-												{sttModelOptions.length === 0 ? (
-													<Text c="dimmed" size="xs">
-														No models available.
-													</Text>
-												) : (
-													<ScrollArea.Autosize
-														mah={180}
-														type="auto"
-														offsetScrollbars
-													>
-														<Checkbox.Group
-															value={selectedSttModelKeys}
-															onChange={(next) => setSelectedSttModelKeys(next)}
-														>
-															<Stack gap={6}>
-																{sttModelOptions.map((opt) => (
-																	<Checkbox
-																		key={opt.key}
-																		value={opt.key}
-																		size="xs"
-																		label={<Text size="xs">{opt.label}</Text>}
-																		styles={{
-																			label: { width: "100%" },
-																			body: { alignItems: "center" },
-																		}}
-																	/>
-																))}
-															</Stack>
-														</Checkbox.Group>
-													</ScrollArea.Autosize>
-												)}
-											</Accordion.Panel>
-										</Accordion.Item>
-
-										<Accordion.Item value="llm_models">
-											<Accordion.Control>
-												<Group justify="space-between" wrap="nowrap" w="100%">
-													<Text size="xs" fw={600}>
-														LLM models
-													</Text>
-													{selectedLlmModelKeys.length > 0 ? (
-														<Button
-															component="span"
-															role="button"
-															tabIndex={0}
-															variant="subtle"
-															size="compact-xs"
-															color="gray"
-															onClick={(e) => {
-																e.preventDefault();
-																e.stopPropagation();
-																setSelectedLlmModelKeys([]);
-															}}
-															onKeyDown={(e) => {
-																if (e.key !== "Enter" && e.key !== " ") return;
-																e.preventDefault();
-																e.stopPropagation();
-																setSelectedLlmModelKeys([]);
-															}}
-															styles={{
-																root: { height: 20, padding: "0 6px" },
-															}}
-														>
-															Reset
-														</Button>
-													) : null}
-												</Group>
-											</Accordion.Control>
-											<Accordion.Panel>
-												{llmModelOptions.length === 0 ? (
-													<Text c="dimmed" size="xs">
-														No models available.
-													</Text>
-												) : (
-													<ScrollArea.Autosize
-														mah={180}
-														type="auto"
-														offsetScrollbars
-													>
-														<Checkbox.Group
-															value={selectedLlmModelKeys}
-															onChange={(next) => setSelectedLlmModelKeys(next)}
-														>
-															<Stack gap={6}>
-																{llmModelOptions.map((opt) => (
-																	<Checkbox
-																		key={opt.key}
-																		value={opt.key}
-																		size="xs"
-																		label={<Text size="xs">{opt.label}</Text>}
-																		styles={{
-																			label: { width: "100%" },
-																			body: { alignItems: "center" },
-																		}}
-																	/>
-																))}
-															</Stack>
-														</Checkbox.Group>
-													</ScrollArea.Autosize>
-												)}
-											</Accordion.Panel>
-										</Accordion.Item>
-									</Accordion>
-								</Box>
-							</Popover.Dropdown>
-						</Popover>
-
-						<Select
-							value={timeframe}
-							onChange={(value) => {
-								const next = (value ?? "30d") as CostTimeframe;
-								setTimeframe(next);
-							}}
-							data={timeframeOptions}
-							renderOption={({ option }) => option.label}
-							allowDeselect={false}
-							searchable={false}
-							w={220}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-								},
-								dropdown: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-								},
-								option: {
-									color: "var(--text-primary)",
-								},
-							}}
-						/>
-					</Group>
-				</Group>
-			</header>
-
-			<div className="main-content-inner">
-				<Tabs
-					value={activeStatsTab}
-					onChange={(value) => {
-						if (!value) return;
-						setActiveStatsTab(value);
-					}}
-					keepMounted={false}
-				>
-					<Tabs.List>
-						<Tabs.Tab value="cost">Cost</Tabs.Tab>
-					</Tabs.List>
-
-					<Tabs.Panel value="cost" pt="md">
-						<CostTab
-							timeframe={timeframe}
-							kind={statsKind}
-							sttModelKeys={selectedSttModelKeys}
-							llmModelKeys={selectedLlmModelKeys}
-							excludeFreeTier={excludeFreeTier}
-						/>
-					</Tabs.Panel>
-				</Tabs>
 			</div>
 		</div>
 	);
@@ -809,6 +270,9 @@ export default function App() {
 	);
 	const shouldShowTelemetryDisclosure =
 		!settingsGuideOpen && Boolean(settings) && !telemetryDisclosureResolved;
+
+	// The optional per-installation toggle does not govern aggregate counts.
+	const aggregateAnalyticsEnabled = telemetryDisclosureResolved;
 
 	// Keep the cost summary cache in sync even when the Stats view isn't mounted.
 	useEffect(() => {
@@ -964,6 +428,8 @@ export default function App() {
 						}}
 					/>
 				);
+			case "transcribe-file":
+				return null;
 			case "settings":
 				return (
 					<SettingsViewWithGuideLauncher
@@ -974,12 +440,10 @@ export default function App() {
 				);
 			case "logs":
 				return (
-					<div className="main-content">
-						<LogsView
-							jumpToLogId={logsJumpToId}
-							onJumpHandled={() => setLogsJumpToId(null)}
-						/>
-					</div>
+					<LogsView
+						jumpToLogId={logsJumpToId}
+						onJumpHandled={() => setLogsJumpToId(null)}
+					/>
 				);
 			case "usage-stats":
 				return <UsageStatsView />;
@@ -1011,6 +475,13 @@ export default function App() {
 
 	return (
 		<div className="app-layout">
+			<AggregateAnalyticsBridge
+				enabled={aggregateAnalyticsEnabled}
+				page={activeView}
+			/>
+			<a className="skip-navigation" href="#main-content">
+				Skip to content
+			</a>
 			<AccentColorSync />
 			<Sidebar
 				activeView={activeView}
@@ -1022,7 +493,18 @@ export default function App() {
 					}
 				}}
 			/>
-			{renderView()}
+			<main id="main-content" className="app-page" tabIndex={-1}>
+				{renderView()}
+				<div
+					className="retained-page"
+					hidden={activeView !== "transcribe-file"}
+				>
+					<FileTranscription
+						active={activeView === "transcribe-file"}
+						onOpenHistory={() => setActiveView("home")}
+					/>
+				</div>
+			</main>
 
 			<SettingsGuideOverlay
 				opened={settingsGuideOpen}
@@ -1041,17 +523,14 @@ export default function App() {
 
 			<TelemetryDisclosureModal
 				opened={shouldShowTelemetryDisclosure}
-				analyticsEnabled={settings?.posthog_analytics_enabled ?? true}
 				analyticsPolicyEnforced={analyticsPolicy.enforced}
 				analyticsPolicyReason={analyticsPolicy.reason}
 				loading={resolveTelemetryDisclosure.isPending}
 				onDisableAnalytics={() => {
 					resolveTelemetryDisclosure.mutate(false);
 				}}
-				onContinue={() => {
-					resolveTelemetryDisclosure.mutate(
-						settings?.posthog_analytics_enabled ?? true,
-					);
+				onAllowAnalytics={() => {
+					resolveTelemetryDisclosure.mutate(true);
 				}}
 			/>
 		</div>

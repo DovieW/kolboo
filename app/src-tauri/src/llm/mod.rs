@@ -175,6 +175,7 @@ impl Default for LlmRegistry {
 /// Configuration for LLM formatting
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
+    pub custom_providers: Vec<crate::custom_providers::CustomProvider>,
     /// Whether LLM formatting is enabled
     pub enabled: bool,
     /// The provider to use (openai, anthropic, ollama)
@@ -335,6 +336,7 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            custom_providers: Vec::new(),
             provider: "openai".to_string(),
             api_key: String::new(),
             model: None,

@@ -62,7 +62,7 @@ body {
 	filter: blur(1px);
 }
 
-/* The overlay window resizes between 56x56 (collapsed) and 224x56 (expanded).
+/* The overlay window resizes between 48x48 (collapsed) and 200x48 (expanded).
  * We keep a full-window stage that centers the active button so expansion
  * grows from the same visual anchor (no "missing right wall" intermediate). */
 .overlay-stage {
@@ -82,13 +82,15 @@ body {
 
 .overlay-button {
 	box-sizing: border-box;
+	position: relative;
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 10px 12px;
-	border-radius: 16px;
+	gap: 6px;
+	padding: 8px 10px;
+	border-radius: 14px;
 	border: 1px solid rgba(255, 255, 255, 0.08);
-	background: rgba(10, 10, 10, 0.97);
+	background: rgb(10, 10, 10);
+	opacity: 0.98;
 	color: #fff;
 	cursor: pointer;
 	user-select: none;
@@ -110,17 +112,17 @@ body {
 
 /* Collapsed: logo-only pill */
 .overlay-button--collapsed {
-	width: 56px;
-	height: 56px;
-	padding: 10px;
+	width: 48px;
+	height: 48px;
+	padding: 8px;
 	gap: 0;
 	justify-content: center;
 }
 
-/* Expanded: indicator + waveform (meta only shown on error) */
+/* Expanded: waveform, with a status icon only for errors. */
 .overlay-button--expanded {
-	width: 224px;
-	height: 56px;
+	width: 200px;
+	height: 48px;
 }
 
 .overlay-pill--close {
@@ -139,13 +141,17 @@ body {
 	 * When the overlay is busy (transcribing/rewriting) we disable the button to
 	 * avoid accidental clicks, but we don't want the widget to visually dim.
 	 */
-	opacity: 1;
+	opacity: 0.98;
 	cursor: wait;
 }
 
+.overlay-button[data-error="true"] {
+	background: rgb(127, 29, 29);
+}
+
 .overlay-icon {
-	width: 36px;
-	height: 36px;
+	width: 32px;
+	height: 32px;
 	display: grid;
 	place-items: center;
 	flex: 0 0 auto;
@@ -157,30 +163,8 @@ body {
 	width: 10px;
 	height: 10px;
 	border-radius: 999px;
-	background: rgba(239, 68, 68, 0.95);
-	box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
-}
-
-.overlay-dot[data-state="processing"],
-.overlay-dot[data-state="idle"] {
 	background: rgba(156, 163, 175, 0.92);
 	box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.16);
-}
-
-.overlay-dot[data-state="recording"] {
-	animation: overlay-dot-pulse 1.1s ease-in-out infinite;
-}
-
-@keyframes overlay-dot-pulse {
-	0%,
-	100% {
-		transform: scale(0.96);
-		opacity: 0.88;
-	}
-	50% {
-		transform: scale(1);
-		opacity: 1;
-	}
 }
 
 .overlay-center {
@@ -190,7 +174,7 @@ body {
 	align-items: center;
 	justify-content: center;
 	overflow: hidden;
-	padding: 0 4px;
+	padding: 0;
 	/* expand/collapse animation disabled (see .overlay-button note) */
 }
 
@@ -205,6 +189,16 @@ body {
 	align-items: center;
 	gap: 8px;
 	/* expand/collapse animation disabled (see .overlay-button note) */
+}
+
+.overlay-meta:empty {
+	display: none;
+}
+
+/* OCR remains at the edge without pulling the recording wave off center. */
+.overlay-meta--ocr {
+	position: absolute;
+	right: 10px;
 }
 
 .overlay-button--collapsed .overlay-center,
@@ -307,13 +301,57 @@ body {
 
 .overlay-wave {
 	width: 100%;
-	max-width: 168px;
+	max-width: 160px;
 	height: 24px;
 	display: block;
 }
 
+.overlay-button--expanded[data-has-ocr="true"] .overlay-wave,
+.overlay-button--expanded[data-has-ocr="true"] .overlay-phase-text {
+	max-width: 112px;
+}
+
 .overlay-wave--arming {
 	opacity: 0.6;
+}
+
+.overlay-wave--processing .overlay-wave-base {
+	opacity: 0.2;
+}
+
+.overlay-wave-pulse {
+	transform-box: fill-box;
+	transform-origin: center;
+	transform: scaleY(0.08);
+	opacity: 0;
+	animation: overlay-wave-pulse 2.3s ease-in-out infinite;
+}
+
+@keyframes overlay-wave-pulse {
+	24%,
+	100% {
+		transform: scaleY(0.08);
+		opacity: 0;
+	}
+	0%,
+	16% {
+		transform: scaleY(0.16);
+		opacity: 0.28;
+	}
+	8% {
+		transform: scaleY(0.42);
+		opacity: 0.55;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.overlay-wave-pulse {
+		animation: none;
+		opacity: 0;
+	}
+	.overlay-wave--processing .overlay-wave-base {
+		opacity: 0.45;
+	}
 }
 
 /* Hover-revealed preset controls (separate hover window).

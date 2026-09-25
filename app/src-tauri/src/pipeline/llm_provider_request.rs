@@ -72,12 +72,14 @@ impl OneOffLlmProviderRequest {
         &self,
         base_config: &LlmConfig,
         llm_api_keys: &HashMap<String, String>,
+        proxy_settings: &crate::settings::ProxySettings,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
         create_one_off_llm_provider_unstructured(
             base_config,
             llm_api_keys,
             self.provider_id.as_str(),
             self.params.clone(),
+            proxy_settings,
         )
     }
 
@@ -86,6 +88,7 @@ impl OneOffLlmProviderRequest {
         &self,
         base_config: &LlmConfig,
         llm_api_keys: &HashMap<String, String>,
+        proxy_settings: &crate::settings::ProxySettings,
         request_log_store: Option<RequestLogStore>,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
         create_one_off_llm_provider_without_timeout(
@@ -93,6 +96,7 @@ impl OneOffLlmProviderRequest {
             llm_api_keys,
             self.provider_id.as_str(),
             self.params.clone(),
+            proxy_settings,
             request_log_store,
         )
     }

@@ -52,6 +52,7 @@ import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
 	normalizeOverlayMonitorTarget,
+	normalizePasteShortcut,
 	normalizePlayingAudioHandling,
 	normalizePolicyEnforcedFields,
 	normalizePolicySource,
@@ -88,6 +89,7 @@ import type {
 	OutputMode,
 	OverlayMode,
 	OverlayMonitorTarget,
+	PasteShortcut,
 	PlayingAudioHandling,
 	PolicyState,
 	ProxySettings,
@@ -810,6 +812,9 @@ export const tauriSettingsAPI = {
 				(await store.get<WidgetPosition>("widget_position")) ??
 				DEFAULT_SETTINGS_VALUES.widget_position,
 			output_mode: normalizeOutputMode(await store.get("output_mode")),
+			output_paste_shortcut:
+				normalizePasteShortcut(await store.get("output_paste_shortcut")) ??
+				DEFAULT_SETTINGS_VALUES.output_paste_shortcut,
 			output_hit_enter: await readSettingValue(
 				"output_hit_enter",
 				DEFAULT_SETTINGS_VALUES.output_hit_enter,
@@ -1521,6 +1526,9 @@ export const tauriSettingsAPI = {
 
 	async updateOutputMode(mode: OutputMode): Promise<void> {
 		await applySettingsPatch({ patch: { output_mode: mode } });
+	},
+	async updateOutputPasteShortcut(shortcut: PasteShortcut): Promise<void> {
+		await applySettingsPatch({ patch: { output_paste_shortcut: shortcut } });
 	},
 
 	async updateOutputHitEnter(enabled: boolean): Promise<void> {

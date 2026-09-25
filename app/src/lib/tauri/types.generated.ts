@@ -50,6 +50,7 @@ export interface AvailableProvidersResponse {
 export interface ProviderInfo {
   is_local: boolean;
   label: string;
+  models?: string[] | null;
   value: string;
 }
 /**
@@ -100,6 +101,15 @@ export interface CostSummaryResponse {
   total_usd_micros: number;
 }
 
+// From: custom-provider.schema.json
+export interface CustomProvider {
+  base_url: string;
+  id: string;
+  llm_models: string[];
+  name: string;
+  stt_models: string[];
+}
+
 // From: data-storage-summary.schema.json
 export interface DataStorageSummary {
   api_keys_set_count: number;
@@ -121,6 +131,39 @@ export interface DefaultSectionsResponse {
   system: string;
 }
 
+// From: file-import-result.schema.json
+/**
+ * Import preparation and uploads share one owner, so F3 or another command cannot replace the job or its cancellation token between stages.
+ */
+export interface FileImportResult {
+  message?: string | null;
+  recovery_id?: string | null;
+  transcription_complete: boolean;
+}
+
+// From: history-activity.schema.json
+export interface HistoryActivity {
+  days: ActivityDay[];
+  models: ActivityModel[];
+  totals: ActivityTotals;
+}
+export interface ActivityDay {
+  date: string;
+  totals: ActivityTotals;
+}
+export interface ActivityTotals {
+  audio_seconds: number;
+  meetings: number;
+  recordings: number;
+  timed_recordings: number;
+  words: number;
+}
+export interface ActivityModel {
+  model: string;
+  provider: string;
+  totals: ActivityTotals;
+}
+
 // From: history-changed.schema.json
 export type Null = null;
 
@@ -140,43 +183,28 @@ export interface HistoryDeleteResult {
   deleted_recording: boolean;
 }
 
-// From: history-page-query.schema.json
-export interface HistoryPageQuery {
-  filterText?: string | null;
-  /**
-   * When true, include per-model usage counts in the response.
-   */
-  includeUsageCounts?: boolean | null;
-  /**
-   * 1-based page index.
-   */
-  page?: number | null;
-  pageSize?: number | null;
-  selectedLlmModelKeys?: string[] | null;
-  selectedSttModelKeys?: string[] | null;
-  showEmptyTranscript?: boolean | null;
-  showFailed?: boolean | null;
-}
-
-// From: history-page-result.schema.json
+// From: history-detail.schema.json
+export type RecordingMode = "dictation" | "meeting";
 /**
  * Status of a transcription attempt in history.
  */
 export type HistoryStatus = "in_progress" | "success" | "error";
 
-export interface HistoryPageResult {
-  items: HistoryEntry[];
-  llmModelUsage: ModelUsageCount[];
-  page: number;
-  pageSize: number;
-  sttModelUsage: ModelUsageCount[];
-  totalAll: number;
-  totalFiltered: number;
+export interface HistoryDetail {
+  /**
+   * Preserve an unreadable correction file rather than overwriting it.
+   */
+  edit_error?: string | null;
+  edited: boolean;
+  entry: HistoryEntry;
+  original_text: string;
+  revision: number;
 }
 /**
  * A single dictation history entry
  */
 export interface HistoryEntry {
+  duration_seconds?: number | null;
   error_message?: string | null;
   id: string;
   /**
@@ -187,6 +215,7 @@ export interface HistoryEntry {
    * LLM provider used for rewriting (if enabled).
    */
   llm_provider?: string | null;
+  original_stt_text?: string | null;
   /**
    * Preset id selected for this transcription (if any).
    *
@@ -208,6 +237,10 @@ export interface HistoryEntry {
    */
   profile_name?: string | null;
   /**
+   * Optional original recording metadata, never realigned to manual edits.
+   */
+  recording_mode?: RecordingMode | null;
+  /**
    * Request id of the WAV recording to use for playback/rerun.
    *
    * - For "normal" requests this will typically equal `id` (when a recording was saved). - For reruns/retries, this should point to the original request id that owns the WAV.
@@ -215,6 +248,7 @@ export interface HistoryEntry {
    * When `None`, no recording is known/available for this entry.
    */
   recording_request_id?: string | null;
+  speaker_segments?: SpeakerSegment[];
   status?: HistoryStatus & string;
   /**
    * STT model used for this transcription.
@@ -226,6 +260,83 @@ export interface HistoryEntry {
   stt_provider?: string | null;
   text: string;
   timestamp: string;
+  title?: string | null;
+}
+export interface SpeakerSegment {
+  end_seconds: number;
+  /**
+   * Speaker identity is local to this upload, not the whole meeting.
+   */
+  part: number;
+  speaker: string;
+  start_seconds: number;
+  text: string;
+}
+
+// From: history-edit-input.schema.json
+export interface HistoryEditInput {
+  expected_revision: number;
+  id: string;
+  text?: string | null;
+  title?: string | null;
+}
+
+// From: history-edit.schema.json
+export interface HistoryEdit {
+  revision: number;
+  text?: string | null;
+  title?: string | null;
+}
+
+// From: history-page-query.schema.json
+export interface HistoryPageQuery {
+  filterText?: string | null;
+  /**
+   * When true, include per-model usage counts in the response.
+   */
+  includeUsageCounts?: boolean | null;
+  /**
+   * 1-based page index.
+   */
+  page?: number | null;
+  pageSize?: number | null;
+  selectedLlmModelKeys?: string[] | null;
+  selectedSttModelKeys?: string[] | null;
+  showEmptyTranscript?: boolean | null;
+  showFailed?: boolean | null;
+}
+
+// From: history-page-result.schema.json
+export interface HistoryPageResult {
+  items: HistorySummary[];
+  llmModelUsage: ModelUsageCount[];
+  page: number;
+  pageSize: number;
+  sttModelUsage: ModelUsageCount[];
+  totalAll: number;
+  totalFiltered: number;
+}
+/**
+ * List contract: text is a bounded preview, never the full document. Original STT and speaker metadata are intentionally only available through detail.
+ */
+export interface HistorySummary {
+  duration_seconds?: number | null;
+  error_message?: string | null;
+  id: string;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  preset_id?: string | null;
+  preset_name?: string | null;
+  profile_id?: string | null;
+  profile_name?: string | null;
+  recording_mode?: RecordingMode | null;
+  recording_request_id?: string | null;
+  status: HistoryStatus;
+  stt_model?: string | null;
+  stt_provider?: string | null;
+  text: string;
+  timestamp: string;
+  title?: string | null;
 }
 export interface ModelUsageCount {
   count: number;
@@ -478,6 +589,26 @@ export interface QuickAskStartedPayload {
   model?: string | null;
   provider?: string | null;
   question?: string | null;
+}
+
+// From: recording-preferences.schema.json
+export interface RecordingPreferences {
+  meeting_model?: MeetingModel | null;
+  mode?: RecordingMode & string;
+}
+export interface MeetingModel {
+  model: string;
+  provider: string;
+  use_managed?: boolean;
+}
+
+// From: recording-waveform.schema.json
+export interface RecordingWaveform {
+  duration_seconds: number;
+  /**
+   * Interleaved minimum and maximum amplitude, normalized to [-1, 1].
+   */
+  peaks: number[];
 }
 
 // From: recordings-stats.schema.json
@@ -950,6 +1081,7 @@ export interface RewriteProgramPromptProfile {
   openai_reasoning_effort?: string | null;
   output_hit_enter?: boolean | null;
   output_mode?: string | null;
+  output_paste_shortcut?: string | null;
   overlay_mode?: string | null;
   playing_audio_handling?: string | null;
   presets?: RewritePreset[];

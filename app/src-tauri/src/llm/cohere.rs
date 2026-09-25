@@ -27,6 +27,7 @@ pub struct CohereLlmProvider {
 }
 
 impl CohereLlmProvider {
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
@@ -38,6 +39,7 @@ impl CohereLlmProvider {
         }
     }
 
+    #[cfg(test)]
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             model,

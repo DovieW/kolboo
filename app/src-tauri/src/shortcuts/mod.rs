@@ -306,7 +306,7 @@ async fn set_escape_cancel_shortcut_enabled_inner(app: &AppHandle, enabled: bool
     let quick_ask_visible = is_quick_ask_visible(app);
     let pipeline_can_cancel = app
         .try_state::<pipeline::SharedPipeline>()
-        .map(|p| p.state().can_cancel())
+        .map(|p| p.state().can_cancel() || p.is_recovering())
         .unwrap_or(false);
     let should_enable = enabled || pipeline_can_cancel || quick_ask_visible;
 
@@ -369,7 +369,8 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     // when cancelling during transcription).
     let pipeline = app.try_state::<pipeline::SharedPipeline>();
     let pipeline_state = pipeline.as_ref().map(|p| p.state());
-    let can_cancel = pipeline_state.map(|s| s.can_cancel()).unwrap_or(false);
+    let can_cancel = pipeline_state.map(|s| s.can_cancel()).unwrap_or(false)
+        || pipeline.as_ref().is_some_and(|p| p.is_recovering());
 
     if !can_cancel {
         // Defensive: if we somehow still have the shortcut registered while idle, disable it.
@@ -452,9 +453,12 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
     }
 
     // Cancel pipeline
-    if let Some(pipeline) = pipeline {
+    let cancellation_failed = if let Some(pipeline) = pipeline {
         pipeline.cancel();
-    }
+        pipeline.is_error()
+    } else {
+        false
+    };
 
     // Hide overlay if in recording-only mode.
     let overlay_mode: String =
@@ -490,7 +494,10 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
                     current_epoch,
                     pipeline_state
                 );
-                if current_mode == "recording_only" && current_epoch == expected_epoch {
+                if current_mode == "recording_only"
+                    && current_epoch == expected_epoch
+                    && crate::overlay::may_hide(&current_mode, pipeline_state)
+                {
                     let visible_before = window_clone.is_visible().ok();
                     log::debug!(
                         "[overlay] shortcut-cancel fallback hide firing (visible_before={:?})",
@@ -504,10 +511,18 @@ pub(crate) fn cancel_pipeline_session(app: &AppHandle, source: &str) {
 
     // Notify frontend
     let _ = app.emit(events::EVENT_PIPELINE_CANCELLED, ());
-    let _ = app.emit(
-        events::EVENT_PIPELINE_STATE_CHANGED,
-        PipelineStateEvent::Idle,
-    );
+    if cancellation_failed {
+        crate::recording_completion::emit_pipeline_error(
+            app,
+            "Capture stopped, but some audio could not be saved. Check Saved recordings before starting again. If capture did not shut down, restart Kolboo first.",
+            active_request_id.as_deref(),
+        );
+    } else {
+        let _ = app.emit(
+            events::EVENT_PIPELINE_STATE_CHANGED,
+            PipelineStateEvent::Idle,
+        );
+    }
 
     // Disable Escape shortcut now that we're idle.
     set_escape_cancel_shortcut_enabled(app, false);

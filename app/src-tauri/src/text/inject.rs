@@ -7,7 +7,9 @@ use std::time::Duration;
 use crate::text::clipboard::{
     set_clipboard_text_with_barrier, set_output_clipboard_text, ClipboardRestoreGuard,
 };
-use crate::text::key_inject::{release_common_modifiers_best_effort, with_pressed_key};
+use crate::text::key_inject::{
+    release_common_modifiers_best_effort, send_paste_shortcut, PasteShortcut,
+};
 #[cfg(desktop)]
 use tauri::AppHandle;
 #[cfg(desktop)]
@@ -84,12 +86,6 @@ impl OutputMode {
     }
 }
 
-/// Output text based on the specified mode
-#[allow(dead_code)]
-pub fn output_text_with_mode(text: &str, mode: OutputMode, hit_enter: bool) -> Result<(), String> {
-    output_text_with_mode_options(text, mode, hit_enter, true)
-}
-
 /// Output text with explicit control over whether we read/restore the previous clipboard.
 ///
 /// - When `preserve_clipboard` is true, Paste mode will save+restore the previous *text* clipboard
@@ -100,14 +96,17 @@ pub fn output_text_with_mode_options(
     mode: OutputMode,
     hit_enter: bool,
     preserve_clipboard: bool,
+    shortcut: PasteShortcut,
 ) -> Result<(), String> {
     let _guard = output_injection_lock()
         .lock()
         .map_err(|_| "Output lock poisoned".to_string())?;
 
     match mode {
-        OutputMode::Paste => type_text_blocking_with_options(text, hit_enter, preserve_clipboard),
-        OutputMode::PasteAndClipboard => paste_and_keep_clipboard(text, hit_enter),
+        OutputMode::Paste => {
+            type_text_blocking_with_options(text, hit_enter, preserve_clipboard, shortcut)
+        }
+        OutputMode::PasteAndClipboard => paste_and_keep_clipboard(text, hit_enter, shortcut),
         OutputMode::Clipboard => copy_to_clipboard(text),
     }
 }
@@ -125,6 +124,7 @@ pub(crate) fn output_text_with_app(
     mode: OutputMode,
     hit_enter: bool,
     preserve_clipboard: bool,
+    shortcut: PasteShortcut,
 ) -> Result<OutputDelivery, String> {
     let automatic_insertion_requested = !matches!(mode, OutputMode::Clipboard);
     if crate::platform_capabilities::should_use_clipboard_fallback(automatic_insertion_requested) {
@@ -143,51 +143,27 @@ pub(crate) fn output_text_with_app(
         return Ok(OutputDelivery::ClipboardFallback);
     }
 
-    output_text_with_mode_options(text, mode, hit_enter, preserve_clipboard)?;
+    output_text_with_mode_options(text, mode, hit_enter, preserve_clipboard, shortcut)?;
     Ok(OutputDelivery::RequestedMode)
 }
 
 /// Copy text to clipboard and paste, keeping text in clipboard (no restore)
-pub fn paste_and_keep_clipboard(text: &str, hit_enter: bool) -> Result<(), String> {
+pub fn paste_and_keep_clipboard(
+    text: &str,
+    hit_enter: bool,
+    shortcut: PasteShortcut,
+) -> Result<(), String> {
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
-    // Set new text and wait for it to become visible to readers (best-effort).
+    // Verify the new clipboard text before sending a paste keystroke.
     // Even when we keep the text on the clipboard, avoid adding it to Win+V history.
     set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
 
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
 
-    #[cfg(target_os = "macos")]
-    let modifier = Key::Meta;
-    #[cfg(not(target_os = "macos"))]
-    let modifier = Key::Control;
-
-    let result = with_pressed_key(&mut enigo, modifier, |enigo| {
-        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-
-        #[cfg(target_os = "windows")]
-        {
-            // Physical 'V' key (scancode set 1). More reliable for modifier shortcuts.
-            const SCANCODE_V: u16 = 0x2F;
-            enigo
-                .raw(SCANCODE_V, Direction::Press)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(30));
-            enigo
-                .raw(SCANCODE_V, Direction::Release)
-                .map_err(|e| e.to_string())?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            enigo
-                .key(Key::Unicode('v'), Direction::Click)
-                .map_err(|e| e.to_string())?;
-        }
-
-        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-        Ok(())
+    let result = send_paste_shortcut(&mut enigo, shortcut, &mut |ms| {
+        thread::sleep(Duration::from_millis(ms));
     });
 
     // Extra safety: try to ensure no modifiers remain logically held down.
@@ -242,16 +218,11 @@ pub fn type_text_as_keystrokes(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Type text using clipboard and paste. Used internally by shortcut handlers.
-#[cfg(not(target_os = "windows"))]
-pub fn type_text_blocking(text: &str, hit_enter: bool) -> Result<(), String> {
-    type_text_blocking_with_options(text, hit_enter, true)
-}
-
 pub fn type_text_blocking_with_options(
     text: &str,
     hit_enter: bool,
     preserve_clipboard: bool,
+    shortcut: PasteShortcut,
 ) -> Result<(), String> {
     // KDE may return from the synthetic key request before a first-use Wayland input-control
     // approval has completed. Keep the new transcript available until the compositor eventually
@@ -301,36 +272,8 @@ pub fn type_text_blocking_with_options(
     // Simulate Ctrl+V / Cmd+V
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
 
-    #[cfg(target_os = "macos")]
-    let modifier = Key::Meta;
-    #[cfg(not(target_os = "macos"))]
-    let modifier = Key::Control;
-
-    let result = with_pressed_key(&mut enigo, modifier, |enigo| {
-        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-
-        #[cfg(target_os = "windows")]
-        {
-            // Physical 'V' key (scancode set 1). More reliable for modifier shortcuts.
-            const SCANCODE_V: u16 = 0x2F;
-            enigo
-                .raw(SCANCODE_V, Direction::Press)
-                .map_err(|e| e.to_string())?;
-            thread::sleep(Duration::from_millis(30));
-            enigo
-                .raw(SCANCODE_V, Direction::Release)
-                .map_err(|e| e.to_string())?;
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            enigo
-                .key(Key::Unicode('v'), Direction::Click)
-                .map_err(|e| e.to_string())?;
-        }
-
-        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS));
-        Ok(())
+    let result = send_paste_shortcut(&mut enigo, shortcut, &mut |ms| {
+        thread::sleep(Duration::from_millis(ms));
     });
 
     // Extra safety: try to ensure no modifiers remain logically held down.

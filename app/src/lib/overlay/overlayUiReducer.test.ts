@@ -87,6 +87,9 @@ describe("overlayUiReducer", () => {
 			next: "exit",
 		});
 		expect(next.animState).toBe("exit");
+		expect(overlayUiReducer(next, { type: "ANIM_SET", next: "exit" })).toBe(
+			next,
+		);
 	});
 
 	it("ignores stale poll right after event update", () => {

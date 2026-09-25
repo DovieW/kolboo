@@ -3,9 +3,6 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
-/// Delay after clipboard operations to ensure system stability
-const CLIPBOARD_STABILIZATION_DELAY_MS: u64 = 50;
-
 /// How many times we try to confirm the clipboard contains our injected text.
 ///
 /// This mitigates a race where we press Ctrl+V before the clipboard update is fully visible
@@ -55,25 +52,25 @@ pub fn set_clipboard_text_with_barrier(
 ) -> Result<(), String> {
     set_clipboard_text_platform(clipboard, text, exclude_from_clipboard_history)?;
 
-    // Try to confirm the clipboard reflects the new text before we issue Ctrl+V.
-    // If reading fails (clipboard is busy), keep retrying briefly.
-    for _ in 0..CLIPBOARD_VERIFY_ATTEMPTS {
-        thread::sleep(Duration::from_millis(CLIPBOARD_VERIFY_DELAY_MS));
-        match clipboard.get_text() {
-            Ok(current) if current == text => return Ok(()),
-            Ok(_) => continue,
-            Err(_) => continue,
+    verify_clipboard_text(text, || clipboard.get_text().ok(), thread::sleep)
+}
+
+fn verify_clipboard_text(
+    text: &str,
+    mut read: impl FnMut() -> Option<String>,
+    mut wait: impl FnMut(Duration),
+) -> Result<(), String> {
+    // Read immediately. Only a busy/stale clipboard needs the bounded delay.
+    for attempt in 0..CLIPBOARD_VERIFY_ATTEMPTS {
+        if attempt > 0 {
+            wait(Duration::from_millis(CLIPBOARD_VERIFY_DELAY_MS));
+        }
+        if read().as_deref() == Some(text) {
+            return Ok(());
         }
     }
-
-    // Fall back to a small stabilization delay. Even if verification failed,
-    // the clipboard write may still succeed; this avoids making failure worse.
-    thread::sleep(Duration::from_millis(CLIPBOARD_STABILIZATION_DELAY_MS));
-    log::debug!(
-        "Clipboard barrier: could not confirm clipboard contents after {} attempts; proceeding",
-        CLIPBOARD_VERIFY_ATTEMPTS
-    );
-    Ok(())
+    // Never paste old clipboard contents just because the write API succeeded.
+    Err("Clipboard update could not be verified. Copy the transcript from History.".into())
 }
 
 pub fn set_clipboard_text_platform(
@@ -206,3 +203,7 @@ impl Drop for ClipboardRestoreGuard {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "clipboard/tests.rs"]
+mod verification_tests;

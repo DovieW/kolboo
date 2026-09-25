@@ -36,10 +36,10 @@ export function LogsSystemEventsPanel({
 			<Stack gap="sm">
 				<Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
 					<Stack gap={2}>
-						<Text fw={600}>System Events</Text>
+						<Text fw={600}>Live diagnostics</Text>
 						<Text size="sm" c="dimmed">
-							Live frontend events stay local to this view for debugging.
-							Request logs below remain backend-owned and already sanitized.
+							Local events from this session. Hotkey debug turns off when you
+							leave Logs.
 						</Text>
 					</Stack>
 					<Group gap="xs" wrap="wrap">

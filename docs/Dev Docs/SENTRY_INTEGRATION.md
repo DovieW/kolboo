@@ -1,8 +1,77 @@
 # Sentry Integration (Kolboo)
 
-Last updated: 2026-05-29
+Last updated: 2026-09-24
 
-This document captures current Sentry research notes, implementation decisions, and operating guidance for the private `kolboo` desktop app. Sentry reliability work remains active while repository publication is deferred.
+This document covers desktop error reporting and release operations. Historical
+rehearsals below are evidence for their named builds, not a substitute for
+verifying the next packaged release.
+
+## Release readiness and notifications
+
+The desktop reports UI exceptions (including React 19 root failures) and Rust
+panics. This is not a native crash handler: segmentation faults, aborts, OOM
+kills, hangs, and every handled provider/device failure are **not** automatically
+captured. Do not claim complete crash coverage or crash-free-session metrics.
+
+CI uses `.github/scripts/configure-desktop-sentry.mjs` for all three platforms:
+
+| Build | Project | Environment | Release |
+| --- | --- | --- | --- |
+| Prerelease tag | `kolboo-public-dev` | `beta` | `kolboo@<tag version>` |
+| Stable tag | `kolboo-public-prod` | `production` | `kolboo@<tag version>` |
+| Branch/manual development | `kolboo-public-dev` | `development` | `kolboo@<version>-dev.<sha>` |
+
+The ad-hoc macOS workflow always remains development-only, including a manual
+run against a tag. The runtime DSN is compiled into Rust on Windows, macOS and
+Linux; frontend runtime config comes from the same values. Both sides use the
+same release as the uploaded source maps. A missing DSN still leaves local
+development cloud-free. Development builds no longer masquerade as betas.
+
+Repository variables `SENTRY_PUBLIC_DEV_DSN` and `SENTRY_PUBLIC_PROD_DSN` contain
+the **existing public ingestion addresses**, not administrative credentials.
+They were verified against their projects and configured on 2026-09-24. The old
+`TAURI_SENTRY_DSN` secret remains a development-only compatibility fallback.
+The script checks the project ID in each DSN and rejects mismatched routing.
+Tag builds require both the correct DSN and the existing `SENTRY_AUTH_TOKEN`
+upload secret. Never embed that upload token in the application.
+
+CI release builds retain Rust line tables (`CARGO_PROFILE_RELEASE_DEBUG=1`) and
+upload the exact executable/PDB/dSYM through `upload-desktop-symbols.mjs`. This
+uses the new `sentry` CLI, pinned to 0.45.0 with verified platform checksums;
+it rejects artifacts without debug information and waits for processing.
+Windows uploads each feature variant before the next build can replace it.
+macOS explicitly requests packed debug information. Only compiler artifacts
+are uploaded, never customer recordings, logs or settings. Local dev profiles
+are unchanged. The updated cross-platform upload steps still require their
+next real CI build to prove native symbolication on those artifacts.
+
+Live alert rules in `dov-weinstock`, verified 2026-09-24:
+
+- `6059405`: **Kolboo desktop: new or regressed beta errors**, public-dev,
+  environment `beta`.
+- `6059404`: **Kolboo desktop: new or regressed release errors**, public-prod.
+  This project is reserved for stable releases. No production environment had
+  been ingested at setup time, so the rule is project-scoped rather than bound
+  to a nonexistent environment.
+- Both match new/regressed issues at error or fatal level, email the existing
+  owner account directly, and throttle repeats for 30 minutes. Existing default
+  alerts were left intact. No Slack, pager, billing, or Seer configuration changed.
+
+The content-free CLI test event `4c1370d28f2747a4b3f7abe790bcec25`, release
+`kolboo@sentry-alert-check-20260924`, was received in beta with no ingestion
+errors. Rule `6059405` recorded `lastTriggered=2026-09-24T11:37:07.435995Z`.
+The owner then confirmed the matching event ID in the received email, proving
+the beta ingestion → rule → inbox path. This does **not** verify the next
+application's transport or native symbols. No synthetic production event was sent.
+An actual previous-beta overlay event (`cb88c4f6276648c6ab8d98509ff12547`)
+also has uploaded source files/maps matching its debug IDs.
+
+Use the new CLI with explicit targets; it may also have access to unrelated
+organizations. Use interactive OAuth, not newly generated API keys. Reading
+projects needs read scopes; saving the current workflow-based alerts also needs
+`org:write`. Never print authentication tokens. A CLI-generated test event must
+use `--no-environ`, contain no customer content, and stay in a non-production
+project. A successful flush alone is not a delivery receipt.
 
 Canonical-plan note:
 
@@ -111,36 +180,62 @@ Do **not** capture:
 
 Current protections:
 
-- redaction helper in `app/src/lib/telemetry/sentry.ts`
-- event sanitation in `beforeSend`
-- network breadcrumbs filtered (`xhr`/`fetch`)
-- React 19 root hooks capture renderer failures without adding replay/autocapture
-- license telemetry context redaction in both TS and Rust helper paths
-- backend `before_send` scrubbing in `app/src-tauri/src/sentry_init.rs`
-  - drops `user`, `request`, and `server_name`
-  - redacts sensitive event messages / exception values / tags
-  - recursively redacts sensitive `extra` payloads and breadcrumb data by key or content markers
-- frontend Sentry init/smoke flow now also emits sanitized breadcrumbs into the
-  desktop rolling log via the frontend log bridge (`scope=sentry`), so packaged
-  rehearsals can distinguish “no runtime config / no DSN” from “smoke capture
-  attempted and flushed” without relying on DevTools
+- Frontend `sentryPrivacy.ts` and backend `sentry_init.rs` construct allowlisted
+  events at the final SDK boundary. Keyword matching alone cannot protect
+  arbitrary error/provider payloads.
+- Raw error/panic messages, user/request identity, arbitrary extras/contexts,
+  breadcrumbs, and local variables are omitted. Account hashes are not emitted
+  by the frontend boundary. UI/console/network breadcrumb collection is disabled.
+- Keep exception type, code function/file/line, handled status, SDK/release,
+  environment, controlled service/runtime/surface/action tags, and debug IDs.
+  Local path prefixes and URL query/fragment data are removed. Rust retains
+  OS/runtime versions, without arbitrary context extensions or device names.
+- No session replay, profiling, performance traces, structured log forwarding,
+  or Rust SDK metrics are enabled. `sendDefaultPii` stays false.
+- Local `scope=sentry` startup/smoke diagnostics remain available. Frontend
+  smoke returns false on flush failure/timeout; backend smoke requires a known
+  surface and an explicit non-production environment. Smoke diagnostics are
+  never enabled in production.
 
 ## Testing and validation notes
 
-Primary checks used for this rollout:
+Verification on 2026-09-24:
 
-- `pnpm -C app lint`
-- `pnpm -C app typecheck`
-- `pnpm -C app test`
-- `pnpm -C app cargo:test`
-- `pnpm -C app check:ci` (final gate)
+- `pnpm -C app setup:check`, `typecheck`, and `lint:ci` passed (11 existing lint
+  warnings outside Sentry). Focused Rust formatting and workflow `actionlint`
+  checks passed.
+- Focused tests: 17 frontend, 4 Rust, and 6 release-script tests passed.
+- `pnpm -C app coverage:patch` ran the full suites: 851 frontend and 924 Rust
+  tests passed; 57 frontend and 13 Rust tests were skipped/ignored.
+- The bootstrap loophole is closed: the gate enforces changes since the first
+  policy-introduction commit, including untracked production files. It passes
+  for 1,646 non-exempt changed executable lines; 405 native/race lines have
+  source-fingerprinted exceptions documented in `TESTING.md`. This is not
+  global coverage or proof that native integration has run on every OS.
+- A separate audit of the Sentry app diff, including all lines of the new
+  privacy module, found 149 changed executable lines covered, with no uncovered
+  applicable lines, branches or functions and no metadata exemptions.
+- The checksum-verified CLI 0.45.0 successfully inspected a local Linux Rust
+  executable with debug information. This did not upload symbols or verify a
+  newly packaged app. Full release CI and packaged smoke checks remain required.
+- A fresh development Debian package was built in 49 seconds and installed on
+  the IdeaPad on 2026-09-24 through its existing per-user launcher. Package and
+  running-binary checksums matched; the restarted process, WebKit children and
+  backend Sentry initialization were verified. The build uses public-dev with
+  environment `development`, not production. This startup check did not upload
+  source maps/symbols or replace the release ingestion/symbolication smoke test.
+  The previous system binary remains available for rollback; recordings and
+  settings were not changed by the installation.
 
 Deterministic redaction tests added in:
 
 - `app/src/lib/telemetry/sentry.test.ts`
+- `app/src/lib/telemetry/sentryPrivacy.test.ts`
 - `app/src/lib/tauri/license.test.ts`
 - `app/src-tauri/src/licensing.rs` (`telemetry_context_redacts_sensitive_fields`)
-- `app/src-tauri/src/sentry_init.rs`
+- `app/src-tauri/src/sentry_init/tests.rs`
+- `.github/scripts/configure-desktop-sentry.test.mjs`
+- `.github/scripts/upload-desktop-symbols.test.mjs`
 
 Manual smoke test (with DSN enabled):
 
@@ -326,8 +421,9 @@ Build-time env contract:
 
 Behavior:
 
-- without `SENTRY_AUTH_TOKEN`, the plugin stays disabled and release builds keep
-  behaving normally
+- without `SENTRY_AUTH_TOKEN`, the plugin stays disabled for local/development
+  builds; public tag workflows fail their preflight instead of shipping unreadable
+  error reports
 - with `SENTRY_AUTH_TOKEN`, the Vite build emits **hidden** source maps,
   uploads them to Sentry, and deletes the generated `.map` files from `dist`
   after upload completes
@@ -362,7 +458,10 @@ drives setup guidance and defaults.
 
 ## Release/dist guidance
 
-Current integration sets environment/release from Vite env variables. As we harden releases, keep runtime values aligned with CI artifact uploads.
+Current integration sets environment/release through the shared CI configuration
+above and the Rust runtime-config command. Source-map debug IDs distinguish
+different bundles for the same release; native debug IDs distinguish binaries.
+The `dist` convention below remains optional, not a claim that it is emitted.
 
 Recommended pattern:
 

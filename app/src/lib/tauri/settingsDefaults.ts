@@ -95,6 +95,7 @@ export const DEFAULT_SETTINGS_VALUES = {
 	widget_position: "bottom-center",
 	output_mode: "paste",
 	output_hit_enter: false,
+	output_paste_shortcut: "system",
 	output_clipboard_privacy_mode: false,
 	output_smart_paste_protection: false,
 	main_window_close_behavior: "minimize_to_tray",

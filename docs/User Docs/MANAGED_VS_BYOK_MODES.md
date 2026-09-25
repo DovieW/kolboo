@@ -34,6 +34,19 @@ falls back to the catalog shipped with the desktop when refresh is unavailable.
 This metadata request contains no prompts, transcripts, API keys, or account
 identifiers. `models.dev` availability never enables a Managed model.
 
+## Adding your own key
+
+In **Settings → Providers**, paste a provider key and press Enter or leave the
+field to save it. OCR uses the same control. The status underneath confirms
+whether the save completed; if it fails, the replacement draft stays in the
+field so you can retry.
+
+Saved keys remain in the OS credential vault. The settings page checks whether
+a key exists instead of reading it back into the form. Paste a new key to
+replace it. Leaving an empty field does not delete a saved key: use **Remove**
+and confirm to delete it deliberately. The show/hide control only reveals a
+replacement draft you have entered.
+
 ## User-facing recovery behavior
 
 If managed inference is temporarily unavailable:

@@ -9,6 +9,10 @@ import {
 import { homedir } from "node:os";
 import path, { delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	configureRustBuildEnv,
+	describeRustBuildEnv,
+} from "./rust-build-env.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
@@ -96,6 +100,17 @@ function prepareLinuxPortalIdentity() {
 const cleanupLinuxPortalIdentity = prepareLinuxPortalIdentity();
 process.on("exit", cleanupLinuxPortalIdentity);
 
+let rustBuildEnv;
+try {
+	rustBuildEnv = configureRustBuildEnv(process.env, { requireTools: true });
+} catch (error) {
+	console.error(error instanceof Error ? error.message : String(error));
+	process.exit(1);
+}
+console.log(
+	`Rust build acceleration: ${describeRustBuildEnv(rustBuildEnv.status, rustBuildEnv.env)}`,
+);
+
 const child = spawn(
 	process.execPath,
 	[tauriCli, "dev", ...process.argv.slice(2)],
@@ -103,7 +118,7 @@ const child = spawn(
 		cwd: appDir,
 		stdio: "inherit",
 		env: {
-			...process.env,
+			...rustBuildEnv.env,
 			// Interactive development should be readable by a human. Structured JSON
 			// remains the default for other launch paths and rolling file logs remain
 			// unchanged.

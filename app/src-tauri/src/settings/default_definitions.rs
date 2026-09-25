@@ -286,6 +286,7 @@ pub(crate) fn seedable_settings(
             "output_mode",
             json!(default_values::DEFAULT_OUTPUT_MODE),
         ),
+        SettingDefaultDefinition::missing_or_null("output_paste_shortcut", json!(default_values::DEFAULT_OUTPUT_PASTE_SHORTCUT)),
         SettingDefaultDefinition::missing_or_null(
             "output_hit_enter",
             json!(default_values::DEFAULT_OUTPUT_HIT_ENTER),

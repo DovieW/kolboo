@@ -69,6 +69,26 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("legacy settings fixtures", () => {
+	itWithImportTimeout(
+		"reloads a persisted paste shortcut and defaults invalid legacy values",
+		async () => {
+			for (const [stored, expected] of [
+				["ctrl_shift_v", "ctrl_shift_v"],
+				[null, "system"],
+				["invalid", "system"],
+			]) {
+				vi.resetModules();
+				currentStore = new FakeStore({
+					...legacySettingsFixture,
+					output_paste_shortcut: stored,
+				});
+				const { tauriAPI } = await import("../tauri");
+				expect((await tauriAPI.getSettings()).output_paste_shortcut).toBe(
+					expected,
+				);
+			}
+		},
+	);
 	itWithImportTimeout("normalizes a legacy settings.json shape", async () => {
 		vi.resetModules();
 		const fixture = JSON.parse(JSON.stringify(legacySettingsFixture)) as Record<

@@ -1,8 +1,8 @@
 # Release operations
 
-> **Channel scope:** Stable Windows distribution remains gated. Linux may publish a clearly labeled Community/BYOK prerelease after exact-package native acceptance; this does not open managed signup or constitute a broad product launch.
+> **Channel scope:** Stable Windows distribution remains gated. The release also includes an explicitly experimental, unnotarized universal macOS download. Linux may publish a clearly labeled Community/BYOK prerelease after exact-package native acceptance; this does not open managed signup or constitute a broad product launch.
 
-Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS remains development-only.
+Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS is an experimental download, not yet a supported or native-accepted platform.
 
 Linux beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
 
@@ -11,12 +11,17 @@ Linux beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Bet
 A stable Windows release tag is allowed only after all of these are true:
 
 - the repository is public and the unauthenticated GitHub release endpoint works;
-- `WINDOWS_CERTIFICATE` contains the base64-encoded publisher `.pfx` and `WINDOWS_CERTIFICATE_PASSWORD` contains its password;
 - `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are configured;
 - the legal pages are publicly hosted and their links have been checked;
 - the desktop-to-operator and support rehearsal is complete for the exact release commit.
 
-The Release workflow fails closed if either publisher-signing credential is absent. It imports the certificate into the ephemeral Windows runner, configures SHA-256 Authenticode with a timestamp, and rejects any collected `.exe` or `.msi` whose signature is not valid. Ordinary branch and local development builds use `--no-sign` and remain available.
+Windows publisher signing is optional. If both `WINDOWS_CERTIFICATE` (base64-encoded publisher `.pfx`) and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the workflow imports the certificate into the ephemeral Windows runner, configures SHA-256 Authenticode with a timestamp, and rejects any collected `.exe` or `.msi` whose signature is not valid. If neither is configured, it builds unsigned Windows installers and labels the GitHub release accordingly; Windows may show an Unknown publisher warning. If only one credential is configured, the release fails rather than silently producing an unsigned installer. Ordinary branch and local development builds use `--no-sign` and remain available.
+
+The release builds only the standard Windows bundle. The extra `local-whisper` Windows variant is disabled by default, including for manual Windows builds; it remains available as an explicit manual opt-in while the app feature is retained.
+
+Windows checks must pass before installer packaging starts. A failing check therefore prevents an expensive installer build rather than leaving two independent jobs running. The macOS workflow finds Cargo's hashed architecture-specific dSYMs by UUID and verifies them against the finished executable before upload; missing or unusable release symbols still fail the build.
+
+The release also builds a universal macOS DMG and app ZIP with ad-hoc signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, auto-updates, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
 
 ## Signed updates
 
@@ -28,15 +33,15 @@ Updater checks stay disabled in ordinary builds and in the manual-update Linux b
 
 1. Run `pnpm -C app check:ci`, `pnpm -C app coverage`, and `pnpm -C app audit`.
 2. Confirm package, Tauri, and Cargo versions match the intended `vX.Y.Z` tag.
-3. Push the tag and inspect the Release workflow. A missing signing credential is a launch blocker, not a skippable warning.
-4. Download the release without authentication on a clean Windows machine.
-5. Verify Authenticode in PowerShell with `Get-AuthenticodeSignature <installer>`.
-6. Install, launch, check for updates, and confirm that altered or unsigned artifacts are rejected.
+3. Push the tag and inspect the Release workflow. Missing updater-key credentials are a launch blocker. Check whether the Windows publisher certificate is present; the workflow signs and verifies installers when it is, and clearly discloses unsigned installers when it is not.
+4. Download the release without authentication on a clean Windows machine; also confirm both Mac assets are downloadable and carry the experimental notice.
+5. If publisher credentials were configured, verify Authenticode in PowerShell with `Get-AuthenticodeSignature <installer>`. Otherwise confirm the release title and notes disclose that the Windows installers are unsigned.
+6. Install, launch, check for updates, and confirm that altered or updater-unsigned artifacts are rejected.
 7. Record the workflow run, commit SHA, installer hash, updater result, request IDs, and support-safe correlation hashes in the launch evidence.
 
 ## Rollback
 
-Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a newly signed release. Existing clients only accept metadata and artifacts signed by the updater key.
+Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a new updater-signed release. Existing clients only accept metadata and artifacts signed by the updater key; publisher Authenticode signing remains optional.
 
 ## Cargo cache disk usage
 

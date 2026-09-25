@@ -1,4 +1,6 @@
-use crate::history::{HistoryStatus, HistoryStorage, RequestHistoryUpdate, RequestModelInfo};
+use crate::history::{
+    HistoryEditInput, HistoryStatus, HistoryStorage, RequestHistoryUpdate, RequestModelInfo,
+};
 use chrono::{Duration as ChronoDuration, Utc};
 use std::fs;
 use std::path::PathBuf;
@@ -136,4 +138,114 @@ fn test_request_history_update_api_keeps_request_metadata_together() {
     assert!(history.get_by_id(&req_id).unwrap().is_none());
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+fn failed_recording_and_retry(history: &HistoryStorage, failed_id: &str, retry_id: &str) {
+    history
+        .add_request_entry(failed_id.to_string(), RequestModelInfo::default(), None)
+        .unwrap();
+    history
+        .set_request_recording_id(failed_id, Some(failed_id.to_string()))
+        .unwrap();
+    history
+        .complete_request_error(failed_id, "first failure".to_string())
+        .unwrap();
+    history
+        .add_request_entry(retry_id.to_string(), RequestModelInfo::default(), None)
+        .unwrap();
+    history
+        .set_request_recording_id(retry_id, Some(failed_id.to_string()))
+        .unwrap();
+}
+
+#[test]
+fn retry_replaces_failed_history_row_but_keeps_recording_source() {
+    let dir = make_temp_dir("retry-replace");
+    let history = HistoryStorage::new(dir.clone());
+    failed_recording_and_retry(&history, "failed", "retry");
+    history
+        .apply_request_update(RequestHistoryUpdate::CompleteRetry {
+            request_id: "retry".into(),
+            prior_failed_id: "failed".into(),
+            result: Ok("completed transcript".into()),
+        })
+        .unwrap();
+    let entries = history.get_all(None).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "retry");
+    assert_eq!(entries[0].status, HistoryStatus::Success);
+    assert_eq!(entries[0].text, "completed transcript");
+    assert_eq!(entries[0].recording_request_id.as_deref(), Some("failed"));
+    drop(history);
+    assert_eq!(
+        HistoryStorage::new(dir.clone())
+            .get_all(None)
+            .unwrap()
+            .len(),
+        1
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn repeated_failed_retries_leave_only_latest_failed_history_row() {
+    let dir = make_temp_dir("retry-failure");
+    let history = HistoryStorage::new(dir.clone());
+    failed_recording_and_retry(&history, "failed", "retry-one");
+    history
+        .complete_retry_request("retry-one", "failed", Err("second failure".into()))
+        .unwrap();
+    history
+        .add_request_entry("retry-two".into(), RequestModelInfo::default(), None)
+        .unwrap();
+    history
+        .set_request_recording_id("retry-two", Some("failed".into()))
+        .unwrap();
+    history
+        .complete_retry_request("retry-two", "retry-one", Err("third failure".into()))
+        .unwrap();
+    let entries = history.get_all(None).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "retry-two");
+    assert_eq!(entries[0].error_message.as_deref(), Some("third failure"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn retry_never_removes_successful_or_corrected_prior_results() {
+    let dir = make_temp_dir("retry-preserve");
+    let history = HistoryStorage::new(dir.clone());
+    failed_recording_and_retry(&history, "failed", "retry");
+    history
+        .save_edit(HistoryEditInput {
+            id: "failed".into(),
+            expected_revision: 0,
+            title: Some("My note".into()),
+            text: None,
+        })
+        .unwrap();
+    history
+        .complete_retry_request("retry", "failed", Ok("new text".into()))
+        .unwrap();
+    assert_eq!(history.get_all(None).unwrap().len(), 2);
+    assert_eq!(
+        history
+            .get_by_id("failed")
+            .unwrap()
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("My note")
+    );
+    history
+        .add_request_entry("rerun".into(), RequestModelInfo::default(), None)
+        .unwrap();
+    history
+        .set_request_recording_id("rerun", Some("failed".into()))
+        .unwrap();
+    history
+        .complete_retry_request("rerun", "retry", Ok("another result".into()))
+        .unwrap();
+    assert_eq!(history.get_all(None).unwrap().len(), 3);
+    let _ = fs::remove_dir_all(dir);
 }

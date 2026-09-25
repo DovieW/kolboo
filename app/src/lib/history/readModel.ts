@@ -112,6 +112,7 @@ export type HistoryEntryContentKind =
 export interface HistoryEntryViewModel {
 	id: string;
 	timestampLabel: string;
+	recordingMode: "dictation" | "meeting";
 	contentKind: HistoryEntryContentKind;
 	displayText: string;
 	displayTitle?: string;
@@ -119,6 +120,8 @@ export interface HistoryEntryViewModel {
 	hasCopyValue: boolean;
 	profilePresetLabel: string | null;
 	recordingRequestId: string | null;
+	title: string | null;
+	durationSeconds?: number | null;
 }
 
 export interface GroupedHistoryViewModel {
@@ -134,6 +137,20 @@ export interface HistoryFeedEmptyState {
 function trimOrNull(value: string | null | undefined): string | null {
 	const trimmed = (value ?? "").trim();
 	return trimmed.length > 0 ? trimmed : null;
+}
+
+function historyDisplayTitle(value: string | null | undefined): string | null {
+	const title = trimOrNull(value);
+	if (!title) return null;
+	const normalized = title.toLowerCase();
+	if (
+		normalized === "voice recording" ||
+		normalized === "dictation" ||
+		normalized === "meeting" ||
+		normalized === "meeting recording"
+	)
+		return null;
+	return title;
 }
 
 export function groupHistoryByDate(history: HistoryEntry[]): GroupedHistory[] {
@@ -182,9 +199,18 @@ export function toHistoryEntryViewModel(
 	const errorMessage = trimOrNull(entry.error_message);
 	const transcript = trimOrNull(entry.text);
 	const recordingRequestId = trimOrNull(entry.recording_request_id) ?? entry.id;
+	const metadata = {
+		title: historyDisplayTitle(entry.title),
+		recordingMode:
+			entry.recording_mode === "meeting"
+				? ("meeting" as const)
+				: ("dictation" as const),
+		durationSeconds: entry.duration_seconds,
+	};
 
 	if (status === "in_progress") {
 		return {
+			...metadata,
 			id: entry.id,
 			timestampLabel: formatHistoryTime(entry.timestamp),
 			contentKind: "in_progress",
@@ -198,6 +224,7 @@ export function toHistoryEntryViewModel(
 
 	if (status === "error") {
 		return {
+			...metadata,
 			id: entry.id,
 			timestampLabel: formatHistoryTime(entry.timestamp),
 			contentKind: "error",
@@ -212,6 +239,7 @@ export function toHistoryEntryViewModel(
 
 	if (!transcript) {
 		return {
+			...metadata,
 			id: entry.id,
 			timestampLabel: formatHistoryTime(entry.timestamp),
 			contentKind: "empty",
@@ -226,6 +254,7 @@ export function toHistoryEntryViewModel(
 
 	return {
 		id: entry.id,
+		...metadata,
 		timestampLabel: formatHistoryTime(entry.timestamp),
 		contentKind: "text",
 		displayText: entry.text,

@@ -73,6 +73,7 @@ export function ProfileConfigModal({
 			overlay_mode: null,
 			widget_position: null,
 			output_mode: null,
+			output_paste_shortcut: null,
 		};
 
 		const next = [...profiles, newProfile];
@@ -218,6 +219,7 @@ export function ProfileConfigModal({
 					overlay_mode: null,
 					widget_position: null,
 					output_mode: null,
+					output_paste_shortcut: null,
 				});
 			},
 		});
@@ -258,6 +260,9 @@ export function ProfileConfigModal({
 	const [windowPickerEntered, setWindowPickerEntered] = useState(false);
 	const [openWindows, setOpenWindows] = useState<OpenWindowInfo[]>([]);
 	const [isLoadingWindows, setIsLoadingWindows] = useState(false);
+	const [windowPickerError, setWindowPickerError] = useState<string | null>(
+		null,
+	);
 
 	useEffect(() => {
 		if (!opened) return;
@@ -322,6 +327,8 @@ export function ProfileConfigModal({
 
 	const openWindowPicker = async () => {
 		setWindowPickerOpen(true);
+		setWindowPickerError(null);
+		setOpenWindows([]);
 		// Open the dropdown only after the modal finished its enter transition.
 		// Otherwise Mantine positions the dropdown before the Select input is laid out,
 		// which can cause it to render in the wrong place and overlap the whole modal.
@@ -330,6 +337,10 @@ export function ProfileConfigModal({
 		try {
 			const windows = await tauriAPI.listOpenWindows();
 			setOpenWindows(windows);
+		} catch (error) {
+			setWindowPickerError(
+				typeof error === "string" ? error : "Could not list open programs.",
+			);
 		} finally {
 			setIsLoadingWindows(false);
 		}
@@ -577,6 +588,10 @@ export function ProfileConfigModal({
 					<Group justify="center" p="md">
 						<Loader size="sm" color="orange" />
 					</Group>
+				) : windowPickerError ? (
+					<Text size="sm" c="dimmed">
+						{windowPickerError}
+					</Text>
 				) : (
 					<Select
 						ref={windowPickerSelectRef}

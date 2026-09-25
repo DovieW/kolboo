@@ -17,6 +17,79 @@ use tokio_util::sync::CancellationToken;
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
 
+#[test]
+fn failed_locks_and_stale_callbacks_fail_closed_without_creating_providers() {
+    use super::transcription_flow::TranscriptionCallbacks;
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    let cancel = CancellationToken::new();
+    let callbacks = PipelineCallbacks {
+        inner: pipeline.inner.clone(),
+        cancel: cancel.clone(),
+    };
+    cancel.cancel();
+    let params = LlmProviderParams {
+        model: None,
+        timeout: Duration::from_secs(1),
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+    };
+    assert!(matches!(
+        callbacks.get_or_create_llm_provider("unconfigured", params.clone()),
+        Err(PipelineError::Cancelled)
+    ));
+    assert!(pipeline.inner.lock().unwrap().llm_provider_cache.is_empty());
+    let inner = pipeline.inner.clone();
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _guard = inner.lock().unwrap();
+        panic!("synthetic lock failure");
+    }));
+    assert!(matches!(
+        pipeline.mark_stt_complete(&CancellationToken::new(), "test"),
+        Err(PipelineError::Lock(_))
+    ));
+    assert!(matches!(
+        pipeline.take_session_preset_lock(&CancellationToken::new()),
+        Err(PipelineError::Lock(_))
+    ));
+    assert!(matches!(
+        callbacks.get_or_create_llm_provider("unconfigured", params),
+        Err(PipelineError::Lock(_))
+    ));
+}
+
+#[tokio::test]
+async fn each_capture_and_saved_retry_cancels_the_previous_session_token() {
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("saved result")),
+    );
+    let previous = CancellationToken::new();
+    pipeline.inner.lock().unwrap().cancel_token = Some(previous.clone());
+    pipeline.start_recording().unwrap();
+    assert!(previous.is_cancelled());
+    let capture = pipeline.get_cancel_token().unwrap();
+    assert!(!capture.is_cancelled());
+    pipeline.inner.lock().unwrap().state = PipelineState::Idle;
+    let result = pipeline
+        .transcribe_wav_bytes_detailed_for_profile(vec![1, 2, 3], None)
+        .await
+        .unwrap();
+    assert_eq!(result.final_text, "saved result");
+    assert!(capture.is_cancelled());
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+}
+
 /// A fake audio capture backend that returns canned WAV data without using CPAL.
 pub(super) struct FakeAudioCapture {
     level_meter: SharedAudioLevelMeter,
@@ -27,6 +100,9 @@ pub(super) struct FakeAudioCapture {
     before_wav: Vec<u8>,
     after_wav: Vec<u8>,
     _queued_events: std::collections::VecDeque<AudioCaptureEvent>,
+    recovery_path: Option<std::path::PathBuf>,
+    cancellation_calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    fail_recovery_finish: bool,
 }
 
 impl FakeAudioCapture {
@@ -40,6 +116,9 @@ impl FakeAudioCapture {
             before_wav: vec![9],
             after_wav: vec![8],
             _queued_events: std::collections::VecDeque::new(),
+            recovery_path: None,
+            cancellation_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
+            fail_recovery_finish: false,
         }
     }
 
@@ -141,6 +220,34 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
 }
 
 impl AudioCaptureBackend for FakeAudioCapture {
+    fn recovery_path(&self) -> Option<std::path::PathBuf> {
+        self.recovery_path.clone()
+    }
+
+    fn set_recovery_path(
+        &mut self,
+        path: Option<std::path::PathBuf>,
+    ) -> Result<(), AudioCaptureError> {
+        self.recovery_path = path;
+        Ok(())
+    }
+
+    fn finish_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.cancellation_calls.lock().unwrap().push("finish");
+        if self.fail_recovery_finish {
+            return Err(AudioCaptureError::Encoding("Synthetic sync failure".into()));
+        }
+        Ok(())
+    }
+
+    fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
+        self.cancellation_calls.lock().unwrap().push("discard");
+        if let Some(path) = self.recovery_path.take() {
+            crate::audio_capture::journal::discard(&path).unwrap();
+        }
+        Ok(())
+    }
+
     fn set_paused(&mut self, _paused: bool) -> Result<(), AudioCaptureError> {
         Ok(())
     }
@@ -197,7 +304,9 @@ impl AudioCaptureBackend for FakeAudioCapture {
         ))
     }
 
-    fn stop_recording(&mut self) {}
+    fn stop_recording(&mut self) {
+        self.cancellation_calls.lock().unwrap().push("stop");
+    }
     fn stop(&mut self) {}
 
     fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
@@ -231,6 +340,7 @@ pub(super) struct MockBehavior {
 struct MockSttProvider {
     text: String,
     behavior: MockBehavior,
+    realtime_only: bool,
 }
 
 impl MockSttProvider {
@@ -238,6 +348,7 @@ impl MockSttProvider {
         Self {
             text: text.into(),
             behavior: MockBehavior::default(),
+            realtime_only: false,
         }
     }
 
@@ -250,6 +361,9 @@ impl MockSttProvider {
 
 #[async_trait]
 impl SttProvider for MockSttProvider {
+    fn requires_streaming(&self) -> bool {
+        self.realtime_only
+    }
     async fn transcribe(
         &self,
         _audio: &[u8],
@@ -387,6 +501,7 @@ fn mock_llm_config(
 ) -> crate::llm::LlmConfig {
     crate::llm::LlmConfig {
         enabled,
+        custom_providers: Vec::new(),
         provider: MOCK_PROVIDER.to_string(),
         api_key: String::new(),
         model: None,
@@ -417,6 +532,169 @@ fn test_shared_pipeline_creation() {
     let pipeline = SharedPipeline::new(config);
     assert_eq!(pipeline.state(), PipelineState::Idle);
     assert!(!pipeline.is_error());
+}
+
+#[tokio::test]
+async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
+    for (success, realtime) in [(true, false), (false, false), (false, true)] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        let mut provider = MockSttProvider::new("batch fallback");
+        provider.realtime_only = realtime;
+        pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        pipeline.start_recording().unwrap();
+        let (audio_tx, _audio_rx) = tokio::sync::mpsc::channel(1);
+        let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            if success {
+                Ok("  streaming result  ".into())
+            } else {
+                Err(crate::stt::SttError::Api("synthetic failure".into()))
+            }
+        });
+        pipeline.inner.lock().unwrap().active_streaming_session = Some(
+            crate::stt::streaming::StreamingSttSession::new(audio_tx, partial_rx, task),
+        );
+        let result = pipeline.stop_and_transcribe_detailed().await;
+        if !success && realtime {
+            assert!(matches!(result, Err(PipelineError::Stt(_))));
+            assert_eq!(pipeline.state(), PipelineState::Error);
+        } else {
+            assert_eq!(
+                result.unwrap().final_text,
+                if success {
+                    // Dictation trims the leading boundary, preserving the
+                    // provider's trailing whitespace for insertion.
+                    "streaming result  "
+                } else {
+                    "batch fallback"
+                }
+            );
+            assert_eq!(pipeline.state(), PipelineState::Idle);
+        }
+        assert!(pipeline
+            .inner
+            .lock()
+            .unwrap()
+            .active_streaming_session
+            .is_none());
+    }
+}
+
+#[tokio::test]
+async fn cancelling_streaming_connection_or_finalize_leaves_the_new_session_owned() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    for finalizing in [false, true] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        let mut provider = MockSttProvider::new("must not use batch");
+        provider.realtime_only = true;
+        pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        pipeline.start_recording().unwrap();
+        let (done, wait) = tokio::sync::oneshot::channel::<()>();
+        if finalizing {
+            let (audio_tx, _audio_rx) = tokio::sync::mpsc::channel(1);
+            let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
+            pipeline.inner.lock().unwrap().active_streaming_session =
+                Some(crate::stt::streaming::StreamingSttSession::new(
+                    audio_tx,
+                    partial_rx,
+                    tokio::spawn(async move {
+                        let _ = wait.await;
+                        Ok("old result".into())
+                    }),
+                ));
+        }
+        let mut old = Box::pin(pipeline.stop_and_transcribe_detailed());
+        assert!(matches!(
+            old.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        pipeline.cancel();
+        pipeline.start_recording().unwrap();
+        let new_epoch = pipeline.session_epoch();
+        let _ = done.send(());
+        assert!(matches!(old.await, Err(PipelineError::Cancelled)));
+        assert_eq!(pipeline.state(), PipelineState::Recording);
+        assert_eq!(pipeline.session_epoch(), new_epoch);
+        assert!(!pipeline.get_cancel_token().unwrap().is_cancelled());
+        pipeline.cancel();
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn realtime_connection_can_arrive_late_or_time_out_without_batch_upload() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    for connects in [true, false] {
+        let p = SharedPipeline::new_for_tests(
+            test_config_for_transcription(),
+            Box::new(FakeAudioCapture::new()),
+        );
+        let mut provider = MockSttProvider::new("must not batch");
+        provider.realtime_only = true;
+        p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        p.start_recording().unwrap();
+        let mut pending = Box::pin(p.stop_and_transcribe_detailed());
+        assert!(matches!(
+            pending
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        if connects {
+            let (tx, _rx) = tokio::sync::mpsc::channel(1);
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            p.inner.lock().unwrap().active_streaming_session =
+                Some(crate::stt::streaming::StreamingSttSession::new(
+                    tx,
+                    rx,
+                    tokio::spawn(async { Ok("late result".into()) }),
+                ));
+        }
+        let result = pending.await;
+        if connects {
+            assert_eq!(result.unwrap().final_text, "late result");
+            assert_eq!(p.state(), PipelineState::Idle);
+        } else {
+            assert!(
+                matches!(result, Err(PipelineError::Stt(crate::stt::SttError::Config(message))) if message.contains("no batch fallback"))
+            );
+            assert_eq!(p.state(), PipelineState::Error);
+        }
+    }
+}
+
+#[tokio::test]
+async fn journal_entry_point_requires_ownership_and_an_explicit_meeting_model() {
+    use crate::recordings::options::{RecordingMode, RecordingPreferences};
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    let options = RecordingPreferences {
+        mode: RecordingMode::Meeting,
+        ..Default::default()
+    };
+    let result = pipeline
+        .transcribe_journal_wav(vec![], None, None, &options)
+        .await;
+    assert!(matches!(result, Err(PipelineError::Config(message)) if message.contains("ownership")));
+    pipeline.begin_recovery().unwrap();
+    let result = pipeline
+        .transcribe_journal_wav(vec![], None, None, &options)
+        .await;
+    assert!(
+        matches!(result, Err(PipelineError::Config(message)) if message.contains("Select a meeting"))
+    );
+    pipeline.end_recovery();
 }
 
 #[test]
@@ -465,6 +743,261 @@ fn test_cancel_from_transcribing_transitions_to_idle() {
     assert!(token.is_cancelled());
 }
 
+#[tokio::test]
+async fn cancelled_transcription_cannot_reset_a_new_recording() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(
+            MockSttProvider::new("old transcript").with_behavior(MockBehavior {
+                delay: Some(Duration::from_secs(3600)),
+                error: None,
+            }),
+        ),
+    );
+    pipeline.start_recording().unwrap();
+    let mut old = Box::pin(pipeline.stop_and_transcribe_detailed());
+    assert!(matches!(
+        old.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    ));
+    assert_eq!(pipeline.state(), PipelineState::Transcribing);
+    let old_epoch = pipeline.session_epoch().unwrap();
+    pipeline.cancel();
+    pipeline
+        .start_recording_with_output(true, None, false)
+        .unwrap();
+    let new_token = pipeline.get_cancel_token().unwrap();
+    assert_ne!(pipeline.session_epoch(), Some(old_epoch));
+    assert!(matches!(old.await, Err(PipelineError::Cancelled)));
+    assert_eq!(pipeline.state(), PipelineState::Recording);
+    assert!(!new_token.is_cancelled());
+    assert!(pipeline.get_cancel_token().is_some());
+    assert!(pipeline.is_history_only_recording());
+    pipeline.cancel();
+}
+
+#[tokio::test]
+async fn cancelled_rewrite_cannot_change_the_next_recording_or_its_logs() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let logs = crate::request_log::RequestLogStore::new();
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, Vec::new());
+    insert_mock_llm_api_key(&mut config);
+    config.request_log_store = Some(logs.clone());
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("old text")),
+    );
+    pipeline.inject_llm_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Arc::new(
+            MockLlmProvider::new("old rewrite").with_behavior(MockBehavior {
+                delay: Some(Duration::from_secs(3600)),
+                error: None,
+            }),
+        ),
+    );
+    logs.start_request(MOCK_PROVIDER.into(), None);
+    pipeline.start_recording().unwrap();
+    let mut old = Box::pin(pipeline.stop_and_transcribe_detailed());
+    assert!(matches!(
+        old.as_mut().poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Pending
+    ));
+    assert_eq!(pipeline.state(), PipelineState::Rewriting);
+    pipeline.cancel();
+    pipeline.start_recording().unwrap();
+    let new_id = logs.start_request("next-provider".into(), None);
+    assert!(matches!(old.await, Err(PipelineError::Cancelled)));
+    assert_eq!(pipeline.state(), PipelineState::Recording);
+    let current = logs.get_logs(Some(1)).pop().unwrap();
+    assert_eq!(current.id, new_id);
+    assert!(current.llm_provider.is_none());
+    assert!(current.preset_id.is_none());
+    assert!(current.rewrite_clipboard_context.is_none());
+    pipeline.cancel();
+}
+
+#[test]
+fn stale_completion_and_rewrite_callbacks_leave_newer_session_untouched() {
+    use super::transcription_flow::TranscriptionCallbacks;
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    pipeline.start_recording().unwrap();
+    let old = pipeline.get_cancel_token().unwrap();
+    let old_live_output = pipeline.inner.lock().unwrap().live_output_active.clone();
+    let callbacks = PipelineCallbacks {
+        inner: pipeline.inner.clone(),
+        cancel: old.clone(),
+    };
+    pipeline.force_reset();
+    pipeline.start_recording().unwrap();
+    let current = pipeline.get_cancel_token().unwrap();
+    old_live_output.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(!pipeline
+        .inner
+        .lock()
+        .unwrap()
+        .live_output_active
+        .load(std::sync::atomic::Ordering::SeqCst));
+    pipeline
+        .set_session_preset_lock(Some("new-profile".into()), Some("new-preset".into()))
+        .unwrap();
+    assert!(matches!(
+        pipeline.take_session_preset_lock(&old),
+        Err(PipelineError::Cancelled)
+    ));
+    assert_eq!(
+        pipeline.peek_session_preset_lock(),
+        Some((Some("new-profile".into()), "new-preset".into()))
+    );
+    assert_eq!(
+        pipeline
+            .take_session_preset_lock(&current)
+            .unwrap()
+            .unwrap()
+            .preset_id,
+        "new-preset"
+    );
+    // Even if the new recording is already transcribing, old callbacks cannot
+    // change its phase, clear its cancel token, or signal STT completion.
+    pipeline.inner.lock().unwrap().state = PipelineState::Transcribing;
+    callbacks.transition_to_routing();
+    callbacks.transition_to_rewriting();
+    assert_eq!(pipeline.state(), PipelineState::Transcribing);
+    pipeline.inner.lock().unwrap().state = PipelineState::Routing;
+    callbacks.transition_from_routing();
+    assert_eq!(pipeline.state(), PipelineState::Routing);
+    assert!(matches!(
+        pipeline.mark_stt_complete(&old, "stale"),
+        Err(PipelineError::Cancelled)
+    ));
+    pipeline
+        .finish_failed_stt_attempt(&old, &PipelineError::Config("late failure".into()))
+        .unwrap();
+    assert_eq!(pipeline.state(), PipelineState::Routing);
+    assert!(!current.is_cancelled());
+    assert!(!pipeline.inner.lock().unwrap().stt_complete);
+    pipeline.mark_stt_complete(&current, "current").unwrap();
+    assert!(pipeline.inner.lock().unwrap().stt_complete);
+    pipeline
+        .finish_failed_stt_attempt(&current, &PipelineError::Cancelled)
+        .unwrap();
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert!(current.is_cancelled());
+}
+
+#[test]
+fn cancelling_home_capture_preserves_audio_and_mode_without_submitting() {
+    use crate::audio_capture::journal::{read_chunk, Journal};
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+
+    for mode in [RecordingMode::Dictation, RecordingMode::Meeting] {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("recording.pcm");
+        let mut journal = Journal::create(&path, 16000, 1).unwrap();
+        journal.append(&[0.25, -0.25], 16000, 1).unwrap();
+        journal.finish().unwrap();
+        drop(journal);
+        let preferences = RecordingPreferences {
+            mode,
+            meeting_model: Some(MeetingModel {
+                provider: "openai".into(),
+                model: "gpt-4o-transcribe-diarize".into(),
+                use_managed: false,
+            }),
+        };
+        preferences.save_journal(&path).unwrap();
+        let capture = FakeAudioCapture::new();
+        let calls = capture.cancellation_calls.clone();
+        let pipeline = SharedPipeline::new_for_tests(
+            test_config_with_max_recording_bytes(),
+            Box::new(capture),
+        );
+        pipeline
+            .start_recording_with_output(true, Some(path.clone()), false)
+            .unwrap();
+        let token = pipeline.get_cancel_token().unwrap();
+        pipeline.set_recording_paused(true).unwrap();
+
+        pipeline.cancel();
+
+        assert_eq!(*calls.lock().unwrap(), vec!["stop", "finish"]);
+        assert!(token.is_cancelled());
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert_eq!(read_chunk(&path, 0, 10).unwrap().2, vec![0.25, -0.25]);
+        let recovered = RecordingPreferences::load_journal(&path).unwrap();
+        assert_eq!(recovered.mode, preferences.mode);
+        assert_eq!(recovered.meeting_model, preferences.meeting_model);
+        assert!(pipeline.clone_last_wav_bytes().is_none());
+        assert!(!pipeline.is_recovering());
+
+        // A subsequent ordinary shortcut session must not inherit this journal.
+        pipeline.start_recording().unwrap();
+        assert!(!pipeline.is_history_only_recording());
+        assert!(pipeline.recovery_path().is_none());
+        pipeline.cancel();
+        assert!(path.exists());
+        assert!(path.with_extension("options.json").exists());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec!["stop", "finish", "stop", "discard"]
+        );
+    }
+}
+
+#[test]
+fn cancelling_home_capture_reports_sync_failure_without_discarding() {
+    let mut capture = FakeAudioCapture::new();
+    capture.fail_recovery_finish = true;
+    let calls = capture.cancellation_calls.clone();
+    let pipeline =
+        SharedPipeline::new_for_tests(test_config_with_max_recording_bytes(), Box::new(capture));
+    pipeline
+        .start_recording_with_output(true, None, false)
+        .unwrap();
+    let token = pipeline.get_cancel_token().unwrap();
+
+    pipeline.cancel();
+
+    assert!(token.is_cancelled());
+    assert_eq!(pipeline.state(), PipelineState::Error);
+    assert_eq!(*calls.lock().unwrap(), vec!["stop", "finish"]);
+}
+
+#[test]
+fn cancelling_shortcut_capture_does_not_create_recovery_persistence() {
+    let capture = FakeAudioCapture::new();
+    let calls = capture.cancellation_calls.clone();
+    let pipeline =
+        SharedPipeline::new_for_tests(test_config_with_max_recording_bytes(), Box::new(capture));
+    pipeline.start_recording().unwrap();
+    pipeline.cancel();
+
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert!(pipeline.recovery_path().is_none());
+    assert_eq!(*calls.lock().unwrap(), vec!["stop", "discard"]);
+}
+
 #[test]
 fn test_stop_recording_transitions_to_idle() {
     let pipeline = SharedPipeline::new(PipelineConfig::default());
@@ -480,6 +1013,12 @@ fn test_stop_recording_transitions_to_idle() {
     assert!(result.is_ok());
     assert_eq!(pipeline.state(), PipelineState::Idle);
     assert!(pipeline.clone_last_wav_bytes().is_some());
+    let first = pipeline.clone_last_wav_bytes().unwrap();
+    let second = pipeline.clone_last_wav_bytes().unwrap();
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "audio snapshots must not duplicate the WAV allocation"
+    );
     assert!(pipeline.get_cancel_token().is_none());
 }
 
@@ -549,6 +1088,24 @@ fn recovery_owns_pipeline_between_chunks_and_cancels_without_new_recording() {
 }
 
 #[test]
+fn recovery_retry_clears_prior_error_before_cancellable_preparation() {
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_with_max_recording_bytes(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    set_state_for_test(&pipeline, PipelineState::Error, None);
+
+    let token = pipeline.begin_recovery().unwrap();
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert!(pipeline.is_recovering());
+    pipeline.cancel();
+    assert!(token.is_cancelled());
+    assert!(pipeline.is_recovering());
+    pipeline.end_recovery();
+    assert!(!pipeline.is_recovering());
+}
+
+#[test]
 fn end_ocr_session_clears_ocr_state() {
     let config = test_config_with_max_recording_bytes();
     let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
@@ -578,13 +1135,38 @@ async fn get_ocr_result_without_task_keeps_status_not_started() {
     p.begin_ocr_session("req-no-task".to_string());
 
     let result = p
-        .get_ocr_result_with_timeout(std::time::Duration::from_millis(1))
+        .get_ocr_result_with_timeout(std::time::Duration::from_millis(1), None)
         .await;
 
     assert!(result.is_none());
     assert_eq!(p.ocr_session_id().as_deref(), Some("req-no-task"));
     assert_eq!(p.get_ocr_status(), "not_started");
     assert!(!p.inner.lock().unwrap().ocr.awaiting);
+}
+
+#[tokio::test]
+async fn cancelled_transcription_cannot_consume_newer_ocr() {
+    let pipeline = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    pipeline.begin_ocr_session("new-request".into());
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    // This flag belongs to the newer session; the old caller must not even
+    // enter the no-task cleanup path, which clears it.
+    pipeline.inner.lock().unwrap().ocr.awaiting = true;
+    assert!(pipeline
+        .get_ocr_result_with_timeout(Duration::from_secs(1), Some(&cancelled))
+        .await
+        .is_none());
+    assert!(pipeline.inner.lock().unwrap().ocr.awaiting);
+    assert_eq!(pipeline.ocr_session_id().as_deref(), Some("new-request"));
+    assert!(pipeline
+        .get_ocr_result_with_timeout(Duration::from_secs(1), Some(&CancellationToken::new()))
+        .await
+        .is_none());
+    assert!(!pipeline.inner.lock().unwrap().ocr.awaiting);
 }
 
 #[tokio::test]
@@ -617,7 +1199,7 @@ async fn awaited_ocr_task_cannot_publish_after_session_superseded() {
     let waiter_pipeline = p.clone();
     let waiter = tokio::spawn(async move {
         waiter_pipeline
-            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30))
+            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30), None)
             .await
     });
 
@@ -720,7 +1302,7 @@ async fn force_reset_aborts_awaited_ocr_task() {
     let waiter_pipeline = p.clone();
     let waiter = tokio::spawn(async move {
         waiter_pipeline
-            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30))
+            .get_ocr_result_with_timeout(std::time::Duration::from_secs(30), None)
             .await
     });
 
@@ -784,6 +1366,15 @@ fn pipeline_can_start_and_stop_without_cpal() {
 
     let wav = p.stop_recording().expect("stop recording should succeed");
     assert_eq!(wav, vec![1, 2, 3]);
+    assert_eq!(p.try_state(), Some(PipelineState::Idle));
+
+    p.start_recording().unwrap();
+    let (before, after) = p.stop_recording_before_after().unwrap();
+    assert_eq!(before, vec![9]);
+    assert_eq!(after, vec![8]);
+    let retained = p.clone_last_wav_bytes().unwrap();
+    assert_eq!(retained.as_slice(), after.as_slice());
+    assert!(Arc::ptr_eq(&retained, &p.clone_last_wav_bytes().unwrap()));
     assert_eq!(p.try_state(), Some(PipelineState::Idle));
 }
 
@@ -850,14 +1441,199 @@ async fn meeting_transcription_bypasses_only_dictation_size_limit_and_requires_o
         Err(PipelineError::RecordingTooLarge(..))
     ));
     assert!(p
-        .transcribe_meeting_wav(wav.clone(), None, None)
+        .transcribe_journal_wav(wav.clone(), None, None, &Default::default())
         .await
         .is_err());
     p.begin_recovery().unwrap();
-    let result = p.transcribe_meeting_wav(wav, None, None).await.unwrap();
+    let wav = Arc::new(wav);
+    let result = p
+        .transcribe_journal_wav(wav.clone(), None, None, &Default::default())
+        .await
+        .unwrap();
     assert_eq!(result.stt_text, "one final transcript");
     assert_eq!(result.final_text, "one final transcript");
     assert_eq!(p.state(), PipelineState::Idle);
+    assert!(p.is_recovering());
+    assert_eq!(
+        Arc::strong_count(&wav),
+        1,
+        "completed recovery must release its shared audio"
+    );
+    p.end_recovery();
+}
+
+#[tokio::test]
+async fn invalid_journal_audio_fails_without_releasing_recovery_ownership() {
+    let p = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("must not upload")),
+    );
+    p.begin_recovery().unwrap();
+    let result = p
+        .transcribe_journal_wav(vec![0, 1, 2], None, None, &Default::default())
+        .await;
+    assert!(matches!(result, Err(PipelineError::Config(_))));
+    assert_eq!(p.state(), PipelineState::Error);
+    assert!(p.is_recovering());
+    p.end_recovery();
+    assert!(!p.is_recovering());
+}
+
+#[tokio::test]
+async fn disk_sources_cannot_accidentally_enter_the_in_memory_batch_path() {
+    let p = SharedPipeline::new_for_tests(
+        test_config_for_transcription(),
+        Box::new(FakeAudioCapture::new()),
+    );
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("must not upload")),
+    );
+    let source = TranscriptionAudio::File {
+        path: "not-opened.wav".into(),
+        bytes: 44,
+        modified: std::time::SystemTime::UNIX_EPOCH,
+        duration: 0.0,
+    };
+    let result = p
+        .transcribe_saved_audio(
+            source,
+            None,
+            None,
+            None,
+            None,
+            None,
+            SavedAudioMode::Dictation,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(PipelineError::Config(message)) if message == "Saved files require chunked transcription")
+    );
+    assert!(p.clone_last_wav_bytes().is_none());
+    assert_eq!(
+        p.state(),
+        PipelineState::Error,
+        "invalid input must not leave a transcription in progress"
+    );
+}
+
+#[tokio::test]
+async fn managed_auth_failure_without_a_desktop_session_releases_transcription() {
+    let mut config = test_config_for_transcription();
+    config.managed_inference_enabled = true;
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let mut provider = MockSttProvider::new("must not succeed");
+    provider.behavior.error = Some("401 auth_invalid_token".into());
+    let result = p
+        .run_batch_stt_request(
+            Arc::new(provider),
+            MOCK_PROVIDER,
+            None,
+            None,
+            &[1, 2, 3],
+            &crate::stt::RetryConfig::default(),
+            Duration::from_secs(1),
+            &CancellationToken::new(),
+            "test",
+            "retry_transcription",
+        )
+        .await;
+    assert!(
+        matches!(result, Err(PipelineError::Config(message)) if message == "Managed auth refresh unavailable: app handle missing")
+    );
+    assert_eq!(p.state(), PipelineState::Error);
+}
+
+#[tokio::test]
+async fn meeting_managed_choice_never_falls_back_to_a_user_key_when_access_is_unavailable() {
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+    let mut config = test_config_for_transcription();
+    config.managed_stt_preferred = false;
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    // A direct provider is ready in the cache. Choosing Managed may not use it.
+    p.inject_stt_provider_for_tests(
+        "openai",
+        Some("gpt-4o-transcribe-diarize"),
+        None,
+        Arc::new(MockSttProvider::new("Must not use a different route")),
+    );
+    let mut audio = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+    audio.append(&vec![0.25; 16000]);
+    let options = RecordingPreferences {
+        mode: RecordingMode::Meeting,
+        meeting_model: Some(MeetingModel {
+            provider: "openai".into(),
+            model: "gpt-4o-transcribe-diarize".into(),
+            use_managed: true,
+        }),
+    };
+    p.begin_recovery().unwrap();
+    let error = p
+        .transcribe_journal_wav(audio.to_wav_bytes().unwrap(), None, None, &options)
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("Managed meeting transcription is unavailable"));
+    assert!(!p.config().managed_stt_preferred);
+    assert!(p.is_recovering());
+    p.end_recovery();
+}
+
+#[tokio::test]
+async fn meeting_mode_never_rewrites_even_when_dictation_rewriting_is_enabled() {
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+    let mut config = test_config_for_transcription();
+    config.llm_config = mock_llm_config(true, Vec::new());
+    insert_mock_llm_api_key(&mut config);
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        Some("meeting-model"),
+        None,
+        Arc::new(MockSttProvider::new("Unchanged meeting")),
+    );
+    p.inject_llm_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Arc::new(MockLlmProvider::new("Must not run")),
+    );
+    let mut audio = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+    audio.append(&vec![0.25; 16000]);
+    let options = RecordingPreferences {
+        mode: RecordingMode::Meeting,
+        meeting_model: Some(MeetingModel {
+            provider: MOCK_PROVIDER.into(),
+            model: "meeting-model".into(),
+            use_managed: false,
+        }),
+    };
+    p.inner.lock().unwrap().config.managed_stt_preferred = true;
+    p.begin_recovery().unwrap();
+    let result = p
+        .transcribe_journal_wav(audio.to_wav_bytes().unwrap(), None, None, &options)
+        .await
+        .unwrap();
+    assert_eq!(result.final_text, "Unchanged meeting");
+    assert!(
+        p.config().managed_stt_preferred,
+        "Meeting must not change Dictation's route"
+    );
+    assert!(!result.llm_attempted());
+    assert_eq!(
+        result.llm_outcome,
+        crate::pipeline::LlmOutcome::NotAttempted(
+            crate::pipeline::LlmNotAttemptedReason::MeetingMode
+        )
+    );
     assert!(p.is_recovering());
     p.end_recovery();
 }
@@ -1254,6 +2030,20 @@ async fn rewrite_consumes_manual_ocr_result_when_available() {
         .expect("stop/transcribe should succeed");
 
     assert_eq!(result.final_text, "WITH_OCR");
+    assert_eq!(p.state(), PipelineState::Idle);
+
+    // A saved dictation retry uses the same request-owned OCR result, without
+    // starting capture or reading the user's actual screen.
+    p.inner.lock().unwrap().ocr.result = Some(crate::ocr::OcrResult {
+        text: "synthetic retry context".into(),
+        provider: "mock".into(),
+        model: "mock-model".into(),
+    });
+    let retried = p
+        .transcribe_wav_bytes_detailed(vec![1, 2, 3])
+        .await
+        .unwrap();
+    assert_eq!(retried.final_text, "WITH_OCR");
     assert_eq!(p.state(), PipelineState::Idle);
 }
 

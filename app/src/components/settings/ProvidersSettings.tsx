@@ -63,7 +63,11 @@ export function ProvidersSettings() {
 		updateSTTProvider.mutate(value, {
 			onSuccess: () => {
 				// Reset model to first available when provider changes
-				const models = STT_MODELS[value];
+				const models =
+					availableProviders?.stt
+						.find((p) => p.value === value)
+						?.models?.map((value) => ({ value, label: value })) ??
+					STT_MODELS[value];
 				const firstModel = models?.[0];
 				if (firstModel) {
 					updateSTTModel.mutate(firstModel.value);
@@ -174,7 +178,11 @@ export function ProvidersSettings() {
 
 	// Get available models for the selected providers
 	const sttModelOptions = settings?.stt_provider
-		? (STT_MODELS[settings.stt_provider] ?? [])
+		? (availableProviders?.stt
+				.find((p) => p.value === settings.stt_provider)
+				?.models?.map((value) => ({ value, label: value })) ??
+			STT_MODELS[settings.stt_provider] ??
+			[])
 		: [];
 	const llmModelOptions = settings?.llm_provider
 		? getLlmModelsForProvider(settings.llm_provider)

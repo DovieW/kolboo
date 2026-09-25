@@ -77,7 +77,7 @@ pub(crate) async fn collect_ocr_context(
     }
 
     let text = pipeline
-        .get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms))
+        .get_ocr_result_with_timeout(Duration::from_millis(ocr_config.request_timeout_ms), None)
         .await
         .map(|result| result.text);
 

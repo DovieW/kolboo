@@ -3,6 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { createRequestLogsQueryFn } from "./queryFns";
 import { queryFnDeps } from "./shared";
 
+export function useRequestLogIds(limit: number) {
+	return useQuery({
+		queryKey: ["requestLogs", "ids", limit],
+		queryFn: () => queryFnDeps.logsAPI.getRequestLogIds(limit),
+		refetchInterval: 10000,
+	});
+}
+
 // Request-log hooks stay together because they share the same live-refresh and
 // clearing invalidation behavior.
 export function useRequestLogs(limit?: number) {

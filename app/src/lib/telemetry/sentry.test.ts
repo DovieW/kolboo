@@ -218,6 +218,32 @@ describe("sentry telemetry", () => {
 		);
 	});
 
+	it("accepts a cloud-free desktop config without retrying or enabling telemetry", async () => {
+		runtimeConfigState.value = {
+			app_version: "0.2.5-beta.1",
+			api_base_url: null,
+			managed_inference_gateway_url: null,
+			cloudflare_access_client_id: null,
+			cloudflare_access_client_secret: null,
+			sentry_dsn: null,
+			sentry_env: null,
+			sentry_release: null,
+			sentry_smoke: null,
+			posthog_api_key: null,
+			posthog_host: null,
+		};
+		const { initSentry, isSentryConfigured } = await loadSentryModule();
+		await initSentry("overlay");
+		expect(loadRuntimeConfigMock).toHaveBeenCalledOnce();
+		expect(sentryMock.init).not.toHaveBeenCalled();
+		expect(isSentryConfigured()).toBe(false);
+		expect(
+			frontendLogMock.warn.mock.calls.some(([, message]) =>
+				String(message).includes("runtime config unavailable"),
+			),
+		).toBe(false);
+	});
+
 	it("sets tier + hashed identity tags", async () => {
 		const { initSentry, setSentryLicenseIdentityTags } =
 			await loadSentryModule();
@@ -261,7 +287,7 @@ describe("sentry telemetry", () => {
 		expect(sentryMock.setTag).toHaveBeenCalledWith("org_hash", "none");
 	});
 
-	it("redacts product-content fields inside beforeSend and filters network breadcrumbs", async () => {
+	it("drops content and all automatic breadcrumbs at the SDK boundary", async () => {
 		const { initSentry } = await loadSentryModule();
 		await initSentry("main");
 
@@ -296,21 +322,17 @@ describe("sentry telemetry", () => {
 
 		expect(safe.user).toBeUndefined();
 		expect(safe.request).toBeUndefined();
-		expect(safe.extra.clipboard_contents).toBe("[REDACTED]");
-		expect(safe.extra.prompt_text).toBe("[REDACTED]");
-		expect((safe.extra.nested as Record<string, unknown>).completion_text).toBe(
-			"[REDACTED]",
-		);
-		expect((safe.extra.nested as Record<string, unknown>).safe_value).toBe(
-			"ok",
-		);
-		expect(safe.contexts.ocr_payload).toBe("[REDACTED]");
-		expect((safe.contexts.device as Record<string, unknown>).model).toBe("PC");
+		expect(safe.extra).toBeUndefined();
+		expect(safe.contexts).toBeUndefined();
 
 		expect(config.beforeBreadcrumb?.({ category: "fetch" })).toBeNull();
 		expect(config.beforeBreadcrumb?.({ category: "xhr" })).toBeNull();
-		expect(config.beforeBreadcrumb?.({ category: "ui.click" })).toEqual({
-			category: "ui.click",
+		expect(config.beforeBreadcrumb?.({ category: "ui.click" })).toBeNull();
+		expect(config).toMatchObject({
+			sendDefaultPii: false,
+			enableLogs: false,
+			maxBreadcrumbs: 0,
+			tracesSampleRate: 0,
 		});
 	});
 
@@ -431,5 +453,49 @@ describe("sentry telemetry", () => {
 		).toBe(false);
 		expect(sentryMock.captureException).not.toHaveBeenCalled();
 		expect(sentryMock.flush).not.toHaveBeenCalled();
+		expect(sentryMock.init).toHaveBeenCalledWith(
+			expect.objectContaining({ debug: false, transport: undefined }),
+		);
 	});
+
+	it.each([false, new Error("offline")])(
+		"does not claim delivery when smoke flushing fails: %s",
+		async (result) => {
+			const { initSentry, maybeCaptureSentrySmokeTest } =
+				await loadSentryModule();
+			await initSentry("main");
+			if (result instanceof Error)
+				sentryMock.flush.mockRejectedValueOnce(result);
+			else sentryMock.flush.mockResolvedValueOnce(result);
+			expect(
+				await maybeCaptureSentrySmokeTest("main", "?kolboo_sentry_smoke=1"),
+			).toBe(false);
+			expect(frontendLogMock.warn).toHaveBeenCalledWith(
+				"sentry",
+				expect.stringContaining("delivery not verified"),
+			);
+			expect(
+				frontendLogMock.info.mock.calls.some(([, message]) =>
+					String(message).includes("smoke flushed"),
+				),
+			).toBe(false);
+		},
+	);
+
+	it.each(["1.2.3", null])(
+		"uses a consistent fallback release for app version %s",
+		async (version) => {
+			runtimeConfigState.value.sentry_release = null;
+			runtimeConfigState.value.app_version = version;
+			vi.stubEnv("TAURI_PLATFORM", "linux");
+			const { initSentry } = await loadSentryModule();
+			await initSentry("main");
+			expect(sentryMock.init).toHaveBeenCalledWith(
+				expect.objectContaining({
+					release: version ? "kolboo@1.2.3" : undefined,
+				}),
+			);
+			expect(sentryMock.setTag).toHaveBeenCalledWith("os", "linux");
+		},
+	);
 });

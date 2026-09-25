@@ -348,7 +348,7 @@ export function useMicTestMeter({
 
 		if (noSignalYet) {
 			return {
-				text: "No signal yet — check the selected mic, Windows input mute, or permissions.",
+				text: "No signal yet — check the selected mic, system input mute, or permissions.",
 				tone: "yellow" as MicTestStatusTone,
 				isStale: false,
 			};

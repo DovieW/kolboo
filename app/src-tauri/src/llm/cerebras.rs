@@ -33,6 +33,7 @@ pub struct CerebrasLlmProvider {
 
 impl CerebrasLlmProvider {
     /// Create a new Cerebras provider with the given API key.
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
@@ -45,6 +46,7 @@ impl CerebrasLlmProvider {
     }
 
     /// Create with a specific model.
+    #[cfg(test)]
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),

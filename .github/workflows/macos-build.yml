@@ -1,6 +1,21 @@
-name: macOS Development Build
+name: Build (macOS)
 
 on:
+  workflow_call:
+    inputs:
+      architecture:
+        description: "Mac architecture to package"
+        required: true
+        type: string
+      release_build:
+        description: "Use release Sentry configuration and require release telemetry assets"
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded macOS bundle artifact"
+        value: ${{ jobs.build-macos.outputs.artifact-name }}
   workflow_dispatch:
     inputs:
       architecture:
@@ -17,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: macos-development-build-${{ github.ref }}
+  group: macos-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -25,12 +40,20 @@ jobs:
     name: Build macOS (${{ inputs.architecture }})
     runs-on: ${{ inputs.architecture == 'intel' && 'macos-15-intel' || 'macos-15' }}
 
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact_name }}
+
     env:
       CARGO_BUILD_JOBS: 3
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_RELEASE_DEBUG: 1
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
       CARGO_TERM_COLOR: always
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
+      TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
     steps:
       - name: Checkout
@@ -83,14 +106,19 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
-      - name: Compute development build metadata
+      - name: Compute build metadata
         id: build-meta
         shell: bash
+        env:
+          SENTRY_BUILD_KIND: ${{ inputs.release_build && 'release' || 'development' }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PUBLIC_DEV_DSN: ${{ vars.SENTRY_PUBLIC_DEV_DSN }}
+          SENTRY_PUBLIC_PROD_DSN: ${{ vars.SENTRY_PUBLIC_PROD_DSN }}
+          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
-          version=$(node -p "require('./app/package.json').version")
-          short_sha="${GITHUB_SHA::7}"
-          echo "release=kolboo@${version}-macos-dev.${short_sha}" >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
+          node .github/scripts/configure-desktop-sentry.mjs
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
@@ -98,6 +126,12 @@ jobs:
           toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: rustfmt
+
+      - name: Verify native symbol tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun --find dwarfdump
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -114,11 +148,11 @@ jobs:
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: dov-weinstock
-          SENTRY_PROJECT: kolboo-public-dev
+          SENTRY_PROJECT: ${{ steps.build-meta.outputs.project }}
           SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          TAURI_SENTRY_ENV: development
+          TAURI_SENTRY_ENV: ${{ steps.build-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          VITE_SENTRY_ENV: development
+          VITE_SENTRY_ENV: ${{ steps.build-meta.outputs.environment }}
           VITE_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
           VITE_SIGNED_UPDATER_ENABLED: "false"
         shell: bash
@@ -128,6 +162,56 @@ jobs:
           pnpm tauri build \
             --target "$KOLBOO_BUILD_TARGET" \
             --config src-tauri/tauri.macos-development.conf.json
+
+      - name: Verify and upload native symbols
+        working-directory: app
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: dov-weinstock
+          SENTRY_PROJECT: ${{ steps.build-meta.outputs.project }}
+          SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo"
+          test -f "$binary"
+          # Cargo puts the dSYMs beside hashed binaries under release/deps,
+          # not beside the top-level binaries that Tauri merges. Match each
+          # architecture's actual UUID instead of assuming a filename.
+          if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
+            targets=(aarch64-apple-darwin x86_64-apple-darwin)
+          else
+            targets=("$KOLBOO_BUILD_TARGET")
+          fi
+          dwarfs=()
+          for target in "${targets[@]}"; do
+            release_dir="src-tauri/target/$target/release"
+            arch_binary="$release_dir/kolboo"
+            test -f "$arch_binary"
+            expected_uuid=$(xcrun dwarfdump --uuid "$arch_binary" | awk '{ print $2 }')
+            test -n "$expected_uuid"
+            matching_dwarf=""
+            while IFS= read -r -d '' candidate; do
+              candidate_uuid=$(xcrun dwarfdump --uuid "$candidate" | awk '{ print $2 }')
+              if [[ "$candidate_uuid" == "$expected_uuid" ]]; then
+                matching_dwarf="$candidate"
+                break
+              fi
+            done < <(find "$release_dir" -type f -path '*/kolboo*.dSYM/Contents/Resources/DWARF/*' -print0)
+            if [[ -z "$matching_dwarf" ]]; then
+              echo "No dSYM matches $target UUID $expected_uuid; available Kolboo dSYMs:" >&2
+              find "$release_dir" -type d -name 'kolboo*.dSYM' -print >&2
+              exit 1
+            fi
+            echo "Matched $target symbols: $matching_dwarf"
+            dwarfs+=("$matching_dwarf")
+          done
+          diff -u \
+            <(xcrun dwarfdump --uuid "$binary" | awk '{ print $2, $3 }' | sort) \
+            <(xcrun dwarfdump --uuid "${dwarfs[@]}" | awk '{ print $2, $3 }' | sort)
+          # Sentry CLI accepts each architecture-specific dSYM, but rejects
+          # the two-architecture universal executable as a single DIF.
+          node ../.github/scripts/upload-desktop-symbols.mjs "${dwarfs[@]}"
 
       - name: Locate and verify bundles
         id: bundles
@@ -149,11 +233,15 @@ jobs:
           test -x "$executable"
           file "$executable"
           lipo -info "$executable"
+          if [[ "$KOLBOO_BUILD_TARGET" == "universal-apple-darwin" ]]; then
+            lipo "$executable" -verify_arch arm64 x86_64
+          fi
 
           echo "app_path=$app_path" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
 
       - name: Package downloadable artifacts
+        id: package
         shell: bash
         run: |
           set -euo pipefail
@@ -166,6 +254,11 @@ jobs:
 
           cat > artifacts/build-evidence.txt <<EOF
           architecture=${{ inputs.architecture }}
+          sentry_project=${{ steps.build-meta.outputs.project }}
+          sentry_environment=${{ steps.build-meta.outputs.environment }}
+          sentry_release=${{ steps.build-meta.outputs.release }}
+          sentry_runtime_enabled=${{ steps.build-meta.outputs.reporting_enabled }}
+          sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           build_target=${KOLBOO_BUILD_TARGET}
           signing=ad-hoc
           updater_enabled=false
@@ -174,11 +267,12 @@ jobs:
           run_id=${GITHUB_RUN_ID}
           run_url=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
           EOF
+          echo "artifact_name=kolboo-macos-${KOLBOO_ARTIFACT_SUFFIX}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload macOS development bundles
+      - name: Upload macOS bundles
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: kolboo-macos-${{ inputs.architecture }}
+          name: ${{ steps.package.outputs.artifact_name }}
           if-no-files-found: error
           retention-days: 7
           path: artifacts/**

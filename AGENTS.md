@@ -93,7 +93,21 @@ pnpm -C app cargo:fmt:check
 pnpm -C app cargo:test
 ```
 
-Use `pnpm -C app check:ci` as a checkpoint rather than after every small edit. When invoking Cargo locally, use `sccache` when available and set a conservative `CARGO_BUILD_JOBS` value so the machine remains responsive.
+Use `pnpm -C app check:ci` as a checkpoint rather than after every small edit. A
+new development machine must pass `pnpm -C app setup:check` before Rust-backed
+work. Use the repository package scripts for routine Cargo and Tauri commands;
+they require `sccache`, disable Cargo incremental output so Rust cache entries are
+reusable, cap parallelism, and enable `mold` on Linux. Direct Cargo invocations
+are for troubleshooting only and must reproduce the environment from
+`app/scripts/rust-build-env.mjs` when their result will be used as validation.
+
+All new or changed executable production code must retain 100% patch coverage.
+Run `pnpm -C app coverage:patch` before handing off a code change. The patch gate
+checks frontend lines, branches, and functions plus stable Rust line and function
+coverage. Rust branch coverage remains excluded while LLVM's support is unstable.
+Do not satisfy the gate with assertion-free tests, mocks of the implementation
+under test, or broader exclusions; the tests must protect the observable contract
+or a meaningful internal invariant.
 
 ## Completion discipline
 

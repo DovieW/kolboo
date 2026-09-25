@@ -18,9 +18,12 @@ Common categories of local data include:
 
 - **Settings** (via the Tauri store)
   - includes your chosen providers/models and feature toggles
-  - API keys and session secrets are intended to live in your OS secure
-    storage / credential manager; legacy installs may still have old fallback
-    values until they are migrated forward
+  - API keys and session secrets live in your OS secure storage / credential
+    manager (Windows Credential Manager, macOS Keychain, or Linux Secret
+    Service such as KWallet/GNOME Keyring). Legacy installs may still have old
+    fallback values until they are migrated forward. On Linux, a working Secret
+    Service is required so credentials persist across desktop sessions and
+    reboots.
 - **History** (your transcription history)
 - **Recordings** (if you enable saving audio recordings)
 - **Home recorder recovery audio**: Home recordings save audio locally during
@@ -70,28 +73,42 @@ Third-party providers have their own privacy policies and retention behavior.
 Kolboo currently separates telemetry into two buckets:
 
 - **Product analytics (PostHog)**
-  - event-only and intentionally small in scope
+  - event-only, with fixed page names and bounded recording metadata
   - no transcripts, prompts, completions, audio, OCR payloads, or clipboard
     contents are sent
   - desktop session replay and desktop autocapture stay off
-  - nothing is sent until the first-run disclosure is reviewed
-  - you can disable analytics later in **Settings → Data**
-  - if your organization manages the app with policy, that policy can keep
-    product analytics disabled and lock the toggle off
+  - nothing is sent until the current first-run disclosure is reviewed; its
+    collection and identifier details expand beneath the short choice
+  - basic unlinked usage events then run when PostHog is configured; each event
+    has a fresh ID and no persistent device or account ID, so these counts do
+    not identify returning users or unique installations
+  - basic events count app opens, page visits, recording starts and outcomes,
+    transcription starts/results/errors; recording outcomes include rounded
+    duration, mode, and recognized provider/model names (unknown/custom values
+    are grouped as “other”)
+  - **Settings → Data** controls optional linked analytics. When enabled, events
+    use an opaque account ID while signed in, or a random local installation ID
+    while signed out. No email address is sent; disabling it stops linked events
+    immediately, without joining prior unlinked events to the account
+  - organization policy can disable both streams
 - **Crash/error monitoring (Sentry)**
   - used for reliability failures rather than product-behavior analytics
-  - should not include raw user content or secrets
+  - keeps code locations, release/platform details and limited error categories;
+    raw error text, recordings, transcripts, provider responses, account identity,
+    request details and automatic UI/console breadcrumbs are not included
   - is DSN-gated, so environments without Sentry configuration do not send it
+  - does not enable session replay, profiling or continuous log uploads
 
-Current desktop product analytics scope is limited to a small set of settings /
-cloud-sync events. Kolboo uses a locally generated random distinct ID for those
-events; it is not your transcript text or provider credentials.
+The shared PostHog project marks events as development, beta, or production so
+local testing can be excluded from release reports. Counts are best effort when
+the app is offline or PostHog is unavailable. The PostHog server still sees the
+network request, including its source IP.
 
 ## Controlling your data
 
 Kolboo includes controls for deleting locally stored data
-(history/recordings/stats/logs), adjusting retention, and reviewing the current
-analytics toggle in **Settings → Data**.
+(history/recordings/stats/logs), adjusting retention, and reviewing the optional
+linked analytics toggle in **Settings → Data**.
 
 If your organization manages Kolboo, **Settings → Policy** can explain why a
 particular setting is locked.

@@ -560,6 +560,13 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         }
     }
 
+    for provider in crate::custom_providers::load(app) {
+        if let Some(key) = crate::secrets::get_api_key(app, &provider.key_name()) {
+            stt_api_keys.insert(provider.id.clone(), key.clone());
+            llm_api_keys.insert(provider.id, key);
+        }
+    }
+
     // Read rewrite prompt sections + per-program profiles from store
     //
     // `cleanup_prompt_sections` is treated as overrides on top of the built-in defaults.
@@ -885,6 +892,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         quiet_audio_require_speech,
 
         llm_config: llm::LlmConfig {
+            custom_providers: crate::custom_providers::load(app),
             enabled: llm_enabled,
             provider: llm_provider_effective,
             api_key: llm_api_key,

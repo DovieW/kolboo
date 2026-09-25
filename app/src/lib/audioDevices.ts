@@ -137,9 +137,13 @@ export function buildMicSelectorModel(params: {
 		};
 	});
 
-	const defaultOptionLabel = defaultDeviceName
-		? `System Default: ${defaultDeviceName}`
-		: "System Default — no default detected";
+	const defaultOptionLabel = !defaultDeviceName
+		? "System default — unavailable"
+		: /^(?:system )?default(?: (?:audio|input) device)?$/i.test(
+					defaultDeviceName,
+				)
+			? "System default"
+			: `System default · ${defaultDeviceName}`;
 
 	const selectData: Array<{ value: string; label: string }> = [
 		{ value: "default", label: defaultOptionLabel },
@@ -151,9 +155,7 @@ export function buildMicSelectorModel(params: {
 
 	let selectedValue = "default";
 	let selectedLabel = defaultOptionLabel;
-	let selectedSummaryLabel = defaultDeviceName
-		? `System Default (${defaultDeviceName})`
-		: "System Default";
+	let selectedSummaryLabel = defaultOptionLabel;
 	let selectedDevice: MicSelectOption | null = null;
 	let missingSelected: MissingSelectedMic | null = null;
 	let legacySelectionTargetId: string | null = null;
@@ -219,7 +221,7 @@ export function describeMicSelection(model: MicSelectorModel): string {
 	if (model.selectedValue === "default") {
 		return model.defaultDeviceName
 			? `Kolboo will use the current system default microphone: ${model.defaultDeviceName}.`
-			: "Kolboo will use Windows’ current default microphone.";
+			: "No system default microphone was detected. Choose an input from the list.";
 	}
 
 	return `Kolboo will record from ${model.selectedSummaryLabel}.`;
@@ -260,7 +262,7 @@ export function toMicTestErrorMessage(error: unknown): string {
 	}
 
 	if (lowered.includes("no input device")) {
-		return "Kolboo couldn’t find a microphone to test. Plug one in, check Windows sound settings, then refresh the list.";
+		return "Kolboo couldn’t find a microphone to test. Check your system’s input settings, then refresh the list.";
 	}
 
 	if (lowered.includes("failed to start mic test")) {
@@ -279,5 +281,5 @@ export function toMicListErrorMessage(error: unknown): string {
 		return `Kolboo couldn’t list microphones right now. ${message}`;
 	}
 
-	return "Kolboo couldn’t list microphones right now. Try refreshing, or reopen the app if Windows just changed audio devices.";
+	return "Kolboo couldn’t list microphones right now. Try refreshing, or reopen the app after an audio-device change.";
 }

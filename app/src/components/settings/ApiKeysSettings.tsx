@@ -7,7 +7,6 @@ import {
 	Collapse,
 	Divider,
 	Group,
-	PasswordInput,
 	Progress,
 	SegmentedControl,
 	Select,
@@ -19,18 +18,12 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { Link as LinkIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
-import {
-	API_KEYS,
-	type ApiKeyConfig,
-	type ApiKeyMutationIntent,
-	resolveApiKeyMutationIntent,
-} from "../../lib/apiKeys";
-import { formatErrorMessage } from "../../lib/formatError";
+import { useEffect, useState } from "react";
+import { API_KEYS, type ApiKeyConfig } from "../../lib/apiKeys";
 import { EMBEDDING_MODELS, STT_MODELS } from "../../lib/modelOptions";
 import type { ByokLlmModelCatalog } from "../../lib/modelsDev";
 import {
@@ -63,7 +56,8 @@ import type {
 	WhisperModelDownloadProgress,
 	WhisperModelInfo,
 } from "../../lib/tauri";
-import { tauriAPI } from "../../lib/tauri";
+import { ApiKeyField } from "./ApiKeyField";
+import { CustomProvidersSettings } from "./CustomProvidersSettings";
 import { OcrProviderSettings } from "./OcrProviderSettings";
 import { SettingsRow } from "./SettingsRow";
 
@@ -144,89 +138,18 @@ function formatProviderModelsTooltip(
 function ApiKeyInput({
 	config,
 	llmModels,
+	disabled,
 }: {
 	config: ApiKeyConfig;
 	llmModels: ByokLlmModelCatalog;
+	disabled: boolean;
 }) {
-	const queryClient = useQueryClient();
-	const [value, setValue] = useState("");
-	const [isPrefilling, _setIsPrefilling] = useState(false);
-	const hasHydratedRef = useRef(false);
-
 	const { data: settings } = useSettings();
 	const updateGroqFreeTier = useUpdateGroqFreeTier();
 	const updateCerebrasFreeTier = useUpdateCerebrasFreeTier();
 	const updateAssemblyAiFreeTier = useUpdateAssemblyAiFreeTier();
 	const updateSpeechmaticsFreeTier = useUpdateSpeechmaticsFreeTier();
 	const updateCohereFreeTier = useUpdateCohereFreeTier();
-
-	const { data: savedKeyValue } = useQuery({
-		queryKey: ["apiKeyValue", config.storeKey],
-		queryFn: () => tauriAPI.getApiKey(config.storeKey),
-		staleTime: 0,
-	});
-
-	useEffect(() => {
-		if (hasHydratedRef.current) return;
-		if (!savedKeyValue) return;
-
-		// Mirror the setup guide: if a key exists, show it in the PasswordInput
-		// (hidden by default), so Show/Hide reveals something useful.
-		setValue(savedKeyValue);
-		hasHydratedRef.current = true;
-	}, [savedKeyValue]);
-
-	const saveKey = useMutation({
-		mutationFn: async (intent: ApiKeyMutationIntent) => {
-			if (intent.kind === "clear") {
-				await tauriAPI.clearApiKey(config.storeKey);
-				return "";
-			}
-
-			await tauriAPI.setApiKey(config.storeKey, intent.value);
-			return intent.value;
-		},
-		onSuccess: async (normalizedValue) => {
-			await Promise.all([
-				queryClient.invalidateQueries({
-					queryKey: ["apiKey", config.storeKey],
-				}),
-				queryClient.invalidateQueries({
-					queryKey: ["apiKeyValue", config.storeKey],
-				}),
-				queryClient.invalidateQueries({ queryKey: ["availableProviders"] }),
-			]);
-
-			// Keep the normalized value in the field so blur/Enter stays idempotent
-			// and a cleared key looks cleared immediately, even before the query
-			// refetch resolves.
-			setValue(normalizedValue);
-			hasHydratedRef.current = true;
-		},
-		onError: (error, intent) => {
-			notifications.show({
-				title:
-					intent.kind === "clear"
-						? `Unable to clear ${config.label} API key`
-						: `Unable to save ${config.label} API key`,
-				message: formatErrorMessage(error),
-				color: "red",
-			});
-		},
-	});
-
-	const handleCommit = () => {
-		if (saveKey.isPending) return;
-
-		const intent = resolveApiKeyMutationIntent({
-			draftValue: value,
-			savedValue: savedKeyValue,
-		});
-
-		if (!intent) return;
-
-		saveKey.mutate(intent);
-	};
 
 	const modelCountsLabel = formatProviderModelCounts(config.id, llmModels);
 	const modelsTooltip = formatProviderModelsTooltip(config.id, llmModels);
@@ -241,9 +164,9 @@ function ApiKeyInput({
 						size="xs"
 						c="var(--text-muted)"
 						className="settings-description--single-line"
-						title="Stored securely in your OS credential vault. Leave the field blank to remove the saved key."
+						title="Saved in your OS credential vault. Paste a key to add or replace it."
 					>
-						Stored securely. Leave blank to clear.
+						Your key, stored securely on this device.
 					</Text>
 					{config.id === "groq" && (
 						<Group gap={10} align="center" wrap="nowrap" mt={2}>
@@ -396,6 +319,7 @@ function ApiKeyInput({
 					<Tooltip label="Get key" withArrow>
 						<ActionIcon
 							component="a"
+							aria-label={`Get a ${config.label} API key`}
 							href={config.getKeyUrl}
 							target="_blank"
 							rel="noreferrer"
@@ -406,28 +330,10 @@ function ApiKeyInput({
 							<LinkIcon size={16} />
 						</ActionIcon>
 					</Tooltip>
-					<PasswordInput
-						value={value}
-						onChange={(e) => setValue(e.currentTarget.value)}
-						onBlur={handleCommit}
-						placeholder={config.placeholder}
-						size="sm"
-						disabled={isPrefilling || saveKey.isPending}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								height: 36,
-								width: 200,
-							},
-						}}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") {
-								e.preventDefault();
-								e.currentTarget.blur();
-							}
-						}}
+					<ApiKeyField
+						storeKey={config.storeKey}
+						label={config.label}
+						disabled={disabled}
 					/>
 				</>
 			}
@@ -1219,6 +1125,7 @@ export function ApiKeysSettings({
 					key={config.id}
 					config={config}
 					llmModels={byokLlmModelsQuery.data}
+					disabled={Boolean(isProfileScope)}
 				/>
 			))}
 
@@ -1282,6 +1189,7 @@ export function ApiKeysSettings({
 				}
 			/>
 
+			<CustomProvidersSettings />
 			<OcrProviderSettings editingProfileId={editingProfileId} />
 
 			<LocalWhisperModelsCard />
@@ -1292,7 +1200,9 @@ export function ApiKeysSettings({
 		return (
 			<Tooltip label={GLOBAL_ONLY_TOOLTIP} withArrow position="top-start">
 				<div style={{ opacity: 0.5, cursor: "not-allowed" }}>
-					<div style={{ pointerEvents: "none" }}>{content}</div>
+					<div inert style={{ pointerEvents: "none" }}>
+						{content}
+					</div>
 				</div>
 			</Tooltip>
 		);

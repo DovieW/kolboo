@@ -1,6 +1,6 @@
-import { Alert, Stack, Text, Title } from "@mantine/core";
+import { Alert, Stack } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
 	useLicenseAuthContext,
@@ -63,15 +63,6 @@ export function AccountView() {
 	const authContextMessage =
 		authReasonCodeToMessage(context?.reason_code ?? null) ??
 		"No auth issue detected.";
-	const headerSubtitle = useMemo(() => {
-		if (modeLabel === "Managed Business") {
-			return "A cleaner view of managed access, identity, usage, and recovery.";
-		}
-		if (modeLabel === "Personal") {
-			return "Everything about your managed personal account in one place.";
-		}
-		return "See your current setup, usage, and sign-in actions without digging through settings.";
-	}, [modeLabel]);
 
 	const queryError = licenseState.error ?? authContext.error;
 	const loginTierHint =
@@ -239,17 +230,8 @@ export function AccountView() {
 	};
 
 	return (
-		<div className="main-content">
-			<header className="tv-page-header animate-in">
-				<Title order={1} mb={4}>
-					Account
-				</Title>
-				<Text c="dimmed" size="sm">
-					{headerSubtitle}
-				</Text>
-			</header>
-
-			<div className="main-content-inner">
+		<div className={`main-content ${signedIn ? "" : "account-signin-layout"}`}>
+			<div className="main-content-inner page-content-start">
 				<Stack gap="lg" className="account-page-stack">
 					{queryError ? (
 						<Alert
@@ -261,17 +243,19 @@ export function AccountView() {
 						</Alert>
 					) : null}
 
-					<AccountSummaryCard
-						loading={licenseState.isLoading || authContext.isLoading}
-						modeLabel={modeLabel}
-						modeDescription={modeDescription}
-						statusLabel={statusLabel}
-						statusColor={statusColor}
-						email={state?.email ?? null}
-						organizationLabel={state?.org?.org_name ?? null}
-						signedIn={signedIn}
-						reauthRequired={reauthRequired}
-					/>
+					{state && signedIn && (
+						<AccountSummaryCard
+							loading={licenseState.isLoading || authContext.isLoading}
+							modeLabel={modeLabel}
+							modeDescription={modeDescription}
+							statusLabel={statusLabel}
+							statusColor={statusColor}
+							email={state.email ?? null}
+							organizationLabel={state.org?.org_name ?? null}
+							signedIn={signedIn}
+							reauthRequired={reauthRequired}
+						/>
+					)}
 
 					{signedIn ? (
 						<div className="account-page-grid">

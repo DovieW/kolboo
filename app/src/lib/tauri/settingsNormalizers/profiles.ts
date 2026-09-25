@@ -10,6 +10,7 @@ import type {
 import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
+	normalizePasteShortcut,
 	normalizeQuickAskDismissModeOverride,
 	normalizeWidgetPosition,
 } from "./appBehavior";
@@ -296,5 +297,6 @@ export function normalizeRewriteProfile(
 		widget_position,
 		output_mode,
 		output_hit_enter,
+		output_paste_shortcut: normalizePasteShortcut(p.output_paste_shortcut),
 	};
 }

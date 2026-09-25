@@ -3,6 +3,7 @@ import {
 	buildTelemetryDisclosureResolutionPatch,
 	isTelemetryDisclosureResolved,
 	POSTHOG_ANALYTICS_ENABLED_KEY,
+	shouldSendAggregateAnalytics,
 	shouldSendProductAnalytics,
 	TELEMETRY_DISCLOSURE_ACKNOWLEDGED_AT_KEY,
 	TELEMETRY_DISCLOSURE_VERSION,
@@ -54,6 +55,21 @@ describe("telemetry disclosure helpers", () => {
 				telemetryDisclosureAcknowledgedAt: null,
 				telemetryDisclosureVersion: null,
 			}),
+		).toBe(false);
+	});
+
+	it("keeps unlinked counts independent of the local toggle but respects disclosure and organization policy", () => {
+		const reviewed = {
+			telemetryDisclosureAcknowledgedAt: "2026-09-24T10:00:00.000Z",
+			telemetryDisclosureVersion: TELEMETRY_DISCLOSURE_VERSION,
+		};
+		expect(shouldSendAggregateAnalytics(reviewed, false)).toBe(true);
+		expect(shouldSendAggregateAnalytics(reviewed, true)).toBe(false);
+		expect(
+			shouldSendAggregateAnalytics(
+				{ ...reviewed, telemetryDisclosureVersion: "old" },
+				false,
+			),
 		).toBe(false);
 	});
 

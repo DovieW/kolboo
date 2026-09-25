@@ -11,6 +11,14 @@ fn read_schema(path: &PathBuf) -> Value {
 }
 
 #[test]
+fn file_import_result_schema_matches_generated_contract() {
+    let generated = serde_json::to_value(schema_for!(crate::FileImportResult)).unwrap();
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("gen/schemas/file-import-result.schema.json");
+    assert_eq!(generated, read_schema(&path));
+}
+
+#[test]
 fn system_proxy_info_schema_matches_checked_in_file() {
     let schema = schema_for!(crate::commands::network::SystemProxyInfo);
     let generated: Value =

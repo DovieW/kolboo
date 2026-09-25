@@ -26,6 +26,57 @@ export interface HistoryEntry {
 	llm_model?: string | null;
 	// Request id of the WAV recording to use for playback/rerun.
 	recording_request_id?: string | null;
+	title?: string | null;
+	duration_seconds?: number | null;
+	recording_mode?: "dictation" | "meeting" | null;
+	speaker_segments?: SpeakerSegment[];
+	original_stt_text?: string | null;
+}
+
+export interface SpeakerSegment {
+	speaker: string;
+	text: string;
+	start_seconds: number;
+	end_seconds: number;
+	part: number;
+}
+export interface RecordingPreferences {
+	mode: "dictation" | "meeting";
+	meeting_model: {
+		provider: string;
+		model: string;
+		use_managed?: boolean;
+	} | null;
+}
+
+export interface FileImportResult {
+	transcription_complete: boolean;
+	recovery_id: string | null;
+	message: string | null;
+}
+
+export interface HistoryEdit {
+	revision: number;
+	title: string | null;
+	text: string | null;
+}
+export interface HistoryEditInput {
+	id: string;
+	expected_revision: number;
+	title: string | null;
+	text: string | null;
+}
+export interface HistoryDetail {
+	entry: HistoryEntry;
+	original_text: string;
+	revision: number;
+	edited: boolean;
+	edit_error: string | null;
+}
+
+export interface RecordingWaveform {
+	duration_seconds: number;
+	peaks: number[];
 }
 
 export type HistoryDeleteMode =
@@ -61,7 +112,7 @@ export interface ModelUsageCount {
 }
 
 export interface HistoryPageResult {
-	items: HistoryEntry[];
+	items: HistorySummary[];
 	totalAll: number;
 	totalFiltered: number;
 	page: number;
@@ -69,6 +120,12 @@ export interface HistoryPageResult {
 	sttModelUsage: ModelUsageCount[];
 	llmModelUsage: ModelUsageCount[];
 }
+
+/** text is a preview; fetch HistoryDetail before copying/exporting a document. */
+export type HistorySummary = Omit<
+	HistoryEntry,
+	"speaker_segments" | "original_stt_text"
+>;
 
 export interface PromptSection {
 	content: string | null;
@@ -219,15 +276,14 @@ export interface RewriteProgramPromptProfile {
 
 	// Per-profile overrides for UI (Option 1: override-or-inherit)
 	// NOTE: These are persisted in settings.json as part of the profile object.
-	// The backend may ignore them until it is updated to apply them at runtime.
 	sound_enabled?: boolean | null;
 	playing_audio_handling?: PlayingAudioHandling | null;
 	overlay_mode?: OverlayMode | null;
 	widget_position?: WidgetPosition | null;
 	output_mode?: OutputMode | null;
+	output_paste_shortcut?: PasteShortcut | null;
 
 	// After paste, optionally press Enter.
-	// (May be ignored by backend until runtime/profile routing supports it.)
 	output_hit_enter?: boolean | null;
 
 	// Per-profile OCR context mode overrides (tri-state, null = inherit from global).
@@ -610,6 +666,12 @@ export type WidgetPosition =
 	| "bottom-right";
 
 export type OutputMode = "paste" | "paste_and_clipboard" | "clipboard";
+export type PasteShortcut =
+	| "system"
+	| "ctrl_v"
+	| "ctrl_shift_v"
+	| "shift_insert"
+	| "cmd_v";
 
 export type QuickAskDismissMode = "manual" | "auto";
 
@@ -894,6 +956,7 @@ export interface AppSettings {
 	widget_position: WidgetPosition;
 	output_mode: OutputMode;
 	output_hit_enter: boolean;
+	output_paste_shortcut: PasteShortcut;
 	// When true, output injection will not read/restore the clipboard.
 	output_clipboard_privacy_mode: boolean;
 	// When true, avoid pasting into sensitive targets (e.g., password fields).

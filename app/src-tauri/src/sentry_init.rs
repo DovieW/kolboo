@@ -4,24 +4,6 @@ use std::sync::OnceLock;
 
 static SENTRY_GUARD: OnceLock<sentry::ClientInitGuard> = OnceLock::new();
 
-const SENSITIVE_MARKERS: &[&str] = &[
-    "api_key",
-    "apikey",
-    "token",
-    "authorization",
-    "bearer ",
-    "cookie",
-    "password",
-    "secret",
-    "clipboard",
-    "completion",
-    "transcript",
-    "ocr",
-    "audio",
-    "wav",
-    "prompt",
-];
-
 fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key)
         .ok()
@@ -40,92 +22,118 @@ fn sentry_config_value(key: &str, compiled_value: Option<&'static str>) -> Optio
     env_non_empty(key).or_else(|| compiled_non_empty(compiled_value))
 }
 
-fn looks_sensitive(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    SENSITIVE_MARKERS
-        .iter()
-        .any(|marker| lower.contains(marker))
+fn code_filename(value: &str) -> String {
+    value
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
-fn scrub_text(value: &str) -> String {
-    if looks_sensitive(value) {
-        "[REDACTED]".to_string()
-    } else {
-        value.to_string()
-    }
-}
-
-fn scrub_protocol_value_map(map: &mut sentry::protocol::Map<String, sentry::protocol::Value>) {
-    for (key, value) in map.iter_mut() {
-        if looks_sensitive(key) {
-            *value = sentry::protocol::Value::String("[REDACTED]".to_string());
-            continue;
-        }
-        scrub_json_value(value);
-    }
-}
-
-fn scrub_json_object(map: &mut sentry::protocol::value::Map<String, sentry::protocol::Value>) {
-    for (key, value) in map.iter_mut() {
-        if looks_sensitive(key) {
-            *value = sentry::protocol::Value::String("[REDACTED]".to_string());
-            continue;
-        }
-        scrub_json_value(value);
-    }
-}
-
-fn scrub_json_value(value: &mut sentry::protocol::Value) {
-    match value {
-        sentry::protocol::Value::String(text) => {
-            *text = scrub_text(text);
-        }
-        sentry::protocol::Value::Array(entries) => {
-            for entry in entries {
-                scrub_json_value(entry);
-            }
-        }
-        sentry::protocol::Value::Object(map) => {
-            scrub_json_object(map);
-        }
-        _ => {}
+fn scrub_stack(stack: &mut sentry::protocol::Stacktrace) {
+    stack.registers.clear();
+    for frame in &mut stack.frames {
+        frame.filename = frame.filename.as_deref().map(code_filename);
+        frame.package = frame.package.as_deref().map(code_filename);
+        frame.abs_path = None;
+        frame.vars.clear();
+        frame.pre_context.clear();
+        frame.post_context.clear();
+        frame.context_line = None;
     }
 }
 
 fn scrub_event(
     mut event: sentry::protocol::Event<'static>,
 ) -> Option<sentry::protocol::Event<'static>> {
-    // Never send request/user identity by default.
-    event.user = None;
-    event.request = None;
-    event.server_name = None;
-
-    if let Some(message) = event.message.as_mut() {
-        *message = scrub_text(message);
-    }
-
-    for exception in event.exception.values.iter_mut() {
-        if let Some(value) = exception.value.as_mut() {
-            *value = scrub_text(value);
+    use sentry::protocol::{Context, DebugImage, Event, Mechanism};
+    // Panic payloads and errors may include arbitrary provider/user content,
+    // even when no sensitive keyword occurs. Retain code, not message bodies.
+    for exception in &mut event.exception.values {
+        exception.value = Some("Error details withheld for privacy".into());
+        if exception.ty != "panic" {
+            exception.ty = "Error".into();
+        }
+        exception.thread_id = None;
+        if let Some(mechanism) = exception.mechanism.take() {
+            exception.mechanism = Some(Mechanism {
+                ty: mechanism.ty,
+                handled: mechanism.handled,
+                ..Default::default()
+            });
+        }
+        for stack in [&mut exception.stacktrace, &mut exception.raw_stacktrace]
+            .into_iter()
+            .flatten()
+        {
+            scrub_stack(stack);
         }
     }
-
-    for (key, value) in event.tags.iter_mut() {
-        if looks_sensitive(key) || looks_sensitive(value) {
-            *value = "[REDACTED]".to_string();
+    if let Some(stack) = &mut event.stacktrace {
+        scrub_stack(stack);
+    }
+    event.tags.retain(|key, value| {
+        matches!(
+            (key.as_str(), value.as_str()),
+            (
+                "surface",
+                "main" | "overlay" | "overlay_hover" | "quick_ask"
+            ) | ("event_kind", "smoke_test")
+        )
+    });
+    event.tags.insert("service".into(), "desktop".into());
+    event.tags.insert("runtime".into(), "tauri-backend".into());
+    event.tags.insert("os".into(), std::env::consts::OS.into());
+    event
+        .tags
+        .insert("arch".into(), std::env::consts::ARCH.into());
+    event
+        .contexts
+        .retain(|key, context| match (key.as_str(), context) {
+            ("os", Context::Os(os)) => {
+                os.other.clear();
+                true
+            }
+            ("runtime", Context::Runtime(runtime)) => {
+                runtime.other.clear();
+                true
+            }
+            _ => false,
+        });
+    for image in &mut event.debug_meta.to_mut().images {
+        match image {
+            DebugImage::Apple(image) => image.name = code_filename(&image.name),
+            DebugImage::Symbolic(image) => {
+                image.name = code_filename(&image.name);
+                image.debug_file = image.debug_file.as_deref().map(code_filename);
+            }
+            DebugImage::Wasm(image) => {
+                image.name = code_filename(&image.name);
+                image.code_file = code_filename(&image.code_file);
+                image.debug_file = image.debug_file.as_deref().map(code_filename);
+            }
+            DebugImage::Proguard(_) => {}
         }
     }
-
-    scrub_protocol_value_map(&mut event.extra);
-
-    for breadcrumb in &mut event.breadcrumbs.values {
-        if let Some(message) = breadcrumb.message.as_mut() {
-            *message = scrub_text(message);
-        }
-        scrub_protocol_value_map(&mut breadcrumb.data);
-    }
-
-    Some(event)
+    Some(Event {
+        event_id: event.event_id,
+        timestamp: event.timestamp,
+        level: event.level,
+        platform: event.platform,
+        release: event.release,
+        environment: event.environment,
+        dist: event.dist,
+        sdk: event.sdk,
+        message: event
+            .message
+            .map(|_| "Backend error (details withheld)".into()),
+        exception: event.exception,
+        stacktrace: event.stacktrace,
+        tags: event.tags,
+        contexts: event.contexts,
+        debug_meta: event.debug_meta,
+        ..Default::default()
+    })
 }
 
 fn sentry_environment() -> String {
@@ -139,53 +147,71 @@ fn sentry_environment() -> String {
 }
 
 pub fn init() {
-    if SENTRY_GUARD.get().is_some() {
+    init_once(
+        &SENTRY_GUARD,
+        sentry_config_value("TAURI_SENTRY_DSN", option_env!("TAURI_SENTRY_DSN")),
+        sentry_config_value("TAURI_SENTRY_RELEASE", option_env!("TAURI_SENTRY_RELEASE"))
+            .unwrap_or_else(|| format!("kolboo@{}", env!("CARGO_PKG_VERSION"))),
+        sentry_environment(),
+    );
+}
+
+fn init_once(
+    guard_slot: &OnceLock<sentry::ClientInitGuard>,
+    dsn_raw: Option<String>,
+    release: String,
+    environment: String,
+) {
+    if guard_slot.get().is_some() {
         return;
     }
 
-    let Some(dsn_raw) = sentry_config_value("TAURI_SENTRY_DSN", option_env!("TAURI_SENTRY_DSN"))
-    else {
+    let Some(dsn_raw) = dsn_raw else {
         log::info!("Backend Sentry disabled (no TAURI_SENTRY_DSN)");
         return;
     };
 
     let dsn = match dsn_raw.parse() {
         Ok(parsed) => parsed,
-        Err(err) => {
-            log::warn!("Backend Sentry disabled (invalid DSN): {err}");
+        Err(_) => {
+            log::warn!("Backend Sentry disabled (invalid DSN)");
             return;
         }
     };
 
-    let release = sentry_config_value("TAURI_SENTRY_RELEASE", option_env!("TAURI_SENTRY_RELEASE"))
-        .or_else(|| env_non_empty("TAURI_APP_VERSION"))
-        .map(Cow::Owned);
-
     let mut options = sentry::ClientOptions::default();
     options.dsn = Some(dsn);
-    options.release = release;
-    options.environment = Some(Cow::Owned(sentry_environment()));
+    options.release = Some(Cow::Owned(release));
+    options.environment = Some(Cow::Owned(environment));
+    options.send_default_pii = false;
+    options.enable_logs = false;
+    options.enable_metrics = false;
+    options.max_breadcrumbs = 0;
     options.before_send = Some(Arc::new(scrub_event));
 
     let guard = sentry::init(options);
 
-    if sentry::Hub::current().client().is_some() {
-        let _ = SENTRY_GUARD.set(guard);
-        log::info!("Backend Sentry initialized");
-    } else {
-        log::warn!("Backend Sentry initialization did not attach a client");
-    }
+    let _ = guard_slot.set(guard);
+    log::info!("Backend Sentry initialized");
 }
 
 pub fn capture_backend_smoke(surface: &str) -> bool {
-    if sentry::Hub::current().client().is_none() {
+    let Some(client) = sentry::Hub::current().client() else {
+        return false;
+    };
+    if !matches!(surface, "main" | "overlay" | "overlay_hover" | "quick_ask")
+        || !matches!(
+            client.options().environment.as_deref(),
+            Some("development" | "test" | "preview" | "beta")
+        )
+    {
         return false;
     }
 
     sentry::with_scope(
         |scope| {
             scope.set_tag("runtime", "tauri-backend");
-            scope.set_tag("surface", scrub_text(surface));
+            scope.set_tag("surface", surface);
             scope.set_tag("event_kind", "smoke_test");
         },
         || {
@@ -193,135 +219,9 @@ pub fn capture_backend_smoke(surface: &str) -> bool {
         },
     );
 
-    true
+    client.flush(Some(std::time::Duration::from_secs(2)))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{compiled_non_empty, looks_sensitive, scrub_event, scrub_text};
-    use sentry::protocol::{
-        value::Map as JsonMap, Breadcrumb, Event, Exception, Map, Request, User, Value,
-    };
-
-    #[test]
-    fn scrub_text_redacts_sensitive_markers() {
-        assert_eq!(scrub_text("authorization bearer token"), "[REDACTED]");
-        assert_eq!(scrub_text("user transcript sample"), "[REDACTED]");
-        assert_eq!(scrub_text("clipboard restore payload"), "[REDACTED]");
-        assert_eq!(scrub_text("completion preview"), "[REDACTED]");
-    }
-
-    #[test]
-    fn scrub_text_keeps_safe_values() {
-        assert_eq!(scrub_text("startup health check"), "startup health check");
-        assert!(!looks_sensitive("normal-error-category"));
-    }
-
-    #[test]
-    fn compiled_config_ignores_missing_or_blank_values() {
-        assert_eq!(compiled_non_empty(None), None);
-        assert_eq!(compiled_non_empty(Some("  ")), None);
-        assert_eq!(
-            compiled_non_empty(Some(" beta-release ")),
-            Some("beta-release".to_string())
-        );
-    }
-
-    #[test]
-    fn scrub_event_removes_identity_and_redacts_nested_payloads() {
-        let mut extra = Map::new();
-        extra.insert(
-            "clipboard_contents".to_string(),
-            Value::String("copied text".to_string()),
-        );
-        extra.insert(
-            "safe_nested".to_string(),
-            Value::Object({
-                let mut nested = JsonMap::new();
-                nested.insert(
-                    "completion_text".to_string(),
-                    Value::String("rewritten answer".to_string()),
-                );
-                nested.insert("safe_value".to_string(), Value::String("ok".to_string()));
-                nested
-            }),
-        );
-
-        let breadcrumb = Breadcrumb {
-            message: Some("prompt payload".to_string()),
-            data: {
-                let mut data = Map::new();
-                data.insert(
-                    "ocr_payload".to_string(),
-                    Value::String("screen text".to_string()),
-                );
-                data.insert("safe_flag".to_string(), Value::Bool(true));
-                data
-            },
-            ..Breadcrumb::default()
-        };
-
-        let event = Event {
-            user: Some(User::default()),
-            request: Some(Request::default()),
-            server_name: Some("desktop-host".into()),
-            message: Some("user transcript sample".to_string()),
-            exception: vec![Exception {
-                value: Some("authorization bearer token".to_string()),
-                ..Exception::default()
-            }]
-            .into(),
-            tags: {
-                let mut tags = Map::new();
-                tags.insert("clipboard_state".to_string(), "present".to_string());
-                tags.insert("safe".to_string(), "ok".to_string());
-                tags
-            },
-            extra,
-            breadcrumbs: vec![breadcrumb].into(),
-            ..Event::default()
-        };
-
-        let safe = scrub_event(event).expect("event should survive redaction");
-
-        assert!(safe.user.is_none());
-        assert!(safe.request.is_none());
-        assert!(safe.server_name.is_none());
-        assert_eq!(safe.message.as_deref(), Some("[REDACTED]"));
-        assert_eq!(
-            safe.exception.values[0].value.as_deref(),
-            Some("[REDACTED]")
-        );
-        assert_eq!(
-            safe.tags.get("clipboard_state").map(String::as_str),
-            Some("[REDACTED]")
-        );
-        assert_eq!(safe.tags.get("safe").map(String::as_str), Some("ok"));
-        assert_eq!(
-            safe.extra.get("clipboard_contents"),
-            Some(&Value::String("[REDACTED]".to_string()))
-        );
-
-        let nested = safe
-            .extra
-            .get("safe_nested")
-            .and_then(Value::as_object)
-            .expect("nested extra object should stay present");
-        assert_eq!(
-            nested.get("completion_text"),
-            Some(&Value::String("[REDACTED]".to_string()))
-        );
-        assert_eq!(
-            nested.get("safe_value"),
-            Some(&Value::String("ok".to_string()))
-        );
-
-        let breadcrumb = &safe.breadcrumbs.values[0];
-        assert_eq!(breadcrumb.message.as_deref(), Some("[REDACTED]"));
-        assert_eq!(
-            breadcrumb.data.get("ocr_payload"),
-            Some(&Value::String("[REDACTED]".to_string()))
-        );
-        assert_eq!(breadcrumb.data.get("safe_flag"), Some(&Value::Bool(true)));
-    }
-}
+#[path = "sentry_init/tests.rs"]
+mod tests;

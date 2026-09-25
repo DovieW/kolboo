@@ -6,13 +6,9 @@ use crate::commands::{CommandError, CommandResult};
 
 #[allow(unused_imports)]
 pub use crate::text::inject::{
-    copy_to_clipboard, output_text_with_mode, output_text_with_mode_options,
-    paste_and_keep_clipboard, type_as_keystrokes, type_text_blocking_with_options, OutputMode,
+    copy_to_clipboard, output_text_with_mode_options, paste_and_keep_clipboard, type_as_keystrokes,
+    type_text_blocking_with_options, OutputMode,
 };
-
-#[cfg(not(target_os = "windows"))]
-#[allow(unused_imports)]
-pub use crate::text::inject::type_text_blocking;
 
 #[cfg(desktop)]
 #[allow(unused_imports)]
@@ -47,6 +43,7 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
         true,
         true,
         smart_paste_protection,
+        crate::core::output_settings::foreground_paste_shortcut(&app),
     )
     .map_err(CommandError::from)?;
 
@@ -71,6 +68,7 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
                 OutputMode::Paste,
                 false,
                 true,
+                crate::core::output_settings::foreground_paste_shortcut(&app_for_output),
             )
             .map(|_| ())
             .map_err(CommandError::from),

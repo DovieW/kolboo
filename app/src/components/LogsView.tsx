@@ -1,4 +1,13 @@
-import { Stack } from "@mantine/core";
+import {
+	Accordion,
+	Alert,
+	Button,
+	Group,
+	Loader,
+	Modal,
+	Stack,
+	Text,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
@@ -25,7 +34,8 @@ export function LogsView(
 	props: { jumpToLogId?: string | null; onJumpHandled?: () => void } = {},
 ) {
 	const { jumpToLogId = null, onJumpHandled } = props;
-	const { data: logs } = useRequestLogs(50);
+	const logsQuery = useRequestLogs(50);
+	const logs = logsQuery.data;
 	const { data: settings } = useSettings();
 	const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([]);
 	const [filterText, setFilterText] = useState("");
@@ -37,6 +47,9 @@ export function LogsView(
 	const [durationMinSecs, setDurationMinSecs] = useState<string | number>("");
 	const [durationMaxSecs, setDurationMaxSecs] = useState<string | number>("");
 	const [page, setPage] = useState(1);
+	const [clearConfirmationOpened, setClearConfirmationOpened] = useState(false);
+	const [fullExportConfirmationOpened, setFullExportConfirmationOpened] =
+		useState(false);
 
 	const player = useRecordingPlayer({
 		onError: (message) => {
@@ -47,6 +60,7 @@ export function LogsView(
 			});
 		},
 	});
+	const stopPlayback = player.stop;
 
 	useEffect(() => {
 		const unlistenPromise = listen<SystemEvent>("system-event", (event) => {
@@ -107,6 +121,15 @@ export function LogsView(
 		() => getLogsPage(filteredLogs, page),
 		[filteredLogs, page],
 	);
+	const playbackOwnerId = pageLogs.some((log) => log.id === openedLogId)
+		? openedLogId
+		: null;
+	useEffect(() => {
+		// Keep playback ownership here, even when filtering/pagination hides a request
+		// or unavailable query data unmounts the list before it can clear its selection.
+		void playbackOwnerId;
+		stopPlayback();
+	}, [playbackOwnerId, stopPlayback]);
 	const hasActiveFilters = useMemo(
 		() => hasActiveLogsFilters(filters),
 		[filters],
@@ -151,6 +174,7 @@ export function LogsView(
 				}
 
 				notifications.show(getLogsExportSuccessNotification(result.exportKind));
+				setFullExportConfirmationOpened(false);
 			},
 			onError: (error) => {
 				notifications.show(getLogsExportFailureNotification(error));
@@ -159,8 +183,8 @@ export function LogsView(
 	};
 
 	return (
-		<div style={{ width: "100%" }}>
-			<Stack gap="md" className="tv-page-header">
+		<div className="main-content logs-page">
+			<Stack gap="lg" className="main-content-inner page-content-start">
 				<LogsToolbar
 					totalLogsCount={logs?.length ?? 0}
 					filteredLogsCount={filteredLogs.length}
@@ -180,6 +204,7 @@ export function LogsView(
 					durationMaxSecs={durationMaxSecs}
 					onDurationMaxSecsChange={setDurationMaxSecs}
 					onResetFilters={() => {
+						setFilterText("");
 						setShowSuccess(true);
 						setShowError(true);
 						setShowCancelled(true);
@@ -198,32 +223,170 @@ export function LogsView(
 					onExportOpenedChange={logsOrchestration.setExportOpened}
 					hasLogs={(logs?.length ?? 0) > 0}
 					onExportPrivacySafe={() => handleExport("privacySafe")}
-					onExportFull={() => handleExport("full")}
-					onClearAll={() => logsOrchestration.clearLogs.mutate()}
+					onExportFull={() => {
+						logsOrchestration.setExportOpened(false);
+						setFullExportConfirmationOpened(true);
+					}}
+					onClearAll={() => setClearConfirmationOpened(true)}
 					clearAllPending={logsOrchestration.clearLogs.isPending}
 				/>
-
-				<LogsSystemEventsPanel
-					systemEvents={systemEvents}
-					hotkeyDebugEnabled={hotkeyDebugEnabled}
-					hotkeyDebugPending={
-						logsOrchestration.updateHotkeyDebugEnabled.isPending
-					}
-					settingsLoaded={Boolean(settings)}
-					onHotkeyDebugChange={(enabled) =>
-						logsOrchestration.updateHotkeyDebugEnabled.mutate(enabled)
-					}
-					onClear={() => setSystemEvents([])}
-				/>
-
-				<LogsRequestList
-					logs={pageLogs}
-					totalLogsCount={logs?.length ?? 0}
-					openedLogId={openedLogId}
-					onOpenedLogIdChange={setOpenedLogId}
-					player={player}
-				/>
+				<Accordion variant="separated" className="logs-diagnostics">
+					<Accordion.Item value="system-events">
+						<Accordion.Control>
+							<Group gap="xs">
+								<Text size="sm" fw={500}>
+									System events
+								</Text>
+								<Text size="xs" c="dimmed">
+									{systemEvents.length} this session
+									{hotkeyDebugEnabled ? " · Hotkey debug on" : ""}
+								</Text>
+							</Group>
+						</Accordion.Control>
+						<Accordion.Panel>
+							<LogsSystemEventsPanel
+								systemEvents={systemEvents}
+								hotkeyDebugEnabled={hotkeyDebugEnabled}
+								hotkeyDebugPending={
+									logsOrchestration.updateHotkeyDebugEnabled.isPending
+								}
+								settingsLoaded={Boolean(settings)}
+								onHotkeyDebugChange={(enabled) =>
+									logsOrchestration.updateHotkeyDebugEnabled.mutate(enabled)
+								}
+								onClear={() => setSystemEvents([])}
+							/>
+						</Accordion.Panel>
+					</Accordion.Item>
+				</Accordion>
+				{logsQuery.isError ? (
+					<Alert color="red" title="Couldn't load request logs">
+						<Group justify="space-between" gap="sm">
+							<Text size="sm">Your saved logs have not been changed.</Text>
+							<Button
+								variant="light"
+								color="red"
+								size="xs"
+								onClick={() => void logsQuery.refetch()}
+								loading={logsQuery.isFetching}
+							>
+								Retry
+							</Button>
+						</Group>
+					</Alert>
+				) : null}
+				{logsQuery.isLoading ? (
+					<Group
+						justify="center"
+						p="xl"
+						role="status"
+						aria-label="Loading request logs"
+					>
+						<Loader size="sm" />
+						<Text size="sm" c="dimmed">
+							Loading logs…
+						</Text>
+					</Group>
+				) : logs !== undefined ? (
+					<LogsRequestList
+						logs={pageLogs}
+						totalLogsCount={logs?.length ?? 0}
+						openedLogId={openedLogId}
+						onOpenedLogIdChange={setOpenedLogId}
+						player={player}
+					/>
+				) : null}
 			</Stack>
+			<Modal
+				opened={clearConfirmationOpened}
+				onClose={() =>
+					!logsOrchestration.clearLogs.isPending &&
+					setClearConfirmationOpened(false)
+				}
+				title="Clear request logs?"
+				centered
+				closeOnEscape={!logsOrchestration.clearLogs.isPending}
+				closeOnClickOutside={!logsOrchestration.clearLogs.isPending}
+				withCloseButton={!logsOrchestration.clearLogs.isPending}
+			>
+				<Stack gap="md">
+					<Text size="sm">
+						This deletes all saved request logs, not just the filtered results.
+						Your History and recordings are kept. This cannot be undone.
+					</Text>
+					<Group justify="flex-end">
+						<Button
+							variant="default"
+							disabled={logsOrchestration.clearLogs.isPending}
+							onClick={() => setClearConfirmationOpened(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							color="red"
+							loading={logsOrchestration.clearLogs.isPending}
+							onClick={() =>
+								logsOrchestration.clearLogs.mutate(undefined, {
+									onSuccess: () => {
+										setClearConfirmationOpened(false);
+										setOpenedLogId(null);
+									},
+									onError: () =>
+										notifications.show({
+											title: "Couldn't clear logs",
+											message:
+												"Try again. Your History and recordings are unaffected.",
+											color: "red",
+										}),
+								})
+							}
+						>
+							Clear all request logs
+						</Button>
+					</Group>
+				</Stack>
+			</Modal>
+			<Modal
+				opened={fullExportConfirmationOpened}
+				onClose={() =>
+					!logsOrchestration.exportLogs.isPending &&
+					setFullExportConfirmationOpened(false)
+				}
+				title="Export full debug logs?"
+				centered
+				closeOnEscape={!logsOrchestration.exportLogs.isPending}
+				closeOnClickOutside={!logsOrchestration.exportLogs.isPending}
+				withCloseButton={!logsOrchestration.exportLogs.isPending}
+			>
+				<Stack gap="md">
+					<Text size="sm">
+						Full logs may contain transcripts, prompts and provider responses.
+						Only share them with someone you trust.
+					</Text>
+					<Group justify="flex-end">
+						<Button
+							variant="default"
+							disabled={logsOrchestration.exportLogs.isPending}
+							onClick={() => setFullExportConfirmationOpened(false)}
+						>
+							Cancel
+						</Button>
+						<Button
+							variant="light"
+							disabled={logsOrchestration.exportLogs.isPending}
+							onClick={() => handleExport("privacySafe")}
+						>
+							Use privacy-safe export
+						</Button>
+						<Button
+							loading={logsOrchestration.exportLogs.isPending}
+							onClick={() => handleExport("full")}
+						>
+							Export full logs
+						</Button>
+					</Group>
+				</Stack>
+			</Modal>
 		</div>
 	);
 }

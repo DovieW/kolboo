@@ -4,12 +4,12 @@ on:
   workflow_call:
     inputs:
       build_local_whisper:
-        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
         type: boolean
-        default: true
+        default: false
       release_signing:
-        description: "Generate signed updater artifacts for a public release"
+        description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
         type: boolean
         default: false
@@ -20,15 +20,18 @@ on:
       artifact-name-local-whisper:
         description: "Name of the uploaded Windows bundle artifact (with local-whisper feature). Empty when build_local_whisper=false."
         value: ${{ jobs.build-windows.outputs.artifact-name-local-whisper }}
+      publisher-signed:
+        description: "Whether Windows bundles received a verified Authenticode publisher signature"
+        value: ${{ jobs.build-windows.outputs.publisher-signed }}
   workflow_dispatch:
     inputs:
       build_local_whisper:
-        description: "Whether to build and upload the local-whisper Windows bundle artifact"
+        description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
         type: boolean
-        default: true
+        default: false
       release_signing:
-        description: "Generate signed updater artifacts for a public release"
+        description: "Generate signed updater artifacts for a public release (publisher signing is optional)"
         required: false
         type: boolean
         default: false
@@ -43,6 +46,7 @@ jobs:
     runs-on: windows-latest
 
     env:
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
@@ -93,7 +97,11 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
-          components: clippy, rustfmt
+          components: clippy, rustfmt, llvm-tools-preview
+
+      - name: Install Rust coverage tool
+        shell: bash
+        run: cargo install cargo-llvm-cov --locked --version 0.9.1
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -133,6 +141,8 @@ jobs:
           sccache --show-stats || true
 
   build-windows:
+    # Do not spend time packaging installers if the Windows checks fail.
+    needs: test-windows
     # Build bundles for tags (releases) and manual runs.
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_call' }}
     runs-on: windows-latest
@@ -140,8 +150,10 @@ jobs:
     outputs:
       artifact-name-default: ${{ steps.artifact-meta.outputs.artifact_name_default }}
       artifact-name-local-whisper: ${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
+      publisher-signed: ${{ steps.publisher-signing.outputs.enabled }}
 
     env:
+      CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
@@ -151,6 +163,8 @@ jobs:
       # a developer-local .env file that GitHub Actions will never see.
       TAURI_API_BASE_URL: https://kolboo.dovie.dev
       TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
+      TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
     permissions:
       contents: read
@@ -200,6 +214,11 @@ jobs:
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
+          components: llvm-tools-preview
+
+      - name: Install Rust coverage tool
+        shell: bash
+        run: cargo install cargo-llvm-cov --locked --version 0.9.1
 
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
@@ -221,25 +240,15 @@ jobs:
       - name: Compute Sentry build metadata
         id: sentry-meta
         shell: bash
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_PUBLIC_DEV_DSN: ${{ vars.SENTRY_PUBLIC_DEV_DSN }}
+          SENTRY_PUBLIC_PROD_DSN: ${{ vars.SENTRY_PUBLIC_PROD_DSN }}
+          TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
-
-          version=$(node -p "require('./app/package.json').version")
-          short_sha="${GITHUB_SHA::7}"
-
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            project="kolboo-public-prod"
-            environment="production"
-            release="kolboo@${GITHUB_REF_NAME#v}"
-          else
-            project="kolboo-public-dev"
-            environment="development"
-            release="kolboo@${version}-dev.${short_sha}"
-          fi
-
-          echo "project=${project}" >> "$GITHUB_OUTPUT"
-          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
-          echo "release=${release}" >> "$GITHUB_OUTPUT"
+          node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
+          node .github/scripts/configure-desktop-sentry.mjs
 
       - name: Require updater signing credentials for releases
         if: ${{ inputs.release_signing }}
@@ -254,21 +263,27 @@ jobs:
             exit 1
           fi
 
-      - name: Require Windows publisher credentials for releases
+      - name: Resolve optional Windows publisher signing
         if: ${{ inputs.release_signing }}
+        id: publisher-signing
         shell: bash
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -z "${WINDOWS_CERTIFICATE}" || -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
-            echo "Release blocked: provision WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD before publishing Windows installers." >&2
+          if [[ -z "${WINDOWS_CERTIFICATE}" && -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Windows publisher certificate absent: release installers will not have an Authenticode signature." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -z "${WINDOWS_CERTIFICATE}" || -z "${WINDOWS_CERTIFICATE_PASSWORD}" ]]; then
+            echo "Release blocked: set both WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD, or neither." >&2
             exit 1
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Import Windows publisher certificate
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         id: windows-certificate
         shell: pwsh
         env:
@@ -285,7 +300,7 @@ jobs:
           Remove-Item -LiteralPath $certificatePath -Force
 
       - name: Write Windows signing configuration
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -301,6 +316,7 @@ jobs:
           SENTRY_ORG: dov-weinstock
           SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
           SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
+          CARGO_PROFILE_RELEASE_DEBUG: 1
           TAURI_SENTRY_ENV: ${{ steps.sentry-meta.outputs.environment }}
           TAURI_SENTRY_RELEASE: ${{ steps.sentry-meta.outputs.release }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
@@ -316,12 +332,15 @@ jobs:
             echo "sccache not available; building without compiler cache"
           fi
 
-          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+          if [[ "${{ steps.publisher-signing.outputs.enabled }}" == "true" ]]; then
             pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}"
+          elif [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release
           else
             pnpm build
           fi
 
+          node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo.exe src-tauri/target/release/kolboo.pdb
           sccache --show-stats || true
 
       - name: Collect bundles (default)
@@ -338,6 +357,7 @@ jobs:
         working-directory: app
         shell: bash
         env:
+          CARGO_PROFILE_RELEASE_DEBUG: 1
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: dov-weinstock
           SENTRY_PROJECT: ${{ steps.sentry-meta.outputs.project }}
@@ -359,12 +379,15 @@ jobs:
 
           # Reuse the repo's own local-whisper build script so CI follows the
           # exact same invocation path developers use locally.
-          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+          if [[ "${{ steps.publisher-signing.outputs.enabled }}" == "true" ]]; then
             pnpm tauri build --config "${WINDOWS_SIGNING_CONFIG}" --features local-whisper
+          elif [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            pnpm build:release:local-whisper
           else
             pnpm build:local-whisper
           fi
 
+          node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo.exe src-tauri/target/release/kolboo.pdb
           sccache --show-stats || true
 
       - name: Collect bundles (local-whisper)
@@ -378,7 +401,7 @@ jobs:
           cp app/src-tauri/target/release/*.exe artifacts/windows-local-whisper/ || true
 
       - name: Verify Authenticode signatures
-        if: ${{ inputs.release_signing }}
+        if: ${{ inputs.release_signing && steps.publisher-signing.outputs.enabled == 'true' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -419,7 +442,12 @@ jobs:
           sentry_project=${{ steps.sentry-meta.outputs.project }}
           sentry_environment=${{ steps.sentry-meta.outputs.environment }}
           sentry_release=${{ steps.sentry-meta.outputs.release }}
+          sentry_runtime_enabled=${{ steps.sentry-meta.outputs.reporting_enabled }}
+          sentry_sourcemaps_required=${{ steps.sentry-meta.outputs.sourcemaps_required }}
+          sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           sentry_upload_enabled=${sentry_upload_enabled}
+          updater_signing_enabled=${{ inputs.release_signing }}
+          publisher_authenticode_signed=${{ steps.publisher-signing.outputs.enabled == 'true' }}
           bundle_artifact_default=${{ steps.artifact-meta.outputs.artifact_name_default }}
           bundle_artifact_local_whisper=${{ steps.artifact-meta.outputs.artifact_name_local_whisper }}
           build_local_whisper=${{ inputs.build_local_whisper }}

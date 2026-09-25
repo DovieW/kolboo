@@ -60,34 +60,10 @@ export function CostTab(props: {
 		return formatUsdFromMicros(micros);
 	}, [summary.data?.total_usd_micros]);
 
-	const kindLabel =
-		kind === "all"
-			? "speech-to-text + LLM"
-			: kind === "stt"
-				? "speech-to-text"
-				: "LLM";
-
-	const modelsLabelParts: string[] = [];
-	if (kind === "stt") {
-		if (sttModelKeys.length > 0)
-			modelsLabelParts.push(`Filtered to ${sttModelKeys.length} STT model(s)`);
-	} else if (kind === "llm") {
-		if (llmModelKeys.length > 0)
-			modelsLabelParts.push(`Filtered to ${llmModelKeys.length} LLM model(s)`);
-	} else {
-		if (sttModelKeys.length > 0)
-			modelsLabelParts.push(`Filtered to ${sttModelKeys.length} STT model(s)`);
-		if (llmModelKeys.length > 0)
-			modelsLabelParts.push(`Filtered to ${llmModelKeys.length} LLM model(s)`);
-	}
-	if (excludeFreeTier) modelsLabelParts.push("Excluding free tier");
-	const modelsLabel =
-		modelsLabelParts.length > 0 ? modelsLabelParts.join(" • ") : null;
-
 	return (
 		<div className="animate-in" style={{ display: "grid", gap: 12 }}>
 			<Group justify="space-between" align="center" wrap="wrap">
-				<Title order={3}>Total spend</Title>
+				<Title order={3}>Estimated spend</Title>
 			</Group>
 
 			<Card
@@ -98,11 +74,6 @@ export function CostTab(props: {
 					borderColor: "var(--border-default)",
 				}}
 			>
-				<Text c="dimmed" size="sm">
-					Across {kindLabel}, all providers and models
-					{modelsLabel ? ` • ${modelsLabel}` : ""}
-				</Text>
-
 				{summary.isLoading || summary.isFetching ? (
 					<Skeleton height={34} width={180} mt={8} />
 				) : (
@@ -122,7 +93,7 @@ export function CostTab(props: {
 
 			<div style={{ display: "grid", gap: 8 }}>
 				<Text size="sm" c="dimmed">
-					Totals by provider
+					By provider
 				</Text>
 
 				{byProvider.isLoading || byProvider.isFetching ? (
@@ -167,10 +138,13 @@ export function CostTab(props: {
 					</div>
 				) : (
 					<Text size="sm" c="dimmed">
-						No cost events yet for this filter.
+						No spend in this period.
 					</Text>
 				)}
 			</div>
+			<Text size="xs" c="dimmed">
+				Local estimates, not your provider invoice.
+			</Text>
 		</div>
 	);
 }

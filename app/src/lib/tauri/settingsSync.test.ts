@@ -49,6 +49,7 @@ describe("settings runtime sync policy", () => {
 		"playing_audio_handling",
 		"output_mode",
 		"output_hit_enter",
+		"output_paste_shortcut",
 		"quiet_audio_gate_enabled",
 		"quiet_audio_min_duration_secs",
 		"quiet_audio_rms_dbfs_threshold",

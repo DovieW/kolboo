@@ -1,35 +1,10 @@
-import { useEffect } from "react";
-import { listenTyped } from "../lib/tauri/events";
+import { useBackendEvent } from "../lib/tauri/useBackendEvent";
 
-type UseOverlayHideRequestedInputs = {
-	requestAnimatedHide: () => void;
-};
-
-/**
- * Backend can request a hide (so we can animate out before the window hides).
- */
+/** Subscribe once; the latest hide gate owns whether an exit is safe. */
 export function useOverlayHideRequested({
 	requestAnimatedHide,
-}: UseOverlayHideRequestedInputs) {
-	useEffect(() => {
-		let cancelled = false;
-		let unlisten: (() => void) | undefined;
-
-		const setup = async () => {
-			const dispose = await listenTyped("overlay-hide-requested", () => {
-				requestAnimatedHide();
-			});
-			if (cancelled) {
-				dispose();
-				return;
-			}
-			unlisten = dispose;
-		};
-
-		void setup();
-		return () => {
-			cancelled = true;
-			unlisten?.();
-		};
-	}, [requestAnimatedHide]);
+}: {
+	requestAnimatedHide: () => void;
+}) {
+	useBackendEvent("overlay-hide-requested", requestAnimatedHide);
 }

@@ -517,6 +517,12 @@ pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
             .try_state::<crate::pipeline::SharedPipeline>()
             .map(|p| p.state());
 
+        // A webview exit animation may belong to the previous recording.
+        // The backend, not the delayed UI callback, owns capture visibility.
+        if !crate::overlay::may_hide(&overlay_mode, pipeline_state) {
+            return Ok(());
+        }
+
         let visible_before = window.is_visible().ok();
         log::debug!(
             "[overlay] hide_overlay command invoked (visible_before={:?}, overlay_mode={}, pipeline_state={:?})",
@@ -863,7 +869,10 @@ pub async fn set_overlay_mode(app: AppHandle, mode: String) -> CommandResult<()>
                         current_epoch,
                         pipeline_state
                     );
-                    if current_mode == "recording_only" && current_epoch == expected_epoch {
+                    if current_mode == "recording_only"
+                        && current_epoch == expected_epoch
+                        && crate::overlay::may_hide(&current_mode, pipeline_state)
+                    {
                         let visible_before = window_clone.is_visible().ok();
                         log::debug!(
                             "[overlay] set_overlay_mode fallback hide firing (mode_req=recording_only, visible_before={:?})",

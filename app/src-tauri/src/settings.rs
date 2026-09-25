@@ -523,6 +523,8 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub output_mode: Option<String>,
     #[serde(default)]
+    pub output_paste_shortcut: Option<String>,
+    #[serde(default)]
     pub output_hit_enter: Option<bool>,
 }
 

@@ -5,9 +5,20 @@ import type {
 	OutputMode,
 	OverlayMode,
 	OverlayMonitorTarget,
+	PasteShortcut,
 	QuickAskDismissMode,
 	WidgetPosition,
 } from "../types";
+
+export function normalizePasteShortcut(value: unknown): PasteShortcut | null {
+	return value === "system" ||
+		value === "ctrl_v" ||
+		value === "ctrl_shift_v" ||
+		value === "shift_insert" ||
+		value === "cmd_v"
+		? value
+		: null;
+}
 
 export function normalizeOutputMode(value: unknown): OutputMode {
 	if (

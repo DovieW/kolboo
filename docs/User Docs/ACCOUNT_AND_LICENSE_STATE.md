@@ -2,6 +2,11 @@
 
 Kolboo works without signing in. Account login is optional and only enables managed account context.
 
+The signed-out Account page opens directly to a compact sign-in form. Choose
+**Create an account** to register, or **Continue in browser** for browser sign-in.
+**Forgot password?** opens the same browser flow, which includes password reset.
+Account/access summaries are shown only after signing in.
+
 ## States you may see
 
 - **Signed out**: baseline functionality is available; no account identity is attached.
@@ -16,6 +21,12 @@ Kolboo works without signing in. Account login is optional and only enables mana
 - Signed-in email (if available)
 - Organization name and ID (if your account has org context)
 - Actions: Sign in, Refresh, Manage, Sign out
+
+**Access level** describes your account entitlement, not the provider used for
+each request. Personal managed access does not prevent using your own API keys:
+choose those routes in AI settings. Meeting recordings have their own model
+and managed/BYOK selection. These per-task choices do not sign you out or change
+your plan; there is not yet a device-wide managed-inference off switch.
 
 ## Privacy and storage
 

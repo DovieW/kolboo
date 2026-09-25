@@ -28,6 +28,7 @@ pub struct FireworksLlmProvider {
 
 impl FireworksLlmProvider {
     /// Create a new Fireworks provider with the given API key.
+    #[cfg(test)]
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
@@ -40,6 +41,7 @@ impl FireworksLlmProvider {
     }
 
     /// Create with a specific model.
+    #[cfg(test)]
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),

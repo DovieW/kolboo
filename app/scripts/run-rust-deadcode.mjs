@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { configureRustBuildEnv } from "./rust-build-env.mjs";
 
 const useCiTarget = process.argv.includes("--ci");
 const useLocalWhisper = process.argv.includes("--local-whisper");
@@ -32,8 +33,13 @@ if (useCiTarget) {
 
 args.push("--", "-D", "dead-code");
 
+const cargoEnv = configureRustBuildEnv(process.env, {
+	requireTools: true,
+}).env;
+
 const result = spawnSync("cargo", args, {
 	cwd: new URL("..", import.meta.url),
+	env: cargoEnv,
 	stdio: "inherit",
 	windowsHide: true,
 });

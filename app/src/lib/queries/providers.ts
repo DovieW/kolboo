@@ -63,6 +63,7 @@ export function useManagedModels(enabled: boolean) {
 }
 
 export function useByokLlmModels(enabled = true) {
+	const providers = useAvailableProviders();
 	const query = useQuery({
 		queryKey: ["modelsDevByokLlmModels"],
 		queryFn: () => fetchModelsDevByokLlmCatalog(),
@@ -73,8 +74,18 @@ export function useByokLlmModels(enabled = true) {
 		refetchOnWindowFocus: false,
 	});
 	const data = useMemo(
-		() => byokModelsWithLiveCatalog(LLM_MODELS, query.data),
-		[query.data],
+		() => ({
+			...byokModelsWithLiveCatalog(LLM_MODELS, query.data),
+			...Object.fromEntries(
+				(providers.data?.llm ?? [])
+					.filter((p) => p.models)
+					.map((p) => [
+						p.value,
+						(p.models ?? []).map((value) => ({ value, label: value })),
+					]),
+			),
+		}),
+		[query.data, providers.data],
 	);
 
 	return {
@@ -250,26 +261,6 @@ export function useUpdateOcrResizeFilter() {
 		(filter: "nearest" | "triangle" | "catmullrom" | "lanczos3") =>
 			tauriAPI.updateOcrResizeFilter(filter),
 	);
-}
-
-export function useSetOcrApiKey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (apiKey: string) => tauriAPI.setApiKey("ocr_api_key", apiKey),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-		},
-	});
-}
-
-export function useClearOcrApiKey() {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: () => tauriAPI.clearApiKey("ocr_api_key"),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["availableProviders"] });
-		},
-	});
 }
 
 export function useUpdateLocalWhisperModelId() {

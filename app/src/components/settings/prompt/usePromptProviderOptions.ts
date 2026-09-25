@@ -5,8 +5,8 @@ import {
 	STT_MODELS,
 } from "../../../lib/modelOptions";
 import {
-	useFireworksModels,
 	useByokLlmModels,
+	useFireworksModels,
 	useManagedModels,
 	useOllamaModels,
 } from "../../../lib/queries";
@@ -20,7 +20,12 @@ import { resolvePromptProfileFallbacks } from "./effectivePromptSettings";
 const DEFAULT_QUICK_REPLACE_SYSTEM_PROMPT =
 	"You are an expert editor. Apply the user's instructions to the provided text.\n\nRules:\n- Return ONLY the updated text (no commentary, no code fences).\n- Preserve the original language and formatting unless instructed otherwise.";
 
-type ProviderOption = { value: string; label: string; is_local: boolean };
+type ProviderOption = {
+	value: string;
+	label: string;
+	is_local: boolean;
+	models?: string[] | null;
+};
 
 type AvailableProviders = {
 	stt: ProviderOption[];
@@ -132,6 +137,12 @@ export function usePromptProviderOptions({
 	const allLlmCloudProviders = API_KEYS.filter(
 		(provider) => byokLlmModels[provider.id] !== undefined,
 	).map((provider) => ({ value: provider.id, label: provider.label }));
+	for (const p of availableProviders?.stt ?? [])
+		if (p.value.startsWith("custom_"))
+			allSttCloudProviders.push({ value: p.value, label: p.label });
+	for (const p of availableProviders?.llm ?? [])
+		if (p.value.startsWith("custom_"))
+			allLlmCloudProviders.push({ value: p.value, label: p.label });
 	const managedSttProviders = Array.from(
 		new Set(
 			managedModels
@@ -348,7 +359,11 @@ export function usePromptProviderOptions({
 	const sttModelOptions = effectiveSttProvider
 		? managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? managedTranscriptionModelOptions(managedModels, effectiveSttProvider)
-			: (STT_MODELS[effectiveSttProvider] ?? [])
+			: (availableProviders?.stt
+					.find((p) => p.value === effectiveSttProvider)
+					?.models?.map((value) => ({ value, label: value })) ??
+				STT_MODELS[effectiveSttProvider] ??
+				[])
 		: [];
 
 	const llmModelOptions = getLlmModelOptionsForProvider(effectiveLlmProvider);
