@@ -17,7 +17,8 @@ fn startup_removes_only_recognized_interrupted_preparation_files() {
     for name in preserved {
         std::fs::write(recordings.join(name), b"keep").unwrap();
     }
-    let directory = recordings.join(".kolboo-normalize-Ab0123.tmp");
+    // Windows filesystems commonly fold case, so this must not alias `abandoned`.
+    let directory = recordings.join(".kolboo-normalize-Cd4567.tmp");
     std::fs::create_dir(&directory).unwrap();
     let store = RecordingStore::new(dir.path().to_owned());
     assert!(!abandoned.exists());

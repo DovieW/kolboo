@@ -141,6 +141,8 @@ jobs:
           sccache --show-stats || true
 
   build-windows:
+    # Do not spend time packaging installers if the Windows checks fail.
+    needs: test-windows
     # Build bundles for tags (releases) and manual runs.
     if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_call' }}
     runs-on: windows-latest

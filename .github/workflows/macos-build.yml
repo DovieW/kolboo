@@ -127,6 +127,13 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
           components: rustfmt
 
+      - name: Verify native symbol tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun --find dsymutil
+          xcrun --find dwarfdump
+
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
 
@@ -156,9 +163,31 @@ jobs:
           pnpm tauri build \
             --target "$KOLBOO_BUILD_TARGET" \
             --config src-tauri/tauri.macos-development.conf.json
+
+      - name: Generate and upload native symbols
+        working-directory: app
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: dov-weinstock
+          SENTRY_PROJECT: ${{ steps.build-meta.outputs.project }}
+          SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo"
+          symbols="${binary}.dSYM"
+          dwarf="${symbols}/Contents/Resources/DWARF/kolboo"
+          test -f "$binary"
+          # Tauri merges the universal executable, but does not create a dSYM
+          # at the merged target path. Link symbols from its debug map while
+          # per-architecture object files are still available on this runner.
+          xcrun dsymutil --verify "$binary" -o "$symbols"
+          test -f "$dwarf"
+          diff -u \
+            <(xcrun dwarfdump --uuid "$binary" | awk '{ print $2, $3 }' | sort) \
+            <(xcrun dwarfdump --uuid "$dwarf" | awk '{ print $2, $3 }' | sort)
           node ../.github/scripts/upload-desktop-symbols.mjs \
-            "src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo" \
-            "src-tauri/target/$KOLBOO_BUILD_TARGET/release/kolboo.dSYM/Contents/Resources/DWARF/kolboo"
+            "$binary" "$dwarf"
 
       - name: Locate and verify bundles
         id: bundles
