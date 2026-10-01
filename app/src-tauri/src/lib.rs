@@ -770,6 +770,10 @@ pub(crate) fn stop_recording(
                             output_value = quick_replace_result.output_value;
                             let quick_replace_failure = quick_replace_result.failure;
 
+                            if epoch != pipeline_clone.session_epoch() {
+                                return;
+                            }
+
                             let normal_output_result =
                                 sessions::normal_dictation_output::execute_normal_dictation_output(
                                     &app_clone,
@@ -787,6 +791,12 @@ pub(crate) fn stop_recording(
                                 normal_output_result.decision,
                                 normal_output_result.output_error.is_some()
                             );
+
+                            // A first-use desktop approval dialog may outlive the
+                            // session. Never finalize/hide the newer recording.
+                            if epoch != pipeline_clone.session_epoch() {
+                                return;
+                            }
 
                             sessions::normal_dictation_output::finalize_normal_dictation_request(
                                 &app_clone,
@@ -1062,6 +1072,7 @@ pub fn run() {
         if !is_cli_invocation {
             builder = builder.plugin(shortcuts::build_global_shortcut_plugin());
             builder = builder.plugin(tauri_plugin_dialog::init());
+            builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
             builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
                 log::info!("Single-instance: focusing existing app window");
                 bootstrap::show_main_window(
@@ -1361,6 +1372,9 @@ pub fn run() {
                     }
                 }
             }
+
+            // Restore machine-local logical dimensions before the first show.
+            bootstrap::main_window::setup(app.handle());
 
             // Startup window visibility:
             // - Show the main window only on first-run (when the setup guide is pending).

@@ -25,6 +25,15 @@ require the tester to approve the application from **System Settings → Privacy
 If a synced profile specifies `Shift+Insert` for paste, macOS uses `Command+V`
 instead because its input backend does not expose an Insert key.
 
+Paste, selection-copy and media keyboard connections share a once-per-launch
+Accessibility prompt policy. Every connection still checks the OS-owned trust
+state; Kolboo never caches a denial as approval or attempts to grant itself
+Accessibility access. Native keyboard APIs stay on the main thread, while callers
+await completion without blocking the async executor. macOS remains authoritative
+over revocation and application identity. The current ad-hoc signing does not
+guarantee that approval survives a changed build; verify restart/update behavior
+on an actual Mac rather than treating Linux restore tokens as cross-platform.
+
 ## Deferred native-validation checkpoint
 
 Native acceptance is paused until a Mac is available. This pauses the manual

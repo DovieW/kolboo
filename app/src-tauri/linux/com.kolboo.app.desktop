@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Kolboo
+Exec=kolboo
+Icon=kolboo
+Terminal=false
+NoDisplay=true
+StartupWMClass=kolboo

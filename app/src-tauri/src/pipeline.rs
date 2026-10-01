@@ -1352,30 +1352,26 @@ impl SharedPipeline {
                                 format!(" {}", committed)
                             };
 
-                            // Paste on a blocking thread to avoid blocking the async runtime.
+                            // The output wrapper selects a Linux/Windows worker or macOS
+                            // main-thread dispatch without blocking this executor.
                             // Never preserve clipboard during live output — the
                             // save/restore cycle adds ~100-200ms of dead time
                             // between every chunk, causing noticeable pauses.
-                            let text = output_text.clone();
-                            let mode = output_mode;
-                            let enter = output_hit_enter;
-                            let output_cancel = cancel.clone();
-                            tokio::task::spawn_blocking(move || {
-                                if output_cancel.is_cancelled() {
-                                    return;
-                                }
-                                if let Err(e) = crate::text::inject::output_text_with_mode_options(
-                                    &text,
-                                    mode,
-                                    enter,
-                                    false,
-                                    output_paste_shortcut,
-                                ) {
-                                    log::error!("Live output: failed to paste chunk: {}", e);
-                                }
-                            })
+                            if cancel.is_cancelled() {
+                                break;
+                            }
+                            if let Err(e) = crate::text::inject::output_text_with_app_async(
+                                app.clone(),
+                                output_text,
+                                output_mode,
+                                output_hit_enter,
+                                false,
+                                output_paste_shortcut,
+                            )
                             .await
-                            .ok();
+                            {
+                                log::error!("Live output: failed to paste chunk: {}", e);
+                            }
                         }
                     }
                 }

@@ -53,33 +53,16 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
 #[cfg(not(target_os = "windows"))]
 #[tauri::command]
 pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
-    use std::sync::mpsc;
-
-    // macOS HIToolbox APIs (used by enigo) must run on the main thread
-    // Use a channel to get the result back from the main thread
-    let (tx, rx) = mpsc::channel::<Result<(), CommandError>>();
-
-    let app_for_output = app.clone();
-    app.run_on_main_thread(move || {
-        let _ = tx.send(
-            crate::text::inject::output_text_with_app(
-                &app_for_output,
-                &text,
-                OutputMode::Paste,
-                false,
-                true,
-                crate::core::output_settings::foreground_paste_shortcut(&app_for_output),
-            )
-            .map(|_| ())
-            .map_err(CommandError::from),
-        );
-    })
-    .map_err(|e| CommandError::from(e.to_string()))?;
-
-    // Wait for result from main thread
-    let result = rx.recv().map_err(|e| CommandError::from(e.to_string()))?;
-    match result {
-        Ok(()) => Ok(()),
-        Err(error) => Err(error),
-    }
+    let shortcut = crate::core::output_settings::foreground_paste_shortcut(&app);
+    crate::text::inject::output_text_with_app_async(
+        app,
+        text,
+        OutputMode::Paste,
+        false,
+        true,
+        shortcut,
+    )
+    .await
+    .map(|_| ())
+    .map_err(CommandError::from)
 }

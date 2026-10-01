@@ -63,12 +63,12 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/text.rs",
-		"reason": "Paste shortcut argument forwarding into OS input injection; chord order and cleanup are tested with a recording keyboard backend.",
-		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs"],
-		"lines": [71],
+		"reason": "Re-reviewed and approved 2026-09-30: concrete Wry command dispatch into the platform-owned input wrapper needs a desktop AppHandle. Actual portal request sequencing, paste chords, cleanup and restored grants are tested without touching user input.",
+		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs", "app/src-tauri/src/text/tests/wayland_input.rs"],
+		"lines": [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "ffa7a0c1a14fb872bd2b2e50c33b69892b5bbbe48b5a8e4602be0fd78c125e45"
+		"sha256": "efaef8dd035e38e6d0a5c833ca4f18eb0cf96cea1e17905fb72e8afd3d5950cf"
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/windows.rs",
@@ -99,19 +99,19 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/lib.rs",
-		"reason": "Native application orchestration wires the tested session epoch, paste profile and visibility decisions into real shortcut/window callbacks.",
+		"reason": "Re-reviewed and approved 2026-09-30: native completion callbacks recheck pipeline ownership after delayed desktop approval; real Wry completion requires the desktop event loop. Lease tests exercise same/new/unknown ownership against a real pipeline. The previously approved autostart registration exception is retained at its moved line; actual enable/disable was verified on the IdeaPad in the prior batch, not this permission change. Snapshot refreshed after adding main-window startup below these unchanged exceptions; the new startup line is covered by isolated real-app acceptance, not exempted.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/core/output_settings.rs",
-			"app/src-tauri/src/overlay/mod.rs"
+			"app/src-tauri/src/overlay/mod.rs",
+			"app/src/components/settings/StartAtLoginSetting.test.tsx",
+			"app/src-tauri/src/text/tests/output_ownership.rs",
+			"docs/Dev Docs/DESKTOP_QOL_BATCH.md"
 		],
-		"lines": [
-			250, 258, 267, 637, 638, 639, 640, 641, 642, 880, 938, 939, 940, 941, 943,
-			944, 945
-		],
+		"lines": [773, 774, 775, 797, 798, 799, 1075],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "5e4b857091c1aff0d984116500e595bab4611a2bacf4777b3b4d72e574a2a880"
+		"sha256": "5b3c498bbe08b13c9eb3d707b6296819acb84ad324cfe33b99450ceefcc47ec9"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",
@@ -128,20 +128,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Concrete Wry realtime event/clipboard bridge plus second ownership checks under mutex and poisoned-lock recovery. Exercising those check-between-check races would require nondeterministic scheduling or production test hooks. Streaming success/fallback, delayed connection/timeout and cancellation preserving the next session are tested.",
+		"reason": "Re-reviewed and approved 2026-09-30: concrete Wry live-output dispatch selects a blocking Linux/Windows worker or the macOS main thread. Streaming and cancellation semantics are tested without an OS clipboard; actual key delivery remains native acceptance. No Wayland live partial injection is enabled.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
-			"app/src-tauri/src/stt/streaming.rs"
+			"app/src-tauri/src/stt/streaming.rs",
+			"app/src-tauri/src/text/tests/output_ownership.rs"
 		],
-		"lines": [
-			1126, 1129, 1130, 1131, 1137, 1183, 1184, 1191, 1203, 1219, 1223, 1229,
-			1231, 1232, 1234, 1240, 1260, 1286, 1287, 1288, 1320, 1321, 1322, 1328,
-			1330, 1331, 1332, 1333, 1362, 1364, 1365, 1366, 1368, 1369, 1370, 1371,
-			1372, 1781, 1838, 1878, 1999, 2404, 2504
-		],
-		"functions": [1126, 2402],
-		"instantiations": [2083],
-		"sha256": "12166feb8f5ee20e60587f2aff150cf268d4ea999929f3cf20fa665132b76287"
+		"lines": [1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1369, 1373, 1374],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "77f3a9e302b06a7f3ac0155cbd1a1165809e9430fc6ecccf382082db40d28d55"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",
@@ -175,15 +171,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/normal_dictation_output.rs",
-		"reason": "Native paste-shortcut argument forwarding into UIA/clipboard output, protected by pure output-intent and chord tests.",
+		"reason": "Re-reviewed and approved 2026-09-30: native final dictation output awaits the app-owned portal/main-thread wrapper. Wry AppHandle dispatch cannot execute headlessly; output-intent, portal grant and keyboard-order tests cover the owned behavior.",
 		"evidence": [
 			"app/src-tauri/src/core/output_settings.rs",
-			"app/src-tauri/src/text/tests/key_inject.rs"
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs"
 		],
-		"lines": [274],
-		"functions": [],
+		"lines": [95, 264, 269, 270, 271, 277],
+		"functions": [264],
 		"instantiations": [],
-		"sha256": "29a6e8e684737bed2c85f84ac19717dccea90bd581f7166f9f682890f08fba6f"
+		"sha256": "369aa5a6e944225707c2dc98e93d1ae41431fbab3d876a96806e3b26371c70ab"
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/ocr_usage.rs",
@@ -234,27 +231,30 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/shortcuts/paste_last.rs",
-		"reason": "Actual foreground-process and OS paste-chord forwarding require a desktop; resolver and key-order tests cover the decisions.",
+		"reason": "Re-reviewed and approved 2026-09-30: native shortcut callback starts asynchronous app-owned output, requiring Wry/history stores. Release debounce, profile resolution, portal reuse and keyboard chords are deterministically tested.",
 		"evidence": [
 			"app/src-tauri/src/core/output_settings.rs",
-			"app/src-tauri/src/text/tests/key_inject.rs"
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs",
+			"app/src-tauri/src/shortcuts/paste_last.rs"
 		],
-		"lines": [77, 88],
-		"functions": [],
+		"lines": [72, 73, 74, 75, 76, 77, 79, 90, 91, 92, 98],
+		"functions": [74, 79],
 		"instantiations": [],
-		"sha256": "3d80ccdbd686c076e6295239604cf136715ca1d2cc49347c0245082e6002d336"
+		"sha256": "f05c7b71767dbc8366386fafde9b1173c5c5f5c34c4608cd4789448c4ea025fb"
 	},
 	{
 		"filePath": "app/src-tauri/src/shortcuts/retry_last.rs",
-		"reason": "Native retry output forwards the captured paste shortcut; pipeline replay and profile resolution are tested independently.",
+		"reason": "Re-reviewed and approved 2026-09-30: native retry forwards the profile shortcut into awaited app-owned output; actual Wry input cannot run headlessly. Retry ownership, replacement, profile resolution and portal lifecycle have deterministic tests.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
-			"app/src-tauri/src/core/output_settings.rs"
+			"app/src-tauri/src/core/output_settings.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs"
 		],
-		"lines": [124, 132],
+		"lines": [126, 127, 128, 129, 133, 135],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "10fbc0225c4fed8aa9a593afdd01392527ee56ce5ba5f89acbd1856a323d7ce1"
+		"sha256": "e7f80757563475fbec2de174ef698670ef2fe0edce241fc87965fe4a7c20991e"
 	},
 	{
 		"filePath": "app/src-tauri/src/stats.rs",
@@ -276,18 +276,70 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/text/inject.rs",
-		"reason": "Real arboard/Enigo input and OS clipboard side effects are excluded from headless tests. Paste chord order/modifier cleanup, output policy and clipboard verification are tested at their owned boundaries.",
+		"reason": "Re-reviewed and approved 2026-09-30: real Wry state capture, worker/main-thread dispatch, OS clipboard and native keyboard calls cannot safely execute in headless tests. Actual pipeline leases, portal permission/delivery lifecycle, chord cleanup, fallback policy and clipboard barriers are tested. No exception covers the lease comparison or controller protocol bodies.",
 		"evidence": [
 			"app/src-tauri/src/text/tests/key_inject.rs",
 			"app/src-tauri/src/text/clipboard/tests.rs",
-			"app/src-tauri/src/platform_capabilities.rs"
+			"app/src-tauri/src/platform_capabilities.rs",
+			"app/src-tauri/src/text/tests/output_ownership.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs"
 		],
-		"lines": [
-			99, 107, 109, 127, 146, 151, 152, 153, 154, 155, 165, 166, 225, 275, 276
-		],
-		"functions": [151, 165, 275],
+		"lines": [45, 46, 47, 48, 49, 50, 51, 52, 53, 162, 163, 164, 165, 166, 167, 168, 169, 170, 172, 175, 176, 177, 178, 179, 180, 181, 182, 190, 191, 192, 193, 194, 195, 196, 197, 199, 201, 202, 203, 204, 205, 217, 225, 226, 227, 228, 229, 230, 231, 232, 233, 236, 237, 238, 239, 240, 241, 242, 243, 244, 246, 247, 248, 280, 288, 341, 360, 361, 365, 366, 372, 377],
+		"functions": [45, 48, 51, 175, 194, 225, 232, 236, 248, 361],
 		"instantiations": [],
-		"sha256": "b12e3b1f5984d8dc0d4f1bf3a7a88bb5a5fddf1b738876b8f0af77b7bd51b7d3"
+		"sha256": "c1eb8504d80870ebff243a3faedc7eaad408f04fe592b3537b093015a1d7f1be"
+	},
+	{
+		"filePath": "app/src-tauri/src/adapters/media_controls.rs",
+		"reason": "Approved 2026-09-30: native media dispatch requires Wry and real keyboard input. The tested portal controller never prompts for optional media, reuses an approved grant and releases keys after failure; recording-side native invocation remains manual acceptance.",
+		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs"],
+		"lines": [99, 100, 102, 105, 106, 107, 108, 110, 112, 113, 114, 115, 117],
+		"functions": [105, 110, 114],
+		"instantiations": [],
+		"sha256": "5d6df9cac10b9465f4802fecc9fe4ad9f120d34cde638497163da0fbe30fadb7"
+	},
+	{
+		"filePath": "app/src-tauri/src/secrets.rs",
+		"reason": "Approved 2026-09-30: OS keyring entry construction and serialized store access cannot safely use the real account keyring in headless tests. Isolated keyring credential tests cover rotation, failed-write preservation, idempotent removal and sanitized errors; renderer access to this grant is rejected.",
+		"evidence": ["app/src-tauri/src/secrets.rs"],
+		"lines": [297, 298, 299, 300, 301, 304, 305, 306, 307, 308, 309],
+		"functions": [297, 304],
+		"instantiations": [],
+		"sha256": "b5892e8768552079a944cc0ceac99972968ad6d8e9171206e56d55ded223cf4e"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/key_inject.rs",
+		"reason": "Approved 2026-09-30: platform detection and real Enigo construction interact with native permission/input services. The permission-prompt latch, configured paste chords and cleanup are tested without asking the OS for user input approval.",
+		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs", "app/src-tauri/src/platform_capabilities.rs"],
+		"lines": [14, 16, 17, 19, 20, 22, 23, 24, 25, 26, 27],
+		"functions": [14, 26],
+		"instantiations": [],
+		"sha256": "6e8004530d9a5efbd3b716600640eaec4f91442aa8473290b558637038caa23a"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/mod.rs",
+		"reason": "Approved 2026-09-30: only the target-gated module declaration has no executable coverage records. The declared portal implementation is measured and tested; this is not a module-body exclusion.",
+		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs"],
+		"unmeasuredLines": [5, 6],
+		"sha256": "348724972015d3e51f1c07e6b10eca3d51cdaed4669c360fb1b6340f53c1fa7b"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/selection_probe.rs",
+		"reason": "Approved 2026-09-30: actual clipboard snapshots/sentinels and native copy/main-thread dispatch cannot touch the user's clipboard in headless tests. The disabled probe never requests permission or prepares the clipboard; protocol tests verify preparation runs after approval and copy shares the paste grant. Real selection/focus and restoration remain native acceptance.",
+		"evidence": ["app/src-tauri/src/text/tests/selection_probe.rs", "app/src-tauri/src/text/tests/wayland_input.rs", "app/src-tauri/src/text/clipboard/tests.rs"],
+		"lines": [127, 128, 130, 135, 143, 146, 147, 148, 149, 150, 151, 153, 154, 173, 174, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 284, 285, 286, 453, 454, 456, 457, 458, 459, 461, 463, 464, 465],
+		"functions": [143, 180, 183, 456],
+		"instantiations": [],
+		"sha256": "6ea1b2680f7b1bf646966f8d335a979a8d431ad85cd585334cc01e57295f3dca"
+	},
+	{
+		"filePath": "app/src-tauri/src/text/wayland_input.rs",
+		"reason": "Approved 2026-09-30: Wry/global-controller dispatch, session-bus and OS keyring workers are native boundaries. Four defensive lines handle failure subscribing to the compositor Closed signal and abort/close instead of using an unobservable grant. Request sequencing, registry identity, denial, restoration, revocation signal, keyboard-only persistence, rotation and all chord failure cleanup run against an isolated real D-Bus. Instantiation entries waive only duplicate LLVM records whose source and function execute in those tests.",
+		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs", "app/src-tauri/src/secrets.rs", "docs/How Tos/LINUX_DEVELOPMENT.md"],
+		"lines": [125, 126, 133, 134, 268, 269, 270, 271, 272, 273, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 299, 300, 301, 303, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 318, 319],
+		"functions": [268, 273, 276, 277, 284, 289, 290, 294, 299, 307, 310, 316],
+		"instantiations": [157, 165, 173, 201],
+		"sha256": "95602272ac54a8c6dc22082fffffc38cd571c85360e38c00cf1d006fcb0412d5"
 	},
 	{
 		"filePath": "app/src-tauri/src/windows_apps_linux.rs",

@@ -92,7 +92,7 @@ pub(crate) async fn execute_normal_dictation_output(
         }
         NormalDictationOutputDecision::Output => {
             let output_error =
-                output_text_for_platform(app, request.output_value, request.output_intent);
+                output_text_for_platform(app, request.output_value, request.output_intent).await;
 
             NormalDictationOutputResult {
                 decision: NormalDictationOutputDecision::Output,
@@ -188,7 +188,7 @@ fn update_history_after_output(app: &AppHandle, request: &NormalDictationFinaliz
 }
 
 #[cfg(target_os = "windows")]
-fn output_text_for_platform(
+async fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
@@ -261,18 +261,21 @@ fn output_text_for_platform(
 }
 
 #[cfg(not(target_os = "windows"))]
-fn output_text_for_platform(
+async fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
 ) -> Option<String> {
-    if let Err(e) = commands::text::output_text_with_mode_options(
-        output_value,
+    if let Err(e) = crate::text::inject::output_text_with_app_async(
+        app.clone(),
+        output_value.to_string(),
         output_intent.mode(),
         output_intent.hit_enter(),
         !output_intent.clipboard_privacy_mode(),
         output_intent.paste_shortcut(),
-    ) {
+    )
+    .await
+    {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, &e);
         return Some(e);

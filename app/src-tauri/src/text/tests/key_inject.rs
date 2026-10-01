@@ -1,5 +1,16 @@
 use super::*;
 
+#[test]
+fn accessibility_prompt_is_once_per_launch_but_other_platforms_are_unchanged() {
+    let prompt = AtomicBool::new(false);
+    assert!(keyboard_settings(false, &prompt).open_prompt_to_get_permissions);
+    assert!(!prompt.load(Ordering::Relaxed));
+    assert!(keyboard_settings(true, &prompt).open_prompt_to_get_permissions);
+    assert!(!keyboard_settings(true, &prompt).open_prompt_to_get_permissions);
+    // Trust itself is still checked against macOS, never cached as approved.
+    assert!(keyboard_settings(true, &AtomicBool::new(false)).open_prompt_to_get_permissions);
+}
+
 #[derive(Default)]
 struct KeyboardSpy {
     events: Vec<(Key, Direction)>,

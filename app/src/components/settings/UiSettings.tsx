@@ -46,6 +46,7 @@ import {
 	isInheritedSettingValue,
 } from "../../lib/tauri/settingsViews";
 import { PasteShortcutSetting } from "./PasteShortcutSetting";
+import { StartAtLoginSetting } from "./StartAtLoginSetting";
 import {
 	SettingsIconButton,
 	SettingsRow,
@@ -1035,6 +1036,8 @@ export function UiSettings({
 					)
 				}
 			/>
+
+			<StartAtLoginSetting profileScope={isProfileScope} />
 
 			<SettingsRow
 				label="Close button"

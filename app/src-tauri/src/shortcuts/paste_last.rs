@@ -69,6 +69,14 @@ fn classify_paste_last_event(
 }
 
 fn output_last_transcription(app: &AppHandle, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn(async move {
+        output_last_transcription_async(&app, &label).await;
+    });
+}
+
+async fn output_last_transcription_async(app: &AppHandle, label: &str) {
     log::info!("{}: outputting last transcription", label);
 
     // Keep output intent resolution here so both global shortcuts and modifier-only hook events
@@ -79,14 +87,16 @@ fn output_last_transcription(app: &AppHandle, label: &str) {
 
     if let Ok(entries) = history_storage.get_all(Some(1)) {
         if let Some(entry) = entries.first() {
-            if let Err(e) = crate::text::inject::output_text_with_app(
-                app,
-                &entry.text,
+            if let Err(e) = crate::text::inject::output_text_with_app_async(
+                app.clone(),
+                entry.text.clone(),
                 output_intent.mode(),
                 output_intent.hit_enter(),
                 !output_intent.clipboard_privacy_mode(),
                 crate::core::output_settings::foreground_paste_shortcut(app),
-            ) {
+            )
+            .await
+            {
                 log::error!("Failed to output last transcription: {}", e);
             }
         } else {

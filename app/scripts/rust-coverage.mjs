@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -8,6 +9,56 @@ import { configureRustBuildEnv } from "./rust-build-env.mjs";
 
 export function conservativeCargoJobs(cpuCount = os.cpus().length) {
 	return Math.min(8, Math.max(1, Math.floor(cpuCount / 2)));
+}
+
+// Rust v0 symbols include build-specific crate disambiguators. A unit test
+// and the same code linked into the desktop binary therefore have different
+// symbols. Merge only identical demangled functions, retaining generic types,
+// closure indices and the source-file boundary. Keep a raw symbol as the alias
+// so the gate's strict Tauri-wrapper checks still recognize LLVM record shapes.
+export function mergeRustBuildIdentities(lcov, demangle) {
+	const names = [
+		...new Set(
+			lcov
+				.split("\n")
+				.filter((line) => /^FN:\d+,_R/u.test(line))
+				.map((line) => line.slice(line.indexOf(",") + 1)),
+		),
+	];
+	if (names.length === 0) return lcov;
+	const decoded = demangle(names);
+	if (decoded.length !== names.length || decoded.some((name) => !name))
+		throw new Error("Incomplete Rust coverage demangling");
+	const identities = new Map(
+		names.map((name, index) => [name, decoded[index]]),
+	);
+	const files = new Map();
+	let aliases = new Map();
+	let definitions = new Map();
+	return lcov
+		.split("\n")
+		.map((line) => {
+			if (line.startsWith("SF:")) {
+				aliases = files.get(line) ?? new Map();
+				files.set(line, aliases);
+				definitions = new Map();
+			}
+			if (!/^FN(?:DA)?:\d+,_R/u.test(line)) return line;
+			const separator = line.indexOf(",");
+			const raw = line.slice(separator + 1);
+			const identity = identities.get(raw);
+			if (!identity) throw new Error("Rust function count lacks a definition");
+			if (line.startsWith("FN:"))
+				definitions.set(raw, line.slice(3, separator));
+			const location = definitions.get(raw);
+			if (!location)
+				throw new Error("Rust function count lacks a source location");
+			const key = `${location}:${identity}`;
+			const alias = aliases.get(key) ?? raw;
+			aliases.set(key, alias);
+			return line.slice(0, separator + 1) + alias;
+		})
+		.join("\n");
 }
 
 export function buildRustCoverageArgs(options = {}) {
@@ -128,7 +179,55 @@ export function runRustCoverageCli(argv = process.argv.slice(2)) {
 		return 1;
 	}
 
-	return result.status ?? 1;
+	if (result.status !== 0) return result.status ?? 1;
+	// Keep normal unit tests headless. Linux coverage additionally exercises the
+	// real window boundary in an isolated display, then merges those profiles.
+	if (
+		process.platform === "linux" &&
+		options.tests.length === 0 &&
+		options.packages.length === 0
+	) {
+		const native = spawnSync(
+			process.execPath,
+			[
+				fileURLToPath(new URL("./window-native-test.mjs", import.meta.url)),
+				"--coverage",
+			],
+			{ env, stdio: "inherit" },
+		);
+		if (native.status !== 0) return native.status ?? 1;
+		const report = spawnSync(
+			"cargo",
+			[cargoArgs[0], "report", ...cargoArgs.slice(1)],
+			{ env, stdio: "inherit" },
+		);
+		if (report.status !== 0) return report.status ?? 1;
+		if (options.lcov && options.outputPath) {
+			const merged = mergeRustBuildIdentities(
+				readFileSync(options.outputPath, "utf8"),
+				(names) => {
+					const result = spawnSync(
+						"c++filt",
+						["--format=rust", "--no-verbose"],
+						{
+							input: `${names.join("\n")}\n`,
+							encoding: "utf8",
+							maxBuffer: 32 * 1024 * 1024,
+							env,
+						},
+					);
+					if (result.status !== 0)
+						throw new Error(
+							"Rust coverage requires binutils c++filt with Rust v0 support",
+						);
+					return result.stdout.trimEnd().split("\n");
+				},
+			);
+			writeFileSync(options.outputPath, merged);
+		}
+		return 0;
+	}
+	return 0;
 }
 
 if (isCliEntrypoint(import.meta.url)) {

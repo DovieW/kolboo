@@ -1,5 +1,5 @@
 use arboard::Clipboard;
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use enigo::{Direction, Key, Keyboard};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::thread;
@@ -7,6 +7,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 use uuid::Uuid;
 
+#[cfg(target_os = "windows")]
 use crate::app_shared::basename_for_log;
 use crate::text::clipboard::{clipboard_only_last_text_lock, set_clipboard_text_platform};
 use crate::text::inject::run_with_output_injection_lock;
@@ -56,6 +57,18 @@ pub enum ContextGrabMethod {
 
 #[cfg(desktop)]
 pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<String>, String> {
+    probe_selected_text_via_copy_impl(method, None)
+}
+
+#[cfg(desktop)]
+type CopyOverride<'a> =
+    &'a mut dyn FnMut(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>;
+
+#[cfg(desktop)]
+fn probe_selected_text_via_copy_impl(
+    method: ContextGrabMethod,
+    mut copy_override: Option<CopyOverride<'_>>,
+) -> Result<Option<String>, String> {
     if method == ContextGrabMethod::None {
         log::debug!("Selection probe: disabled (method=None)");
         return Ok(None);
@@ -66,6 +79,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         // Best-effort: only treat the clipboard as a "selection" when it changed since the last
         // clipboard-only probe.
         let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
+
         let current = clipboard
             .get_text()
             .ok()
@@ -108,9 +122,17 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
         let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
+        // Establish the native keyboard before writing a sentinel so permission
+        // rejection cannot strand temporary text in the user's clipboard.
+        let mut keyboard = if copy_override.is_none() {
+            Some(crate::text::key_inject::new_keyboard()?)
+        } else {
+            None
+        };
+
         // Save previous clipboard content (text only).
         // NOTE: If this is None, we avoid any technique that would overwrite a non-text clipboard.
-        let previous: Option<String> = clipboard.get_text().ok();
+        let mut previous: Option<String> = None;
 
         // Important: without any guard, if Ctrl+C doesn't actually copy (common in terminals),
         // reading the clipboard will just return whatever text was already there (stale).
@@ -118,22 +140,20 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         // If we have a previous text clipboard, we temporarily write a unique sentinel value and
         // only accept a selection if the clipboard changes away from that sentinel.
         let mut sentinel: Option<String> = None;
-        if previous.is_some() {
-            let token = format!("__kolboo_selection_probe__{}", Uuid::new_v4());
-            if set_clipboard_text_platform(&mut clipboard, &token, true).is_ok() {
-                sentinel = Some(token);
+        let mut prepare_clipboard = || {
+            // A portal dialog can stay open for minutes. Snapshot and write only
+            // after approval, otherwise restoration would overwrite newer data.
+            previous = clipboard.get_text().ok();
+            if previous.is_some() {
+                let token = format!("__kolboo_selection_probe__{}", Uuid::new_v4());
+                if set_clipboard_text_platform(&mut clipboard, &token, true).is_ok() {
+                    sentinel = Some(token);
+                }
             }
-        }
-
-        log::debug!(
-            "Selection probe: sentinel_set={} (previous_clipboard_text={})",
-            sentinel.is_some(),
-            previous.is_some()
-        );
+            Ok(())
+        };
 
         // Simulate a copy shortcut.
-        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-
         #[cfg(not(target_os = "windows"))]
         {
             let modifier = if cfg!(target_os = "macos") {
@@ -150,14 +170,22 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
             // Important: ensure we always release modifiers, even if something errors mid-injection.
             // Otherwise keys can appear "stuck" at the OS level.
-            let injection_result: Result<(), String> =
-                with_pressed_key(&mut enigo, modifier, |enigo| {
-                    enigo
-                        .key(Key::Unicode('c'), Direction::Click)
-                        .map_err(|e| e.to_string())?;
-                    thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
-                    Ok(())
-                });
+            let injection_result: Result<(), String> = if let Some(copy) = copy_override.as_mut() {
+                copy(&mut prepare_clipboard)
+            } else {
+                prepare_clipboard()?;
+                with_pressed_key(
+                    keyboard.as_mut().expect("native keyboard initialized"),
+                    modifier,
+                    |enigo| {
+                        enigo
+                            .key(Key::Unicode('c'), Direction::Click)
+                            .map_err(|e| e.to_string())?;
+                        thread::sleep(Duration::from_millis(KEY_EVENT_DELAY_MS * 2));
+                        Ok(())
+                    },
+                )
+            };
 
             if let Err(e) = injection_result {
                 log::warn!("Selection probe: key injection failed: {}", e);
@@ -167,6 +195,8 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
         #[cfg(target_os = "windows")]
         {
+            prepare_clipboard()?;
+            let enigo = keyboard.as_mut().expect("Windows uses native keyboard");
             // Key sequence: press modifiers -> click key -> release.
 
             // Give the OS a moment to finish processing any key-up events from the record-stop hotkey.
@@ -193,7 +223,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 
                 match method {
                     ContextGrabMethod::CtrlShiftC => {
-                        with_pressed_key(&mut enigo, Key::Shift, |enigo| {
+                        with_pressed_key(enigo, Key::Shift, |enigo| {
                             // Hold Shift first, then press Ctrl+<key>.
                             // NOTE: Some console hosts still treat this as a Ctrl+C cancel event; users
                             // can opt into Ctrl+Insert or None if this is unsafe in their shell.
@@ -211,7 +241,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
                         })
                     }
                     ContextGrabMethod::CtrlInsert => {
-                        with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                        with_pressed_key(enigo, Key::Control, |enigo| {
                             // Use the semantic Insert key rather than a raw scancode here.
                             // Insert is an extended key on Windows; sending the wrong form can end up
                             // as a VT escape sequence in some terminals (e.g. showing up as `5~`).
@@ -222,7 +252,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
                             Ok(())
                         })
                     }
-                    _ => with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                    _ => with_pressed_key(enigo, Key::Control, |enigo| {
                         enigo
                             .raw(SCANCODE_C, Direction::Press)
                             .map_err(|e| e.to_string())?;
@@ -251,7 +281,9 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         }
 
         // Even on success, try to reset modifiers (best-effort) so we never leave keys "stuck".
-        release_common_modifiers_best_effort(&mut enigo);
+        if let Some(enigo) = keyboard.as_mut() {
+            release_common_modifiers_best_effort(enigo);
+        }
 
         // Wait briefly for clipboard to update and then read it.
         let mut clipboard_read_errors: u32 = 0;
@@ -305,13 +337,14 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
         // Only do this fallback when the user selected Ctrl+C, to avoid surprising behavior.
         #[cfg(target_os = "windows")]
         if captured.is_none() && method == ContextGrabMethod::CtrlC {
+            let enigo = keyboard.as_mut().expect("Windows uses native keyboard");
             polls_run += 1;
             log::info!(
                 "Selection probe: Ctrl+C produced no clipboard change; retrying with Ctrl+Insert"
             );
 
             let injection_result: Result<(), String> =
-                with_pressed_key(&mut enigo, Key::Control, |enigo| {
+                with_pressed_key(enigo, Key::Control, |enigo| {
                     enigo
                         .key(Key::Insert, Direction::Click)
                         .map_err(|e| e.to_string())?;
@@ -323,7 +356,7 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
                 log::warn!("Selection probe: key injection failed: {}", e);
             }
 
-            release_common_modifiers_best_effort(&mut enigo);
+            release_common_modifiers_best_effort(enigo);
             captured = poll_for_capture(&mut clipboard);
         }
 
@@ -392,7 +425,8 @@ pub fn probe_selected_text_via_copy(method: ContextGrabMethod) -> Result<Option<
 /// Probe selected text, ensuring platform constraints are respected.
 ///
 /// - macOS: runs on the main thread via `AppHandle::run_on_main_thread`.
-/// - other platforms: calls `probe_selected_text_via_copy` directly.
+/// - Wayland: shares Kolboo's keyboard-only portal session with paste.
+/// - X11/Windows: use the existing native keyboard backend.
 #[cfg(desktop)]
 #[allow(dead_code)]
 pub fn probe_selected_text_via_copy_with_app(
@@ -415,6 +449,24 @@ pub fn probe_selected_text_via_copy_with_app(
 
     #[cfg(not(target_os = "macos"))]
     {
+        #[cfg(target_os = "linux")]
+        if crate::platform_capabilities::current_linux_display_server()
+            == crate::platform_capabilities::LinuxDisplayServer::Wayland
+        {
+            let mut copy = |prepare: &mut dyn FnMut() -> Result<(), String>| {
+                tauri::async_runtime::block_on(crate::text::wayland_input::send_shortcut(
+                    _app,
+                    crate::text::wayland_input::InputShortcut::Copy,
+                    false,
+                    prepare,
+                ))
+            };
+            return probe_selected_text_via_copy_impl(method, Some(&mut copy));
+        }
         probe_selected_text_via_copy(method)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/selection_probe.rs"]
+mod tests;

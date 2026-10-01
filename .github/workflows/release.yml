@@ -81,12 +81,19 @@ jobs:
       release_build: true
     secrets: inherit
 
+  build-linux:
+    name: Build Linux Community packages
+    needs: verify
+    uses: ./.github/workflows/linux-build.yml
+    secrets: inherit
+
   publish:
-    name: Publish GitHub Release
+    name: Prepare draft GitHub Release
     needs:
       - verify
       - build-windows
       - build-macos
+      - build-linux
     runs-on: ubuntu-latest
 
     steps:
@@ -120,6 +127,12 @@ jobs:
           name: ${{ needs.build-macos.outputs.artifact-name }}
           path: .release/macos
 
+      - name: Download Linux packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ needs.build-linux.outputs.artifact-name }}
+          path: .release/linux
+
       - name: Attest build provenance (Windows bundles)
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
@@ -129,6 +142,13 @@ jobs:
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: .release/macos/**
+
+      - name: Attest build provenance (Linux packages)
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: |
+            .release/linux/*.deb
+            .release/linux/*.AppImage
 
       - name: Disclose unsigned Windows publisher identity
         if: ${{ needs.build-windows.outputs.publisher-signed != 'true' }}
@@ -150,13 +170,15 @@ jobs:
       - name: Generate signed updater manifest
         run: node .github/scripts/generate-updater-manifest.mjs .release/windows/default .release/RELEASE_NOTES.md .release/windows/default/latest.json
 
-      - name: Create GitHub Release
+      - name: Create draft GitHub Release for exact-package acceptance
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ needs.build-windows.outputs.publisher-signed == 'true' && format('Kolboo {0}', github.ref_name) || format('Kolboo {0} (unsigned Windows installer)', github.ref_name) }}
           body_path: .release/RELEASE_NOTES.md
+          draft: true
           files: |
             .release/windows/**
             .release/macos/*.dmg
             .release/macos/*.app.zip
+            .release/linux/**
           fail_on_unmatched_files: true

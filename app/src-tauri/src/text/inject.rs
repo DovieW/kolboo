@@ -1,5 +1,5 @@
 use arboard::Clipboard;
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use enigo::{Direction, Enigo, Key, Keyboard};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -8,7 +8,7 @@ use crate::text::clipboard::{
     set_clipboard_text_with_barrier, set_output_clipboard_text, ClipboardRestoreGuard,
 };
 use crate::text::key_inject::{
-    release_common_modifiers_best_effort, send_paste_shortcut, PasteShortcut,
+    new_keyboard, release_common_modifiers_best_effort, send_paste_shortcut, PasteShortcut,
 };
 #[cfg(desktop)]
 use tauri::AppHandle;
@@ -30,6 +30,42 @@ pub(crate) const WAYLAND_CLIPBOARD_FALLBACK_MESSAGE: &str =
 pub(crate) enum OutputDelivery {
     RequestedMode,
     ClipboardFallback,
+}
+
+// Permission dialogs and queued main-thread work can outlive a dictation. Never
+// insert its text into the next session's target after delayed approval.
+#[cfg(desktop)]
+struct OutputLease {
+    pipeline: Option<crate::pipeline::SharedPipeline>,
+    epoch: Option<u64>,
+}
+
+#[cfg(desktop)]
+impl OutputLease {
+    fn capture(app: &AppHandle) -> Self {
+        let pipeline = app
+            .try_state::<crate::pipeline::SharedPipeline>()
+            .map(|pipeline| (*pipeline).clone());
+        let epoch = pipeline
+            .as_ref()
+            .and_then(|pipeline| pipeline.session_epoch());
+        Self { pipeline, epoch }
+    }
+
+    fn ensure_current(&self) -> Result<(), String> {
+        match &self.pipeline {
+            Some(pipeline) => validate_output_epoch(self.epoch, pipeline.session_epoch()),
+            None => Ok(()),
+        }
+    }
+}
+
+fn validate_output_epoch(expected: Option<u64>, current: Option<u64>) -> Result<(), String> {
+    if expected.is_some() && expected == current {
+        Ok(())
+    } else {
+        Err("Text output was superseded by a newer recording session".into())
+    }
 }
 
 /// Global lock to ensure we never run multiple output injections concurrently.
@@ -113,10 +149,8 @@ pub fn output_text_with_mode_options(
 
 /// Apply a user-facing platform fallback before invoking synthetic input.
 ///
-/// Wayland intentionally prevents applications from injecting global keyboard
-/// input through the X11-style path Kolboo currently uses. Copy the completed
-/// transcript once and notify the renderer instead of failing or pretending the
-/// paste succeeded.
+/// Wayland uses its own keyboard-only portal grant. An unavailable or rejected
+/// grant leaves the completed transcript on the clipboard, never XWayland input.
 #[cfg(desktop)]
 pub(crate) fn output_text_with_app(
     app: &AppHandle,
@@ -126,12 +160,49 @@ pub(crate) fn output_text_with_app(
     preserve_clipboard: bool,
     shortcut: PasteShortcut,
 ) -> Result<OutputDelivery, String> {
+    output_text_with_app_and_lease(
+        app,
+        text,
+        mode,
+        hit_enter,
+        preserve_clipboard,
+        shortcut,
+        &OutputLease::capture(app),
+    )
+}
+
+#[cfg(desktop)]
+fn output_text_with_app_and_lease(
+    app: &AppHandle,
+    text: &str,
+    mode: OutputMode,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+    shortcut: PasteShortcut,
+    lease: &OutputLease,
+) -> Result<OutputDelivery, String> {
     let automatic_insertion_requested = !matches!(mode, OutputMode::Clipboard);
     if crate::platform_capabilities::should_use_clipboard_fallback(automatic_insertion_requested) {
         let _guard = output_injection_lock()
             .lock()
             .map_err(|_| "Output lock poisoned".to_string())?;
-        copy_to_clipboard_and_notify(app, text)?;
+        #[cfg(target_os = "linux")]
+        if tauri::async_runtime::block_on(super::wayland_input::send_shortcut(
+            app,
+            super::wayland_input::InputShortcut::Paste(shortcut),
+            hit_enter,
+            || {
+                lease.ensure_current()?;
+                copy_to_clipboard(text)
+            },
+        ))
+        .is_ok()
+        {
+            return Ok(OutputDelivery::RequestedMode);
+        }
+        lease.ensure_current()?;
+        copy_to_clipboard(text)?;
+        let _ = app.emit(EVENT_TRANSCRIPT_COPIED_TO_CLIPBOARD, ());
         log::warn!("{}", WAYLAND_CLIPBOARD_FALLBACK_MESSAGE);
 
         if let Some(log_store) = app.try_state::<crate::request_log::RequestLogStore>() {
@@ -143,8 +214,69 @@ pub(crate) fn output_text_with_app(
         return Ok(OutputDelivery::ClipboardFallback);
     }
 
+    lease.ensure_current()?;
     output_text_with_mode_options(text, mode, hit_enter, preserve_clipboard, shortcut)?;
     Ok(OutputDelivery::RequestedMode)
+}
+
+/// Native input may wait for a compositor dialog or key delivery: never block
+/// a Tokio executor. macOS keyboard APIs must remain on the main thread.
+#[cfg(desktop)]
+pub(crate) async fn output_text_with_app_async(
+    app: AppHandle,
+    text: String,
+    mode: OutputMode,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+    shortcut: PasteShortcut,
+) -> Result<OutputDelivery, String> {
+    let lease = OutputLease::capture(&app);
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            output_text_with_app_and_lease(
+                &app,
+                &text,
+                mode,
+                hit_enter,
+                preserve_clipboard,
+                shortcut,
+                &lease,
+            )
+        })
+        .await
+        .map_err(|_| "Text output worker failed".to_string())?
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let dispatch = app.clone();
+        dispatch
+            .run_on_main_thread(move || {
+                let _ = tx.send(output_text_with_app_and_lease(
+                    &app,
+                    &text,
+                    mode,
+                    hit_enter,
+                    preserve_clipboard,
+                    shortcut,
+                    &lease,
+                ));
+            })
+            .map_err(|_| "Could not dispatch text output".to_string())?;
+        rx.await
+            .map_err(|_| "Text output worker failed".to_string())?
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+    output_text_with_app_and_lease(
+        &app,
+        &text,
+        mode,
+        hit_enter,
+        preserve_clipboard,
+        shortcut,
+        &lease,
+    )
 }
 
 /// Copy text to clipboard and paste, keeping text in clipboard (no restore)
@@ -153,6 +285,7 @@ pub fn paste_and_keep_clipboard(
     hit_enter: bool,
     shortcut: PasteShortcut,
 ) -> Result<(), String> {
+    let mut enigo = new_keyboard()?;
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Verify the new clipboard text before sending a paste keystroke.
@@ -160,8 +293,6 @@ pub fn paste_and_keep_clipboard(
     set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
 
     // Simulate Ctrl+V / Cmd+V
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-
     let result = send_paste_shortcut(&mut enigo, shortcut, &mut |ms| {
         thread::sleep(Duration::from_millis(ms));
     });
@@ -207,7 +338,7 @@ pub fn type_text_as_keystrokes(text: &str) -> Result<(), String> {
         .lock()
         .map_err(|_| "Output lock poisoned".to_string())?;
 
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+    let mut enigo = new_keyboard()?;
     for ch in text.chars() {
         enigo
             .key(Key::Unicode(ch), Direction::Click)
@@ -224,54 +355,28 @@ pub fn type_text_blocking_with_options(
     preserve_clipboard: bool,
     shortcut: PasteShortcut,
 ) -> Result<(), String> {
-    // KDE may return from the synthetic key request before a first-use Wayland input-control
-    // approval has completed. Keep the new transcript available until the compositor eventually
-    // delivers that queued Ctrl+V; restoring the old clipboard on a timer would paste stale text.
-    #[cfg(target_os = "linux")]
-    let retain_clipboard_for_deferred_paste =
-        crate::platform_capabilities::current_linux_display_server()
-            == crate::platform_capabilities::LinuxDisplayServer::Wayland;
-    #[cfg(not(target_os = "linux"))]
-    let retain_clipboard_for_deferred_paste = false;
-
-    let mut clipboard = if retain_clipboard_for_deferred_paste {
-        None
-    } else {
-        Some(Clipboard::new().map_err(|e| e.to_string())?)
-    };
+    // Wayland must use the app-owned portal path. Validate the native backend
+    // before touching the clipboard, including callers bypassing that wrapper.
+    let mut enigo = new_keyboard()?;
+    let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
 
     // Save previous clipboard content (text only). If the previous clipboard isn't text,
     // don't try to "restore" it as an empty string.
-    let previous: Option<String> = if preserve_clipboard && !retain_clipboard_for_deferred_paste {
-        clipboard
-            .as_mut()
-            .and_then(|clipboard| clipboard.get_text().ok())
+    let previous: Option<String> = if preserve_clipboard {
+        clipboard.get_text().ok()
     } else {
         None
     };
 
     // RAII restore guard so errors/early-returns still attempt to restore when safe.
-    let mut restore_guard = ClipboardRestoreGuard::new(
-        previous,
-        text,
-        preserve_clipboard && !retain_clipboard_for_deferred_paste,
-    );
+    let mut restore_guard = ClipboardRestoreGuard::new(previous, text, preserve_clipboard);
 
     // Set new text and wait for it to become visible to readers (best-effort).
     // In the default "Paste" mode, we restore the clipboard afterwards, so on Windows we also
     // try to exclude the injected text from the OS clipboard history.
-    if retain_clipboard_for_deferred_paste {
-        set_output_clipboard_text(text)?;
-    } else {
-        let clipboard = clipboard
-            .as_mut()
-            .ok_or_else(|| "Output clipboard is unavailable".to_string())?;
-        set_clipboard_text_with_barrier(clipboard, text, true)?;
-    }
+    set_clipboard_text_with_barrier(&mut clipboard, text, true)?;
 
     // Simulate Ctrl+V / Cmd+V
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-
     let result = send_paste_shortcut(&mut enigo, shortcut, &mut |ms| {
         thread::sleep(Duration::from_millis(ms));
     });
@@ -295,3 +400,7 @@ pub fn run_with_output_injection_lock<T>(
         .map_err(|_| "Output lock poisoned".to_string())?;
     work()
 }
+
+#[cfg(test)]
+#[path = "tests/output_ownership.rs"]
+mod output_ownership_tests;

@@ -290,6 +290,92 @@ fn migrate_linux_auth_session() -> Result<(), String> {
 // Generic secret helpers (OS keyring)
 // ---------------------------------------------------------------------------
 
+// This grant is backend-only, not an API key or a synced setting. In particular
+// do NOT add its name to EXTRA_SECRET_KEYS: renderer API-key commands must not
+// be able to read, overwrite or delete desktop input approval.
+#[cfg(all(desktop, target_os = "linux"))]
+pub(crate) fn load_desktop_input_token() -> Option<String> {
+    let _guard = lock_secret_store();
+    let entry = Entry::new(SERVICE_NAME, "desktop_input_restore_token").ok()?;
+    non_empty_password(&entry).ok().flatten()
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+pub(crate) fn save_desktop_input_token(token: Option<&str>) -> Result<(), String> {
+    let _guard = lock_secret_store();
+    let entry = Entry::new(SERVICE_NAME, "desktop_input_restore_token")
+        .map_err(|_| "Desktop input secure storage is unavailable")?;
+    write_desktop_input_token(&entry, token)
+}
+
+#[cfg(all(desktop, target_os = "linux"))]
+fn write_desktop_input_token(entry: &Entry, token: Option<&str>) -> Result<(), String> {
+    match token {
+        Some(token) => entry
+            .set_password(token)
+            .map_err(|_| "Could not save desktop input approval".into()),
+        None => match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => Err("Could not clear desktop input approval".into()),
+        },
+    }
+}
+
+#[cfg(all(test, desktop, target_os = "linux"))]
+mod desktop_input_tests {
+    use super::*;
+
+    #[test]
+    fn desktop_grant_is_backend_only_and_not_accessible_to_renderer_secret_commands() {
+        assert_eq!(
+            validate_secret_store_key("desktop_input_restore_token"),
+            Err("Invalid key name".into())
+        );
+        assert!(!API_KEY_SETTING_KEYS.contains(&"desktop_input_restore_token"));
+        assert!(!EXTRA_SECRET_KEYS.contains(&"desktop_input_restore_token"));
+    }
+
+    #[test]
+    fn token_rotation_and_removal_are_idempotent_and_errors_do_not_leak_values() {
+        let entry = Entry::new_with_credential(Box::new(keyring::mock::MockCredential::default()));
+        let credential = entry
+            .get_credential()
+            .downcast_ref::<keyring::mock::MockCredential>()
+            .unwrap();
+        assert_eq!(non_empty_password(&entry).unwrap(), None);
+        write_desktop_input_token(&entry, Some("synthetic-old-grant")).unwrap();
+        write_desktop_input_token(&entry, Some("synthetic-new-grant")).unwrap();
+        assert_eq!(
+            non_empty_password(&entry).unwrap().as_deref(),
+            Some("synthetic-new-grant")
+        );
+        credential.set_error(keyring::Error::Invalid(
+            "synthetic-sensitive-value".into(),
+            "error".into(),
+        ));
+        assert_eq!(
+            write_desktop_input_token(&entry, Some("synthetic-other-grant")),
+            Err("Could not save desktop input approval".into())
+        );
+        assert_eq!(
+            non_empty_password(&entry).unwrap().as_deref(),
+            Some("synthetic-new-grant")
+        );
+        credential.set_error(keyring::Error::Invalid(
+            "synthetic-sensitive-value".into(),
+            "error".into(),
+        ));
+        assert_eq!(
+            write_desktop_input_token(&entry, None),
+            Err("Could not clear desktop input approval".into())
+        );
+        assert!(non_empty_password(&entry).unwrap().is_some());
+        write_desktop_input_token(&entry, None).unwrap();
+        write_desktop_input_token(&entry, None).unwrap();
+        assert_eq!(non_empty_password(&entry).unwrap(), None);
+    }
+}
+
 /// Get a non-API-key secret from secure storage.
 ///
 /// Unlike API keys, these do not have a legacy `settings.json` fallback.

@@ -24,6 +24,8 @@ const TRAY_HISTORY_MENU_ID: &str = "tray-history";
 const TRAY_HISTORY_EMPTY_ID: &str = "tray-history-empty";
 const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
+pub(crate) mod main_window;
+
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();
     for delay_ms in delays_ms {
@@ -55,12 +57,14 @@ pub(crate) fn show_main_window(app: &AppHandle, source: &str, notify_event: Opti
                 tauri::WebviewUrl::App("index.html".into()),
             )
             .title("Kolboo")
-            .inner_size(1280.0, 720.0)
+            .inner_size(1280.0, 800.0)
+            .visible(false)
             .resizable(true)
             .center()
             .build()
             {
                 Ok(w) => {
+                    main_window::configure(&w);
                     let _ = w.unminimize();
                     let _ = w.show();
                     let _ = w.set_focus();
