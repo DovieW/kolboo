@@ -204,6 +204,13 @@ successful serialization, invalid arguments, storage errors, and content-safe
 responses. Recheck and remove this exception when upgrading Rust or Tauri;
 it is not permission to exempt other generated wrappers.
 
+On 2026-10-01 the maintainer explicitly approved extending the existing native
+recording/permission-callback wiring exception for the superseded-History and
+request-scoped warning fixes. The helper behavior has deterministic regression
+tests plus isolated real-Wry checks; no History transition or clipboard-decision
+logic is exempted. The old autostart-registration exception was removed because
+isolated production startup now covers it.
+
 Rust coverage evidence is available through:
 
 ```sh
@@ -215,7 +222,7 @@ Coverage supports risk assessment; it does not replace platform and integration 
 Linux Rust coverage also runs `pnpm cargo:test:window-native -- --coverage`.
 This explicitly opted-in integration test uses real GTK/Tauri windows and
 Openbox in Xvfb, a private D-Bus session and temporary application storage.
-It verifies fractional-DPI sizing, resize/maximize persistence, actual tray-path
+It verifies isolated clipboard selection after copy approval/denial, fractional-DPI sizing, resize/maximize persistence, actual tray-path
 window recreation, storage failures and production startup/close. The production
 startup process runs in a network namespace without external connectivity; no
 developer environment files, account, recordings or API calls are used. Its
@@ -234,7 +241,11 @@ or unprivileged network namespaces are unavailable. Failed-run artifacts remain
 in the printed temporary directory for diagnosis. The first instrumented desktop
 binary compilation may take longer than the window assertions themselves.
 CI uses a privileged network-namespace launcher that immediately drops back to
-the runner UID/GID; it does not disable the host's namespace security policy.
+the runner UID/GID and preserves only the named display, temporary-storage and
+LLVM-profile environment variables (including the runner's HOME). It does not
+disable the host's namespace security policy. Full offline startup also needs
+the tray runtime (`libayatana-appindicator3-dev` on Ubuntu). Failed startup logs
+are printed from the synthetic fixture, never the user's desktop/data.
 `KOLBOO_NATIVE_WINDOW_RUNNER` selects this trusted launcher, never an offline-test
 bypass.
 

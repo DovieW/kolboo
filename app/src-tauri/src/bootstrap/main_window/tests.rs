@@ -44,12 +44,20 @@ fn native_window_manager_integration() {
         Ok("1"),
         "Run only through the isolated native-window test runner"
     );
+    crate::text::selection_probe::tests::native_selection_probe_copy_transaction();
+    let history_directory = tempfile::tempdir().unwrap();
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
+        .manage(crate::history::HistoryStorage::new(
+            history_directory.path().into(),
+        ))
+        .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .build(mock_context(noop_assets()))
         .unwrap();
+    crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
+    crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     // A real GTK screen with controlled fractional DPI, not a fake Window.
     gdk::Screen::default().unwrap().set_resolution(168.0);
     let window = WebviewWindowBuilder::new(&app, "main", Default::default())

@@ -39,11 +39,10 @@
 			1057, 1159, 1173, 1174, 1175, 1176, 1178, 1179, 1180, 1181, 1219, 1286,
 			1287, 1288, 1289, 1290, 1291, 1303, 1365, 1370, 1411, 1432, 1437, 1666,
 			1667, 1668, 1669, 1670, 1671, 1732, 1739, 1825, 1826, 1827, 1828, 1860,
-			1867, 2000, 2026,
-			1310, 1312, 1313, 1339, 1340, 1341, 1342, 1343, 1344, 1345, 1346,
-			1375, 1380, 1386, 1388, 1389, 1422, 1443, 1448,
-			1677, 1678, 1679, 1680, 1681, 1682, 1743, 1750,
-			1836, 1837, 1838, 1839, 1871, 1878, 2011, 2037
+			1867, 2000, 2026, 1310, 1312, 1313, 1339, 1340, 1341, 1342, 1343, 1344,
+			1345, 1346, 1375, 1380, 1386, 1388, 1389, 1422, 1443, 1448, 1677, 1678,
+			1679, 1680, 1681, 1682, 1743, 1750, 1836, 1837, 1838, 1839, 1871, 1878,
+			2011, 2037
 		],
 		"functions": [1288],
 		"instantiations": [],
@@ -51,20 +50,23 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/history.rs",
-		"reason": "HistoryData contains only serializable plain fields; serde_json has no reachable failure for this owned snapshot. Successful and failed retry commits, title preservation, correction protection, disk-write rollback and post-commit cleanup failure are exercised in storage tests.",
+		"reason": "Re-reviewed 2026-10-01: the existing unreachable serialization-error closure moved into the shared atomic snapshot writer. HistoryData contains only serializable plain fields. Retry and superseded-row success/failure, title preservation, correction protection, disk-write rollback and post-commit cleanup failure are exercised in storage tests; no transition or persistence behavior is waived.",
 		"evidence": [
 			"app/src-tauri/src/tests/history_storage_tests.rs",
 			"app/src-tauri/src/history.rs"
 		],
-		"lines": [730],
-		"functions": [730],
+		"lines": [],
+		"functions": [392],
 		"instantiations": [],
-		"sha256": "4630e6ef735f4fc202d849f9624e076366271067460b8472943bb5a53f74f6d8"
+		"sha256": "12a99aa324675d39fbb49d571b6c6c7356a154a81eb7acaf8d6ccf6e99892efb"
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/text.rs",
 		"reason": "Re-reviewed and approved 2026-09-30: concrete Wry command dispatch into the platform-owned input wrapper needs a desktop AppHandle. Actual portal request sequencing, paste chords, cleanup and restored grants are tested without touching user input.",
-		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs", "app/src-tauri/src/text/tests/wayland_input.rs"],
+		"evidence": [
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs"
+		],
 		"lines": [56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67],
 		"functions": [],
 		"instantiations": [],
@@ -99,19 +101,24 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/lib.rs",
-		"reason": "Re-reviewed and approved 2026-09-30: native completion callbacks recheck pipeline ownership after delayed desktop approval; real Wry completion requires the desktop event loop. Lease tests exercise same/new/unknown ownership against a real pipeline. The previously approved autostart registration exception is retained at its moved line; actual enable/disable was verified on the IdeaPad in the prior batch, not this permission change. Snapshot refreshed after adding main-window startup below these unchanged exceptions; the new startup line is covered by isolated real-app acceptance, not exempted.",
+		"reason": "Re-reviewed and explicitly approved 2026-10-01: only real recording/permission callback wiring and its stale-session exits require the live capture/desktop event loop. Pipeline lease tests cover ownership decisions; superseded History and scoped-log success, cancellation, repeat, deletion and disk-failure behavior are tested with mock and real Wry handles. No History/clipboard helper logic is exempted. Removed the old autostart-registration exception because isolated full-app startup now executes that line.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/core/output_settings.rs",
 			"app/src-tauri/src/overlay/mod.rs",
 			"app/src/components/settings/StartAtLoginSetting.test.tsx",
 			"app/src-tauri/src/text/tests/output_ownership.rs",
+			"app/src-tauri/src/tests/history_request_lifecycle.rs",
+			"app/src-tauri/src/bootstrap/main_window/tests.rs",
 			"docs/Dev Docs/DESKTOP_QOL_BATCH.md"
 		],
-		"lines": [773, 774, 775, 797, 798, 799, 1075],
+		"lines": [
+			640, 641, 642, 643, 644, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787,
+			809, 810, 811, 812, 813, 814, 815, 816, 817, 818
+		],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "5b3c498bbe08b13c9eb3d707b6296819acb84ad324cfe33b99450ceefcc47ec9"
+		"sha256": "d28e45c5829e687b5661c2dc583dc77dafbcc27ffac4f68cf6fbc286771b33a4"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",
@@ -171,16 +178,17 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/normal_dictation_output.rs",
-		"reason": "Re-reviewed and approved 2026-09-30: native final dictation output awaits the app-owned portal/main-thread wrapper. Wry AppHandle dispatch cannot execute headlessly; output-intent, portal grant and keyboard-order tests cover the owned behavior.",
+		"reason": "Re-reviewed and explicitly approved 2026-10-01: native final-output dispatch into the app-owned clipboard/portal/main-thread wrapper, including forwarding its request ID, requires desktop permission/input acceptance. Output-intent, portal sequencing and keyboard-order tests cover the owned behavior; mock and real Wry tests verify that late output warnings never modify a newer request. The scoped warning helper itself is fully covered and not exempted.",
 		"evidence": [
 			"app/src-tauri/src/core/output_settings.rs",
 			"app/src-tauri/src/text/tests/key_inject.rs",
-			"app/src-tauri/src/text/tests/wayland_input.rs"
+			"app/src-tauri/src/text/tests/wayland_input.rs",
+			"app/src-tauri/src/tests/normal_dictation_output.rs"
 		],
-		"lines": [95, 264, 269, 270, 271, 277],
-		"functions": [264],
+		"lines": [94, 95, 96, 97, 98, 99, 100, 270, 274, 276, 277, 278, 284, 287],
+		"functions": [270],
 		"instantiations": [],
-		"sha256": "369aa5a6e944225707c2dc98e93d1ae41431fbab3d876a96806e3b26371c70ab"
+		"sha256": "d444d5ca6eb663ea911a8a09d2ff278720174d3351f411dbab62ca99ec199d6a"
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/ocr_usage.rs",
@@ -284,7 +292,13 @@
 			"app/src-tauri/src/text/tests/output_ownership.rs",
 			"app/src-tauri/src/text/tests/wayland_input.rs"
 		],
-		"lines": [45, 46, 47, 48, 49, 50, 51, 52, 53, 162, 163, 164, 165, 166, 167, 168, 169, 170, 172, 175, 176, 177, 178, 179, 180, 181, 182, 190, 191, 192, 193, 194, 195, 196, 197, 199, 201, 202, 203, 204, 205, 217, 225, 226, 227, 228, 229, 230, 231, 232, 233, 236, 237, 238, 239, 240, 241, 242, 243, 244, 246, 247, 248, 280, 288, 341, 360, 361, 365, 366, 372, 377],
+		"lines": [
+			45, 46, 47, 48, 49, 50, 51, 52, 53, 162, 163, 164, 165, 166, 167, 168,
+			169, 170, 172, 175, 176, 177, 178, 179, 180, 181, 182, 190, 191, 192, 193,
+			194, 195, 196, 197, 199, 201, 202, 203, 204, 205, 217, 225, 226, 227, 228,
+			229, 230, 231, 232, 233, 236, 237, 238, 239, 240, 241, 242, 243, 244, 246,
+			247, 248, 280, 288, 341, 360, 361, 365, 366, 372, 377
+		],
 		"functions": [45, 48, 51, 175, 194, 225, 232, 236, 248, 361],
 		"instantiations": [],
 		"sha256": "c1eb8504d80870ebff243a3faedc7eaad408f04fe592b3537b093015a1d7f1be"
@@ -310,7 +324,10 @@
 	{
 		"filePath": "app/src-tauri/src/text/key_inject.rs",
 		"reason": "Approved 2026-09-30: platform detection and real Enigo construction interact with native permission/input services. The permission-prompt latch, configured paste chords and cleanup are tested without asking the OS for user input approval.",
-		"evidence": ["app/src-tauri/src/text/tests/key_inject.rs", "app/src-tauri/src/platform_capabilities.rs"],
+		"evidence": [
+			"app/src-tauri/src/text/tests/key_inject.rs",
+			"app/src-tauri/src/platform_capabilities.rs"
+		],
 		"lines": [14, 16, 17, 19, 20, 22, 23, 24, 25, 26, 27],
 		"functions": [14, 26],
 		"instantiations": [],
@@ -325,18 +342,34 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/text/selection_probe.rs",
-		"reason": "Approved 2026-09-30: actual clipboard snapshots/sentinels and native copy/main-thread dispatch cannot touch the user's clipboard in headless tests. The disabled probe never requests permission or prepares the clipboard; protocol tests verify preparation runs after approval and copy shares the paste grant. Real selection/focus and restoration remain native acceptance.",
-		"evidence": ["app/src-tauri/src/text/tests/selection_probe.rs", "app/src-tauri/src/text/tests/wayland_input.rs", "app/src-tauri/src/text/clipboard/tests.rs"],
-		"lines": [127, 128, 130, 135, 143, 146, 147, 148, 149, 150, 151, 153, 154, 173, 174, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 284, 285, 286, 453, 454, 456, 457, 458, 459, 461, 463, 464, 465],
-		"functions": [143, 180, 183, 456],
+		"reason": "Re-reviewed 2026-10-01: removed covered clipboard preparation/portal-denial exceptions after isolated Xvfb regression tests verified rejection without reading stale text, sentinel restoration after delivery failure and successful selection capture. Retained only the previously approved native keyboard and real Wry portal/main-thread dispatch boundaries; no new preparation or denial logic is waived. Actual desktop focus/grant restoration remains native acceptance.",
+		"evidence": [
+			"app/src-tauri/src/text/tests/selection_probe.rs",
+			"app/src-tauri/src/text/tests/wayland_input.rs",
+			"app/src-tauri/src/text/clipboard/tests.rs"
+		],
+		"lines": [
+			128, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 287, 462, 463,
+			465, 466, 467, 468, 470, 472, 473, 474
+		],
+		"functions": [182, 185, 465],
 		"instantiations": [],
-		"sha256": "6ea1b2680f7b1bf646966f8d335a979a8d431ad85cd585334cc01e57295f3dca"
+		"sha256": "b76c5d5561ab1e8f2b260c39a844b752dca289ef52a40020ee67e6a702203839"
 	},
 	{
 		"filePath": "app/src-tauri/src/text/wayland_input.rs",
 		"reason": "Approved 2026-09-30: Wry/global-controller dispatch, session-bus and OS keyring workers are native boundaries. Four defensive lines handle failure subscribing to the compositor Closed signal and abort/close instead of using an unobservable grant. Request sequencing, registry identity, denial, restoration, revocation signal, keyboard-only persistence, rotation and all chord failure cleanup run against an isolated real D-Bus. Instantiation entries waive only duplicate LLVM records whose source and function execute in those tests.",
-		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs", "app/src-tauri/src/secrets.rs", "docs/How Tos/LINUX_DEVELOPMENT.md"],
-		"lines": [125, 126, 133, 134, 268, 269, 270, 271, 272, 273, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 299, 300, 301, 303, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 318, 319],
+		"evidence": [
+			"app/src-tauri/src/text/tests/wayland_input.rs",
+			"app/src-tauri/src/secrets.rs",
+			"docs/How Tos/LINUX_DEVELOPMENT.md"
+		],
+		"lines": [
+			125, 126, 133, 134, 268, 269, 270, 271, 272, 273, 276, 277, 278, 279, 280,
+			281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295,
+			296, 299, 300, 301, 303, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314,
+			315, 316, 318, 319
+		],
 		"functions": [268, 273, 276, 277, 284, 289, 290, 294, 299, 307, 310, 316],
 		"instantiations": [157, 165, 173, 201],
 		"sha256": "95602272ac54a8c6dc22082fffffc38cd571c85360e38c00cf1d006fcb0412d5"

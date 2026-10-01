@@ -7,6 +7,7 @@ import {
 	openSync,
 	closeSync,
 	writeFileSync,
+	readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -171,10 +172,19 @@ try {
 				smoke.once("error", reject);
 			});
 			const failedStartup = closed.then((status) => {
-				if (status !== 0)
+				if (status !== 0) {
+					// This log belongs to the synthetic offline app, not the user's
+					// desktop/data. Keep CI failures diagnosable after its VM is gone.
+					console.error(
+						readFileSync(path.join(directory, "startup.log"), "utf8")
+							.split("\n")
+							.slice(-80)
+							.join("\n"),
+					);
 					throw new Error(
 						`Native startup exited with ${status}; see ${path.join(directory, "startup.log")}`,
 					);
+				}
 				// Successful exit follows Python's close request. Wait for its
 				// assertions too, rather than masking a failed geometry check.
 				return checked;

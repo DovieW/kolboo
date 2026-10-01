@@ -637,6 +637,11 @@ pub(crate) fn stop_recording(
             let epoch = pipeline_clone.session_epoch();
             let outcome = pipeline_clone.stop_and_transcribe_detailed().await;
             if epoch.is_none() || epoch != pipeline_clone.session_epoch() {
+                let _ = history_request_lifecycle::complete_superseded_request(
+                    &app_clone,
+                    request_id.as_deref(),
+                    Err("Transcription superseded before completion"),
+                );
                 return;
             }
             match outcome {
@@ -771,6 +776,13 @@ pub(crate) fn stop_recording(
                             let quick_replace_failure = quick_replace_result.failure;
 
                             if epoch != pipeline_clone.session_epoch() {
+                                let _ = history_request_lifecycle::complete_superseded_request(
+                                    &app_clone,
+                                    request_id.as_deref(),
+                                    quick_replace_failure
+                                        .as_deref()
+                                        .map_or(Ok(output_value.as_str()), Err),
+                                );
                                 return;
                             }
 
@@ -795,6 +807,13 @@ pub(crate) fn stop_recording(
                             // A first-use desktop approval dialog may outlive the
                             // session. Never finalize/hide the newer recording.
                             if epoch != pipeline_clone.session_epoch() {
+                                let _ = history_request_lifecycle::complete_superseded_request(
+                                    &app_clone,
+                                    request_id.as_deref(),
+                                    quick_replace_failure
+                                        .as_deref()
+                                        .map_or(Ok(output_value.as_str()), Err),
+                                );
                                 return;
                             }
 

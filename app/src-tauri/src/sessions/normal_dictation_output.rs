@@ -91,8 +91,13 @@ pub(crate) async fn execute_normal_dictation_output(
             }
         }
         NormalDictationOutputDecision::Output => {
-            let output_error =
-                output_text_for_platform(app, request.output_value, request.output_intent).await;
+            let output_error = output_text_for_platform(
+                app,
+                request.output_value,
+                request.output_intent,
+                request.request_id,
+            )
+            .await;
 
             NormalDictationOutputResult {
                 decision: NormalDictationOutputDecision::Output,
@@ -192,6 +197,7 @@ async fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
+    request_id: Option<&str>,
 ) -> Option<String> {
     if matches!(output_intent.mode(), commands::text::OutputMode::Paste) {
         let snapshot = app
@@ -211,7 +217,7 @@ async fn output_text_for_platform(
             output_intent.paste_shortcut(),
         ) {
             log::error!("Failed to output transcript (UIA ladder): {}", e);
-            record_output_failure(app, &e);
+            record_output_failure(app, request_id, &e);
             return Some(e);
         }
 
@@ -253,7 +259,7 @@ async fn output_text_for_platform(
         output_intent.paste_shortcut(),
     ) {
         log::error!("Failed to output transcript: {}", e);
-        record_output_failure(app, &e);
+        record_output_failure(app, request_id, &e);
         return Some(e);
     }
 
@@ -265,6 +271,7 @@ async fn output_text_for_platform(
     app: &AppHandle,
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
+    request_id: Option<&str>,
 ) -> Option<String> {
     if let Err(e) = crate::text::inject::output_text_with_app_async(
         app.clone(),
@@ -277,46 +284,28 @@ async fn output_text_for_platform(
     .await
     {
         log::error!("Failed to output transcript: {}", e);
-        record_output_failure(app, &e);
+        record_output_failure(app, request_id, &e);
         return Some(e);
     }
 
     None
 }
 
-fn record_output_failure(app: &AppHandle, error: &str) {
+fn record_output_failure<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    request_id: Option<&str>,
+    error: &str,
+) {
+    let Some(id) = request_id else {
+        return;
+    };
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        log_store.with_current(|log| {
+        log_store.with_current_id(id, |log| {
             log.warn(format!("Output failed: {}", error));
         });
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_decision_prioritizes_quick_replace_failure() {
-        assert_eq!(
-            decide_normal_dictation_output(Some("rewrite failed"), true),
-            NormalDictationOutputDecision::QuickReplaceFailure
-        );
-    }
-
-    #[test]
-    fn output_decision_skips_when_live_output_completed() {
-        assert_eq!(
-            decide_normal_dictation_output(None, true),
-            NormalDictationOutputDecision::LiveOutputAlreadyCompleted
-        );
-    }
-
-    #[test]
-    fn output_decision_outputs_for_normal_dictation() {
-        assert_eq!(
-            decide_normal_dictation_output(None, false),
-            NormalDictationOutputDecision::Output
-        );
-    }
-}
+#[path = "../tests/normal_dictation_output.rs"]
+pub(crate) mod tests;

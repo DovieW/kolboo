@@ -140,10 +140,12 @@ fn probe_selected_text_via_copy_impl(
         // If we have a previous text clipboard, we temporarily write a unique sentinel value and
         // only accept a selection if the clipboard changes away from that sentinel.
         let mut sentinel: Option<String> = None;
+        let mut prepared = false;
         let mut prepare_clipboard = || {
             // A portal dialog can stay open for minutes. Snapshot and write only
             // after approval, otherwise restoration would overwrite newer data.
             previous = clipboard.get_text().ok();
+            prepared = true;
             if previous.is_some() {
                 let token = format!("__kolboo_selection_probe__{}", Uuid::new_v4());
                 if set_clipboard_text_platform(&mut clipboard, &token, true).is_ok() {
@@ -283,6 +285,13 @@ fn probe_selected_text_via_copy_impl(
         // Even on success, try to reset modifiers (best-effort) so we never leave keys "stuck".
         if let Some(enigo) = keyboard.as_mut() {
             release_common_modifiers_best_effort(enigo);
+        }
+
+        // Approval can fail before the preparation callback runs. In that
+        // case there is no clipboard baseline: polling would capture stale,
+        // unrelated text as a selection. No clipboard write needs restoring.
+        if !prepared {
+            return Ok(None);
         }
 
         // Wait briefly for clipboard to update and then read it.
@@ -469,4 +478,4 @@ pub fn probe_selected_text_via_copy_with_app(
 
 #[cfg(test)]
 #[path = "tests/selection_probe.rs"]
-mod tests;
+pub(crate) mod tests;

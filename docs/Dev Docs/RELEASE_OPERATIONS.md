@@ -23,6 +23,18 @@ Windows checks must pass before installer packaging starts. A failing check ther
 
 The release also builds a universal macOS DMG and app ZIP with ad-hoc signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, auto-updates, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
 
+## 0.3.1 maintenance-release deferrals
+
+The maintainer explicitly deferred public legal-link verification, the full
+Windows/operator rehearsal and Windows/macOS native acceptance for 0.3.1 only.
+All three platform downloads must still be built automatically. Automated CI,
+updater signing and exact-package Linux acceptance remain required; the deferred
+checks must not be described as passed. Managed-service launch remains deferred.
+
+The IdeaPad's unexplained `SIGKILL` on October 1 is a known open reliability
+investigation. The maintainer chose to defer that investigation rather than
+block this maintenance release. No cause or resolution has been established.
+
 ## Signed updates
 
 Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.

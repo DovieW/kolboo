@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev mold sccache xvfb openbox x11-utils xauth
+          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libayatana-appindicator3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev mold sccache xvfb openbox x11-utils xauth
 
       - name: Setup Rust coverage toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
@@ -109,7 +109,10 @@ jobs:
           # without relaxing the host's unprivileged-namespace security policy.
           runner_uid=$(id -u)
           runner_gid=$(id -g)
-          export KOLBOO_NATIVE_WINDOW_RUNNER="sudo -n unshare --net --setuid=$runner_uid --setgid=$runner_gid --"
+          # sudo must retain the isolated display/storage paths and LLVM output
+          # path, rather than launching with root's HOME or dropping coverage.
+          native_env="HOME,DISPLAY,XAUTHORITY,XDG_DATA_HOME,XDG_CONFIG_HOME,XDG_CACHE_HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,GDK_BACKEND,WINIT_UNIX_BACKEND,GDK_SCALE,GDK_DPI_SCALE,WAYLAND_DISPLAY,GTK_MODULES,GTK_A11Y,KOLBOO_NATIVE_WINDOW_TEST,KOLBOO_NATIVE_WINDOW_DIRECTORY,LLVM_PROFILE_FILE"
+          export KOLBOO_NATIVE_WINDOW_RUNNER="sudo -n --preserve-env=$native_env unshare --net --setuid=$runner_uid --setgid=$runner_gid --"
           pnpm cargo:coverage -- --lcov --output-path coverage/rust-lcov.info
 
       - name: Enforce 100% patch coverage

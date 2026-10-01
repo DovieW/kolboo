@@ -134,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           export RUSTC_WRAPPER=sccache
-          pnpm tauri build --no-sign --bundles deb,appimage
+          pnpm tauri build --no-sign --bundles deb,appimage --verbose
           node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo
 
       - name: Verify and package Linux artifacts
