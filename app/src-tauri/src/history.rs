@@ -379,13 +379,18 @@ impl HistoryStorage {
             .read()
             .map_err(|e| format!("Failed to read history: {}", e))?;
 
-        let content = serde_json::to_string_pretty(&*data)
-            .map_err(|e| format!("Failed to serialize history: {}", e))?;
-
-        self.atomic_write_history_json(content.as_bytes())?;
+        self.persist_history_data(&data)?;
         self.cleanup_edits(&data.entries)?;
 
         Ok(())
+    }
+
+    /// Atomically commit a plain history snapshot without unrelated edit cleanup.
+    /// Callers publish the snapshot to readers only after this succeeds.
+    fn persist_history_data(&self, data: &HistoryData) -> Result<(), String> {
+        let content = serde_json::to_string_pretty(data)
+            .map_err(|e| format!("Failed to serialize history: {}", e))?;
+        self.atomic_write_history_json(content.as_bytes())
     }
 
     fn atomic_write_history_json(&self, bytes: &[u8]) -> Result<(), String> {
@@ -639,6 +644,41 @@ impl HistoryStorage {
         Ok(())
     }
 
+    /// Finish only a still-pending row owned by this request. Late output must
+    /// not resurrect deleted recordings or overwrite an already completed row.
+    pub(crate) fn complete_pending_request(
+        &self,
+        request_id: &str,
+        result: Result<&str, &str>,
+    ) -> Result<bool, String> {
+        let _mutation = self.mutation.lock().map_err(|_| "History unavailable")?;
+        let mut snapshot = self.data.read().map_err(|_| "History unavailable")?.clone();
+        let Some(entry) = snapshot
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == request_id)
+        else {
+            return Ok(false);
+        };
+        if entry.status != HistoryStatus::InProgress {
+            return Ok(false);
+        }
+        match result {
+            Ok(text) => {
+                entry.status = HistoryStatus::Success;
+                entry.text = text.into();
+                entry.error_message = None;
+            }
+            Err(message) => {
+                entry.status = HistoryStatus::Error;
+                entry.error_message = Some(message.into());
+            }
+        }
+        self.persist_history_data(&snapshot)?;
+        *self.data.write().map_err(|_| "History unavailable")? = snapshot;
+        Ok(true)
+    }
+
     /// Mark an existing request entry as failed with an error message.
     pub fn complete_request_error(
         &self,
@@ -726,9 +766,7 @@ impl HistoryStorage {
             }
             snapshot.entries.retain(|entry| entry.id != prior_failed_id);
         }
-        let content = serde_json::to_vec_pretty(&snapshot)
-            .map_err(|error| format!("Failed to serialize history: {error}"))?;
-        self.atomic_write_history_json(&content)?;
+        self.persist_history_data(&snapshot)?;
         *self.data.write().map_err(|_| "History unavailable")? = snapshot;
         // The removed row is known to have no correction. If cleanup fails,
         // the committed history is still valid and the next save can retry it.

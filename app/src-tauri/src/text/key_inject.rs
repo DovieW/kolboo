@@ -1,4 +1,30 @@
-use enigo::{Direction, Enigo, Key, Keyboard};
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Check OS-owned Accessibility approval on every connection, but don't reopen
+/// macOS's permission prompt on every denied paste/copy/media action.
+fn keyboard_settings(is_macos: bool, prompt_requested: &AtomicBool) -> Settings {
+    Settings {
+        open_prompt_to_get_permissions: !is_macos
+            || !prompt_requested.swap(true, Ordering::Relaxed),
+        ..Settings::default()
+    }
+}
+
+pub(crate) fn new_keyboard() -> Result<Enigo, String> {
+    #[cfg(target_os = "linux")]
+    if crate::platform_capabilities::current_linux_display_server()
+        == crate::platform_capabilities::LinuxDisplayServer::Wayland
+    {
+        return Err("Wayland keyboard input requires Kolboo's desktop portal session".into());
+    }
+    static PROMPT_REQUESTED: AtomicBool = AtomicBool::new(false);
+    Enigo::new(&keyboard_settings(
+        cfg!(target_os = "macos"),
+        &PROMPT_REQUESTED,
+    ))
+    .map_err(|e| e.to_string())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PasteShortcut {

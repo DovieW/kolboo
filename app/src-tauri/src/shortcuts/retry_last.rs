@@ -123,14 +123,17 @@ pub(crate) fn spawn_retry_last_recording_and_output(app: &AppHandle, source: &st
         let output_intent =
             crate::core::output_settings::resolve_output_intent_from_store(&app, None, None, None);
 
-        if let Err(e) = crate::text::inject::output_text_with_app(
-            &app,
-            &text,
+        let shortcut = crate::core::output_settings::foreground_paste_shortcut(&app);
+        if let Err(e) = crate::text::inject::output_text_with_app_async(
+            app,
+            text,
             output_intent.mode(),
             output_intent.hit_enter(),
             !output_intent.clipboard_privacy_mode(),
-            crate::core::output_settings::foreground_paste_shortcut(&app),
-        ) {
+            shortcut,
+        )
+        .await
+        {
             log::error!("{source}: failed to output retry transcript: {}", e);
         }
     });

@@ -2,7 +2,7 @@
 
 **Status:** Current
 
-**Last reviewed:** 2026-08-09
+**Last reviewed:** 2026-09-30
 
 This is the canonical desktop testing guide. The scripts in `app/package.json` and the workflows under `.github/workflows/` remain executable sources of truth if this guide drifts.
 
@@ -171,6 +171,27 @@ Tauri annotation exception below. It ran 851 frontend and 924 Rust tests;
 This is **100% of non-exempt patch code**, not 100% global or native-platform
 coverage. Exceptions are printed separately in every gate result.
 
+On 2026-09-30 the maintainer approved the necessary native-boundary exceptions
+for persistent desktop input. The reviewed snapshots cover Wry dispatch, real
+clipboard/keyring/keyboard calls, four defensive Closed-signal subscription
+failure lines, and duplicate LLVM instances with executed source definitions.
+The portal's identity, keyboard-only request, restoration/token rotation,
+denial, closure, delivery cleanup, and post-approval preparation are exercised
+through the real ashpd client against an isolated `dbus-daemon`; no desktop
+permission, network service or user clipboard is used. Pipeline output-lease
+tests reject delayed output after a newer operation begins. Tests live outside
+production modules so test-only forbidden-callback sentinels aren't waived.
+
+The maintainer selected Linux-only native acceptance for the next release;
+Windows/macOS native testing is deferred, not certified by Linux coverage.
+On September 30 the refreshed package was installed and restarted on the
+IdeaPad. Its running executable hash matched the extracted package; overlay
+frontend readiness and rendered main-window controls were verified. Actual KDE
+approval, repeated paste and grant restoration after app restart remain pending
+user interaction; startup and portal-version checks do not establish those.
+This exception approval does not assert that native acceptance has occurred
+or authorize release publication.
+
 An additional explicitly approved exception (2026-09-23) covers counterless Tauri async
 wrapper metadata at the standalone `#[tauri::command]` annotation of
 `commands/history.rs::get_history_activity` (observed with rustc 1.98.1 and
@@ -183,6 +204,13 @@ successful serialization, invalid arguments, storage errors, and content-safe
 responses. Recheck and remove this exception when upgrading Rust or Tauri;
 it is not permission to exempt other generated wrappers.
 
+On 2026-10-01 the maintainer explicitly approved extending the existing native
+recording/permission-callback wiring exception for the superseded-History and
+request-scoped warning fixes. The helper behavior has deterministic regression
+tests plus isolated real-Wry checks; no History transition or clipboard-decision
+logic is exempted. The old autostart-registration exception was removed because
+isolated production startup now covers it.
+
 Rust coverage evidence is available through:
 
 ```sh
@@ -191,11 +219,50 @@ pnpm cargo:coverage
 
 Coverage supports risk assessment; it does not replace platform and integration acceptance.
 
+Linux Rust coverage also runs `pnpm cargo:test:window-native -- --coverage`.
+This explicitly opted-in integration test uses real GTK/Tauri windows and
+Openbox in Xvfb, a private D-Bus session and temporary application storage.
+It verifies isolated clipboard selection after copy approval/denial, fractional-DPI sizing, resize/maximize persistence, actual tray-path
+window recreation, storage failures and production startup/close. The production
+startup process runs in a network namespace without external connectivity; no
+developer environment files, account, recordings or API calls are used. Its
+profiles are merged into the same Rust LCOV report, without new coverage waivers.
+Normal `cargo:test` stays headless; Windows/macOS still require native acceptance.
+
+On Ubuntu/Kubuntu install the optional acceptance prerequisites:
+
+```sh
+sudo apt-get install xvfb openbox x11-utils xauth
+pnpm cargo:test:window-native
+```
+
+Coverage fails rather than silently skipping this boundary when its prerequisites
+or unprivileged network namespaces are unavailable. Failed-run artifacts remain
+in the printed temporary directory for diagnosis. The first instrumented desktop
+binary compilation may take longer than the window assertions themselves.
+CI uses a privileged network-namespace launcher that immediately drops back to
+the runner UID/GID and preserves only the named display, temporary-storage and
+LLVM-profile environment variables (including the runner's HOME). It does not
+disable the host's namespace security policy. Full offline startup also needs
+the tray runtime (`libayatana-appindicator3-dev` on Ubuntu). Failed startup logs
+are printed from the synthetic fixture, never the user's desktop/data.
+`KOLBOO_NATIVE_WINDOW_RUNNER` selects this trusted launcher, never an offline-test
+bypass.
+
+The merged Linux LCOV report uses binutils `c++filt --format=rust --no-verbose`
+to identify the same Rust function across test/desktop build hashes. It retains
+source files, definition locations, concrete generic types and closure indices;
+unexecuted variants still fail the gate. This deduplicates build artifacts, not
+source functions or missing lines. Regression tests enforce that distinction.
+
 ## Dependency security
 
 ```sh
-pnpm audit
+pnpm run audit
 ```
+
+Use `run audit` explicitly to invoke both JavaScript and Rust audits; bare
+`pnpm audit` runs pnpm's JavaScript audit only.
 
 High or critical advisories must be fixed. If no upstream fix exists and the dependency is still necessary, document a time-limited exception with exploitability, mitigation, owner, and expiry.
 

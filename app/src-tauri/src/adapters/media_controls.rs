@@ -1,5 +1,5 @@
 #[cfg(desktop)]
-use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use enigo::{Direction, Key, Keyboard};
 #[cfg(desktop)]
 use tauri::AppHandle;
 
@@ -76,7 +76,7 @@ pub(crate) fn toggle_media_play_pause(app: &AppHandle) -> Result<(), String> {
     {
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         app.run_on_main_thread(move || {
-            let mut enigo = match Enigo::new(&Settings::default()) {
+            let mut enigo = match crate::text::key_inject::new_keyboard() {
                 Ok(e) => e,
                 Err(e) => {
                     let _ = tx.send(Err(e.to_string()));
@@ -95,10 +95,26 @@ pub(crate) fn toggle_media_play_pause(app: &AppHandle) -> Result<(), String> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        // `app` is only needed on macOS (main-thread requirement). Silence the
-        // unused-parameter warning on other platforms without changing behavior.
+        #[cfg(target_os = "linux")]
+        if crate::platform_capabilities::current_linux_display_server()
+            == crate::platform_capabilities::LinuxDisplayServer::Wayland
+        {
+            let app = app.clone();
+            // Callers include runtime tasks: do not nest block_on inside their
+            // executor. Media only reuses approval; it never opens a dialog.
+            return std::thread::spawn(move || {
+                tauri::async_runtime::block_on(crate::text::wayland_input::send_shortcut(
+                    &app,
+                    crate::text::wayland_input::InputShortcut::MediaPlayPause,
+                    false,
+                    || Ok(()),
+                ))
+            })
+            .join()
+            .map_err(|_| "Desktop media worker failed".to_string())?;
+        }
         let _ = app;
-        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+        let mut enigo = crate::text::key_inject::new_keyboard()?;
         enigo
             .key(Key::MediaPlayPause, Direction::Click)
             .map_err(|e| e.to_string())?;

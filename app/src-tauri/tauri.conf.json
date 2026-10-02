@@ -3,7 +3,7 @@
 	"productName": "Kolboo",
 	"identifier": "com.kolboo.app",
 	"mainBinaryName": "kolboo",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"build": {
 		"beforeDevCommand": "pnpm dev:vite",
 		"devUrl": "http://localhost:5173",
@@ -20,7 +20,7 @@
 				"label": "main",
 				"visible": false,
 				"width": 1280,
-				"height": 720,
+				"height": 800,
 				"resizable": true,
 				"fullscreen": false,
 				"center": true
@@ -421,6 +421,23 @@
 		"targets": "all",
 		"shortDescription": "Customizable AI-powered voice dictation tool",
 		"longDescription": "Open-source alternative to Wispr Flow and SuperWhisper. Speak and your words are typed wherever your cursor is.",
+		"linux": {
+			"deb": {
+				"files": {
+					"/usr/share/applications/com.kolboo.app.desktop": "linux/com.kolboo.app.desktop"
+				}
+			},
+			"rpm": {
+				"files": {
+					"/usr/share/applications/com.kolboo.app.desktop": "linux/com.kolboo.app.desktop"
+				}
+			},
+			"appimage": {
+				"files": {
+					"/usr/share/applications/com.kolboo.app.desktop": "linux/com.kolboo.app.appimage.desktop"
+				}
+			}
+		},
 		"license": "AGPL-3.0",
 		"icon": [
 			"icons/32x32.png",

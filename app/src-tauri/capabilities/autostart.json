@@ -1,0 +1,11 @@
+{
+	"$schema": "../gen/schemas/desktop-schema.json",
+	"identifier": "autostart",
+	"description": "Only the main settings window can manage launch at login",
+	"windows": ["main"],
+	"permissions": [
+		"autostart:allow-is-enabled",
+		"autostart:allow-enable",
+		"autostart:allow-disable"
+	]
+}

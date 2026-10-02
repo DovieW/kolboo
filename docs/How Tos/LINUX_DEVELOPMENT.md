@@ -2,7 +2,7 @@
 
 **Status:** public x86_64 Community/BYOK beta; provisional support
 
-**Last reviewed:** 2026-09-03
+**Last reviewed:** 2026-09-30
 
 Kolboo's public Linux Community beta began with [`v0.2.5-beta.1`](https://github.com/DovieW/kolboo/releases/tag/v0.2.5-beta.1). The channel is limited to x86_64 Ubuntu/Kubuntu and account-free Community/BYOK use. It is not a managed-service launch, a stable-platform declaration, or a promise of native Wayland feature parity.
 
@@ -13,6 +13,7 @@ The Rust/Tauri build requires native GTK, WebKit, audio, tray, TLS, and input de
 ```sh
 sudo apt-get update
 sudo apt-get install -y \
+  dbus-daemon \
   libasound2-dev \
   libayatana-appindicator3-dev \
   libglib2.0-dev \
@@ -24,9 +25,13 @@ sudo apt-get install -y \
   libwebkit2gtk-4.1-dev \
   libxdo-dev \
   mold \
+  openbox \
   patchelf \
   pkg-config \
-  sccache
+  sccache \
+  x11-utils \
+  xauth \
+  xvfb
 ```
 
 Verify the required compiler cache and linker before development:
@@ -58,6 +63,11 @@ the frontend but are not release candidates; public artifacts must continue
 through the release workflow below.
 
 The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for this beta channel.
+
+DEB/RPM packages use a hidden portal-identity alias to avoid duplicate menu
+entries. AppImage uses a visible variant of that identity: linuxdeploy can choose
+it as the root launcher, which must include valid desktop categories and must
+not be hidden by `NoDisplay=true`.
 
 ## Install, update, and remove
 
@@ -100,12 +110,16 @@ Kolboo detects the Linux session using `XDG_SESSION_TYPE`, then falls back to `W
 - X11 keeps the current automatic clipboard-and-keyboard paste path.
 - Standard Wayland `xdg-shell` windows do not have a global coordinate system, so a normal application cannot reliably place an overlay at screen bottom-center. When a Wayland session also exposes XWayland through `DISPLAY`, Kolboo automatically runs its GTK/Tauri windows through XWayland so anchored overlay placement remains deterministic. Kolboo uses XSettings fractional DPI for the native overlay rectangle; WebKit inherits that same desktop scale itself, so no additional webview zoom is applied. This does not change the session classification used for input safety.
 - Set `KOLBOO_LINUX_WINDOW_BACKEND=wayland` to test the native Wayland window path, or `KOLBOO_LINUX_WINDOW_BACKEND=x11` to require X11/XWayland. Native Wayland uses compositor-selected placement until Kolboo adopts a broadly supported shell protocol capable of anchored utility surfaces.
-- Wayland does not promise global synthetic keyboard insertion. Completed output that requested automatic paste is copied to the clipboard once, and the UI shows an explicit fallback notification.
-- Streaming live output is disabled on Wayland so partial chunks are not repeatedly copied to the clipboard. The final completed transcript uses the clipboard fallback.
+- Wayland automatic paste and selection-copy use one app-identified, keyboard-only XDG RemoteDesktop portal session, including when Kolboo's windows use XWayland. No pointer or screen-sharing access is requested. The portal must support persistent approval (RemoteDesktop version 2+) and host-app identification. Kolboo requests persistence until revoked, saves the desktop-issued restore token only in the Rust OS secure store, and rotates it after each successful restoration. No token enters settings, sync, logs, or renderer secret commands.
+- The first automatic paste/copy can open the desktop's approval dialog. A live session is reused; after restart or compositor closure, Kolboo restores the saved grant. The desktop may still ask again after revocation, expiration, or if it declined persistence; an unavailable/locked secure store cannot preserve a grant across restarts. A rejected or unsupported setup is not retried for every recording in the same launch. Restart Kolboo to retry approval. Kolboo does not pre-authorize all X11/anonymous applications or alter desktop security policy.
+- Older portals and desktops without keyboard control keep the final transcript on the clipboard and show the existing fallback notification. No XWayland synthetic-input fallback is attempted. This is capability-based, not a KDE/GNOME or distro-name assumption. Optional media play/pause shares an already-approved session and never opens a permission dialog during capture; it is skipped if there is no usable approval or input is busy.
+- The clipboard is populated after approval, immediately before paste; Wayland retains the transcript instead of restoring previous clipboard contents on a timer. Failed key delivery releases keys/modifiers best-effort and is never automatically replayed, since the compositor may have delivered part of the chord.
+- Linux packages include a hidden `com.kolboo.app.desktop` identity matching the portal registration, alongside Tauri's menu launcher. Portable/development installations must make that identity available to the host desktop as well; an internal AppImage entry alone is not proof of host desktop integration. This is metadata, not a permission grant.
+- Streaming live output remains disabled on Wayland; partial chunks never attempt global injection. The final completed transcript uses the portal or clipboard fallback.
 - Native Wayland sessions register shortcuts through the compositor-owned XDG Global Shortcuts portal. This prevents a shortcut such as F3 from also reaching the focused Wayland application. The desktop may show a confirmation dialog the first time a binding is requested or after the binding changes, and the desktop remains authoritative over the final assigned trigger.
 - X11 sessions use the Tauri global-shortcut backend. Portal or X11 registration failures remain visible in diagnostics rather than preventing app startup.
 
-The fallback retains the transcript and avoids reporting a paste that did not happen. It does not make Wayland globally injected text a supported capability.
+The fallback retains the transcript and avoids reporting a paste that did not happen. Portal behavior still needs native acceptance on each supported desktop stack. See the [Registry](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.host.portal.Registry.html) and [RemoteDesktop](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.RemoteDesktop.html) contracts.
 
 ## Focused validation
 
@@ -124,7 +138,7 @@ The release artifact, not a dev-server build, must pass and record:
 
 - launch and tray lifecycle;
 - microphone enumeration and recording;
-- X11 automatic paste or Wayland clipboard fallback;
+- X11 automatic paste; Wayland first-use approve/deny, repeated paste without re-prompt, app restart/token restoration, desktop revocation and clipboard fallback; repeat for normal dictation, Paste Last, Retry Last, and explicit text insertion;
 - shortcut registration behavior, including that F3 does not also trigger the focused application's action on Wayland;
 - recording-overlay mapping without moving focus away from the previously focused input;
 - secure-storage availability and failure messaging;

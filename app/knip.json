@@ -17,5 +17,6 @@
 	"ignore": ["src/lib/tauri/types.generated.ts"],
 	"ignoreExportsUsedInFile": true,
 	"ignoreDependencies": ["@biomejs/biome", "json-schema-to-typescript"],
+	"ignoreBinaries": ["openbox", "xprop"],
 	"tags": ["-lintignore"]
 }

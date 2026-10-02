@@ -23,6 +23,172 @@ credentials, paid requests, production changes or release publication.
   Initial formats are WAV, MP3, FLAC and ADTS AAC. M4A, Ogg and AIFF remain
   unsupported pending decoder/container hardening; no custom media parser was added.
 
+## 0.3.1 release preparation — 2026-10-01
+
+Package, Cargo and Tauri versions are aligned at 0.3.1, with user-facing notes in
+`changelog.d/0.3.1.md`. The release workflow now includes Linux alongside Windows
+and experimental universal macOS, and prepares a draft. Exact-package acceptance
+and explicit publication still follow successful builds; the version bump is not
+a publication claim. Windows/macOS native acceptance remains maintainer-deferred.
+
+Fresh local `check:ci` and `coverage:patch` passed in about 2m06s each: 901 frontend
+tests, 951 Rust tests, plus isolated native-window/startup acceptance. The patch
+gate covers all 405 non-exempt changed executable lines, with the 247 previously
+approved native/race line exceptions across 13 reviewed source snapshots still
+reported separately. The JavaScript test toolchain was updated to Vitest 4.1.11
+to resolve its development-server file-read advisory; the JavaScript audit is
+clean. The combined JavaScript/Rust audit passed (Rust reports eight existing
+allowed warnings), as did cargo-machete and actionlint on the changed workflows.
+This does not establish release-artifact acceptance or native behavior on other
+operating systems.
+
+The investigated IdeaPad termination on September 30 was SIGKILL, with no logged
+sender, kernel OOM event or Rust/WebKit crash report found. The app subsequently
+restarted and completed transcriptions. No general crash fix is claimed in the
+release notes.
+
+## Persistent desktop input — 2026-09-30
+
+Wayland paste now uses an app-identified, keyboard-only RemoteDesktop portal
+session rather than opening another XWayland synthetic-input connection for
+each action. The desktop-issued restoration token remains backend-only in OS
+secure storage, is rotated after restoration, and is never synced or exposed
+to renderer secret commands. Normal dictation, Paste Last, Retry Last, explicit
+output and selection-copy share the grant. Optional media control reuses an
+approved session without requesting permission during recording.
+
+Denied/unsupported setup falls back to the clipboard and does not ask again
+for every recording in the same launch. Unsupported desktop stacks are detected
+by capabilities, not distro names. Revocation, missing persistence or a locked
+keyring can still require approval again. Linux packages include matching
+`com.kolboo.app.desktop` identity metadata without an extra visible launcher;
+portable development installs still require host desktop integration.
+
+Clipboard preparation waits for approval. Output leases reject delayed pastes
+after a newer pipeline operation begins; failed key delivery cleans up without
+automatically replaying a possibly delivered chord. Linux/Windows async output
+runs on a worker; macOS native input stays on the main thread and opens the
+Accessibility prompt at most once per launch while still checking OS approval.
+Windows UIA and X11 native output retain their existing paths.
+
+The maintainer approved narrow native-boundary coverage exceptions and deferred
+Windows/macOS native acceptance for the next release. The refreshed build was
+installed and restarted on the online IdeaPad on September 30. Its KDE Wayland
+desktop advertises RemoteDesktop portal version 2; the running executable hash
+matches the extracted package, the overlay reported frontend readiness, and the
+main window exposed its rendered controls through AT-SPI after being focused.
+Actual KDE approval, repeated paste and grant restoration after app restart
+remain pending user interaction. No release publication was performed.
+Linux protocol tests do not certify another OS or
+every compositor. See `LINUX_DEVELOPMENT.md` for the native acceptance checklist.
+
+The user-local binary was replaced atomically, without sudo or changes to the
+system package, recordings, credentials or settings. The stale user-local hidden
+portal identity referenced an old repository executable; it was replaced with
+the package's validated `com.kolboo.app.desktop`. The visible launcher and login
+autostart entry were preserved. Rollback copies of the executable and desktop
+entries are in `~/.cache/kolboo-dev/desktop-input-TmNyrfwv/`. The running app is
+supervised by the transient user unit `kolboo-dev-20260930-input.service`; this
+unit does not replace or add login autostart configuration.
+
+Validation on this Linux development machine: `setup:check` and `check:ci`
+passed; 898 frontend tests and 943 Rust tests passed (57 frontend skipped,
+13 Rust ignored). The patch gate reports 260 covered changed executable lines
+and 248 explicitly exempt native/defensive lines across 13 reviewed snapshots.
+The refreshed debug-profile Debian package built in 50.3 seconds; its contents
+include both the visible Kolboo launcher and hidden matching portal identity.
+It is an installable development package, not a published release artifact.
+
+## Main-window sizing and persistence — 2026-09-30
+
+The IdeaPad's main window was 1280 physical pixels wide while XSettings exposed
+168 DPI (175% content scaling). The main window did not compensate for this
+fractional XWayland mismatch and had no persisted size/maximized preference.
+
+The fix restores logical content dimensions before showing either
+the startup window or a window recreated from the tray. It bounds sizes and
+minimum sizes to the current work area, saves normal dimensions separately from
+maximized state, and ignores minimized/fullscreen/transient-zero measurements.
+Preferences use a separate machine-local `main-window.json` store with debounced
+resize writes and a close-time flush; they do not enter settings sync or backups.
+Windows and macOS use their native scale factor without applying Linux DPI again.
+
+Eight deterministic regression tests cover sizing, work-area fallback, real
+temporary-store save/reload and failed-save recovery. An opt-in Linux integration
+test uses real GTK/Tauri windows in isolated Xvfb/Openbox to exercise resizing,
+maximizing, production tray recreation and failed native/store operations. Offline
+production startup/close is also instrumented. Linux Rust coverage merges those
+profiles into the regular gate; no new native exception was added for this fix.
+Duplicate Rust build identities are merged without collapsing source locations,
+generic types or closure indices; focused coverage-helper tests protect that rule.
+
+Validation: 901 frontend tests, 951 Rust tests and the real-window test passed;
+type checking, focused script lint, Rust formatting and 100% non-exempt patch
+coverage passed. Existing previously approved native exceptions remain; this is
+not global coverage. The fast installable Linux package built in 44.8 seconds.
+
+IdeaPad acceptance: atomically updated the user-local executable, with a rollback
+copy at `/home/dovie/.cache/kolboo-dev/window-size-NPQviLxn/kolboo.previous`.
+At 175% content scaling, normal dimensions are now 2240×1400 physical pixels
+(1280×800 logical). A resize to 2100×1313 survived close/recreate; maximized state
+also survived close/recreate and a full process restart. Reset the normal size
+to the corrected default and left the app running maximized, matching its
+pre-update state. The running binary hash matched the extracted package and the
+rendered web document was verified through accessibility. Windows/macOS scaling
+policies are unit-tested; native acceptance there remains deferred, not certified.
+
+## Start at login — 2026-09-29
+
+Settings → UI now includes **Start at login**, a machine-global switch in the
+Default profile. It is off until explicitly enabled, independent of the Close
+button setting, and does not record or upload anything at startup. Existing
+completed-setup startup behavior (running in the tray) is unchanged.
+
+The official Tauri autostart plugin manages the current executable through XDG
+autostart on Linux, the Windows login registry, or a macOS LaunchAgent. Only the
+main window has autostart permissions. The registration is read on opening the
+tab and after writes; failures do not optimistically flip the saved state. This
+machine-local choice is deliberately not stored in settings.json, synced to an
+account, exported with profiles, or overridden per program. Moving an AppImage
+or installing the executable at a different path requires disabling/re-enabling
+the setting from the new location.
+
+Tests exercise the real JavaScript plugin/IPC boundary with deterministic OS
+responses: loading, existing registration, enable/disable/readback, failed reads
+and writes, retry, duplicate-write prevention, and profile-scope restrictions.
+Native acceptance remains platform-specific; a Linux check does not certify
+Windows/macOS login or replace an actual logout/reboot test.
+
+IdeaPad acceptance: the real main-window switch was activated via AT-SPI
+accessibility actions. Enable created `~/.config/autostart/Kolboo.desktop` with
+the stable `~/.local/bin/kolboo` executable; disable removed it; enable restored
+it. The switch remained enabled after restarting the actual app. The desktop
+entry passed `desktop-file-validate`. The maintainer approved
+an exact one-line native plugin-registration coverage exception; all added UI
+lines, branches and functions are covered. No account/session data was changed.
+
+Validation: 898 frontend tests and 930 Rust tests passed (57 frontend skipped,
+13 Rust ignored); focused startup tests, typecheck, lint, Knip, Rust formatting,
+schema generation and the patch gate passed. The exact one native-wiring
+exception is printed by the gate. The laptop uses its existing stable
+`~/.local/bin/kolboo` launcher, updated atomically from the built Debian package
+without sudo. The system package is untouched; future development deployments
+must update this user-local binary, or deliberately restore the saved launcher
+symlink before switching back to system-package installations. Login autostart
+is enabled on this laptop only. No real logout/reboot was performed.
+
+### Ubuntu font-cache incident
+
+On the IdeaPad, WebKit renderers were stuck in font lookup and `fc-match`
+incorrectly selected `KaTeX_AMS-Regular.woff` for ordinary UI fonts. The user
+font cache contained cache-9/10/11 symlinks pointing to incompatible cache-12
+files. Repair preserved the old cache, rejected only KaTeX `.woff`/`.woff2`
+system-font matches (not its TTF fonts), and rebuilt the user cache using the
+installed system Fontconfig. Normal font matching and frontend-ready events
+returned. No fonts were removed, system packages changed, or rendering/sandbox
+security disabled. This is a laptop-specific OS workaround, not a Kolboo
+startup-time font-cache mutation.
+
 ## Deliberately separate
 
 - A global managed-off preference needs one native routing gate across dictation,

@@ -1,10 +1,10 @@
 # Release operations
 
-> **Channel scope:** Stable Windows distribution remains gated. The release also includes an explicitly experimental, unnotarized universal macOS download. Linux may publish a clearly labeled Community/BYOK prerelease after exact-package native acceptance; this does not open managed signup or constitute a broad product launch.
+> **Channel scope:** Stable Windows distribution remains gated. Versioned desktop releases also include explicitly experimental, unnotarized universal macOS downloads and manual-update Linux Community/BYOK packages. Linux-only prereleases remain available separately. Linux publication requires exact-package native acceptance; none of these channels opens managed signup or constitutes a broad product launch.
 
 Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS is an experimental download, not yet a supported or native-accepted platform.
 
-Linux beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
+Linux-only beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. Versioned desktop releases also include Linux Community/BYOK packages, with manual updates and the same Linux exact-package acceptance requirements. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
 
 ## Release gates
 
@@ -23,6 +23,18 @@ Windows checks must pass before installer packaging starts. A failing check ther
 
 The release also builds a universal macOS DMG and app ZIP with ad-hoc signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, auto-updates, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
 
+## 0.3.1 maintenance-release deferrals
+
+The maintainer explicitly deferred public legal-link verification, the full
+Windows/operator rehearsal and Windows/macOS native acceptance for 0.3.1 only.
+All three platform downloads must still be built automatically. Automated CI,
+updater signing and exact-package Linux acceptance remain required; the deferred
+checks must not be described as passed. Managed-service launch remains deferred.
+
+The IdeaPad's unexplained `SIGKILL` on October 1 is a known open reliability
+investigation. The maintainer chose to defer that investigation rather than
+block this maintenance release. No cause or resolution has been established.
+
 ## Signed updates
 
 Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.
@@ -31,10 +43,10 @@ Updater checks stay disabled in ordinary builds and in the manual-update Linux b
 
 ## Cut and verify a release
 
-1. Run `pnpm -C app check:ci`, `pnpm -C app coverage`, and `pnpm -C app audit`.
+1. Run `pnpm -C app check:ci`, `pnpm -C app coverage:patch`, and `pnpm -C app run audit`. Use `run audit` explicitly: bare `pnpm audit` invokes pnpm's JavaScript-only command, not the package script that also audits Rust.
 2. Confirm package, Tauri, and Cargo versions match the intended `vX.Y.Z` tag.
-3. Push the tag and inspect the Release workflow. Missing updater-key credentials are a launch blocker. Check whether the Windows publisher certificate is present; the workflow signs and verifies installers when it is, and clearly discloses unsigned installers when it is not.
-4. Download the release without authentication on a clean Windows machine; also confirm both Mac assets are downloadable and carry the experimental notice.
+3. Push the tag and inspect the Release workflow. It builds all three desktop platforms and prepares a **draft**, not a public release. Missing updater-key credentials are a launch blocker. Check whether the Windows publisher certificate is present; the workflow signs and verifies installers when it is, and clearly discloses unsigned installers when it is not.
+4. Download and verify the draft artifacts, including Linux checksums and build evidence. Complete exact-package native acceptance before explicitly publishing the draft. Record any maintainer-approved platform-testing deferrals; never report them as passed. After publication, confirm unauthenticated downloads work and both Mac assets carry the experimental notice.
 5. If publisher credentials were configured, verify Authenticode in PowerShell with `Get-AuthenticodeSignature <installer>`. Otherwise confirm the release title and notes disclose that the Windows installers are unsigned.
 6. Install, launch, check for updates, and confirm that altered or updater-unsigned artifacts are rejected.
 7. Record the workflow run, commit SHA, installer hash, updater result, request IDs, and support-safe correlation hashes in the launch evidence.
