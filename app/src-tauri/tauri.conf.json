@@ -434,7 +434,7 @@
 			},
 			"appimage": {
 				"files": {
-					"/usr/share/applications/com.kolboo.app.desktop": "linux/com.kolboo.app.desktop"
+					"/usr/share/applications/com.kolboo.app.desktop": "linux/com.kolboo.app.appimage.desktop"
 				}
 			}
 		},

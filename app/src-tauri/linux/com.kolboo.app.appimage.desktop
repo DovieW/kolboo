@@ -5,5 +5,4 @@ Exec=kolboo
 Icon=kolboo
 Terminal=false
 Categories=Utility;
-NoDisplay=true
 StartupWMClass=kolboo

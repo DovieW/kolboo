@@ -582,7 +582,7 @@ fn packaged_linux_desktop_identity_matches_portal_registration_without_duplicate
         serde_json::from_str(include_str!("../../../tauri.conf.json")).unwrap();
     let identifier = config["identifier"].as_str().unwrap();
     assert_eq!(identifier, "com.kolboo.app");
-    for package in ["deb", "rpm", "appimage"] {
+    for package in ["deb", "rpm"] {
         assert_eq!(
             config["bundle"]["linux"][package]["files"]
                 [format!("/usr/share/applications/{identifier}.desktop")],
@@ -595,9 +595,28 @@ fn packaged_linux_desktop_identity_matches_portal_registration_without_duplicate
         "Exec=kolboo",
         "NoDisplay=true",
         "Type=Application",
+        "Categories=Utility;",
     ] {
         assert!(entry.lines().any(|line| line == field));
     }
+    // linuxdeploy may choose this entry as the AppImage's root launcher.
+    // It must be valid and visible, unlike the package-only identity alias.
+    assert_eq!(
+        config["bundle"]["linux"]["appimage"]["files"]
+            [format!("/usr/share/applications/{identifier}.desktop")],
+        "linux/com.kolboo.app.appimage.desktop"
+    );
+    let portable = include_str!("../../../linux/com.kolboo.app.appimage.desktop");
+    for field in [
+        "Name=Kolboo",
+        "Exec=kolboo",
+        "Icon=kolboo",
+        "Type=Application",
+        "Categories=Utility;",
+    ] {
+        assert!(portable.lines().any(|line| line == field));
+    }
+    assert!(!portable.lines().any(|line| line == "NoDisplay=true"));
 }
 
 #[tokio::test]

@@ -64,6 +64,11 @@ through the release workflow below.
 
 The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for this beta channel.
 
+DEB/RPM packages use a hidden portal-identity alias to avoid duplicate menu
+entries. AppImage uses a visible variant of that identity: linuxdeploy can choose
+it as the root launcher, which must include valid desktop categories and must
+not be hidden by `NoDisplay=true`.
+
 ## Install, update, and remove
 
 Use one package format at a time.
