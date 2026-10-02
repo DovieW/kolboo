@@ -68,13 +68,14 @@ fn native_window_manager_integration() {
     super::native::setup(app.handle());
     window.show().unwrap();
     let store = open_store(app.handle(), STORE_FILE).unwrap();
-    let pump = |app: &mut tauri::App<tauri::Wry>,
+    let pump = |operation: &str,
+                app: &mut tauri::App<tauri::Wry>,
                 predicate: &dyn Fn(&tauri::App<tauri::Wry>) -> bool| {
         let deadline = Instant::now() + Duration::from_secs(8);
         while !predicate(app) {
             assert!(
                 Instant::now() < deadline,
-                "native window operation did not settle"
+                "native window operation '{operation}' did not settle"
             );
             app.run_iteration(|_, event| {
                 if let tauri::RunEvent::ExitRequested { api, .. } = event {
@@ -83,33 +84,37 @@ fn native_window_manager_integration() {
             });
         }
     };
-    pump(&mut app, &|_| {
+    pump("initial fractional-DPI size", &mut app, &|_| {
         window.inner_size().unwrap() == PhysicalSize::new(2240, 1400)
     });
     window
         .set_size(tauri::Size::Physical(PhysicalSize::new(1925, 1225)))
         .unwrap();
-    pump(&mut app, &|_| {
+    pump("persist resized dimensions", &mut app, &|_| {
         read_state(&store).width == 1100.0 && read_state(&store).height == 700.0
     });
     assert_eq!(read_state(&store).width, 1100.0);
     window.maximize().unwrap();
-    pump(&mut app, &|_| read_state(&store).maximized);
+    pump("persist maximize", &mut app, &|_| {
+        read_state(&store).maximized
+    });
     assert_eq!(
         (read_state(&store).width, read_state(&store).height),
         (1100.0, 700.0)
     );
     store.save().unwrap();
     window.close().unwrap();
-    pump(&mut app, &|app| app.get_webview_window("main").is_none());
+    pump("close original window", &mut app, &|app| {
+        app.get_webview_window("main").is_none()
+    });
     crate::bootstrap::show_main_window(app.handle(), "native-window-test", None);
-    pump(&mut app, &|app| {
+    pump("recreate maximized window", &mut app, &|app| {
         app.get_webview_window("main")
             .is_some_and(|window| window.is_maximized().ok() == Some(true))
     });
     let recreated = app.get_webview_window("main").unwrap();
     recreated.unmaximize().unwrap();
-    pump(&mut app, &|_| {
+    pump("restore normal dimensions", &mut app, &|_| {
         !read_state(&store).maximized
             && recreated.inner_size().unwrap() == PhysicalSize::new(1925, 1225)
     });
@@ -120,17 +125,33 @@ fn native_window_manager_integration() {
 
     // Corrupt only this test's Store resource registry. The real failed-open
     // path must still restore usable default dimensions rather than block UI.
-    let rid = app
-        .resources_table()
+    // Other native checks create settings.json too. Resource iteration order
+    // is unspecified; select this exact Store rather than the first Store.
+    let settings_store = app.store("settings.json").unwrap();
+    let resources = app.resources_table();
+    let rid = resources
         .names()
-        .find(|(_, name)| name.contains("tauri_plugin_store") && name.contains("Store"))
-        .unwrap()
-        .0;
+        .find_map(|(rid, _)| {
+            resources
+                .get::<Store<tauri::Wry>>(rid)
+                .ok()
+                .filter(|candidate| Arc::ptr_eq(candidate, &store))
+                .map(|_| rid)
+        })
+        .expect("main-window Store must be registered");
+    drop(resources);
     let taken = app.resources_table().take_any(rid).unwrap();
+    assert!(open_store(app.handle(), STORE_FILE).is_err());
+    assert!(Arc::ptr_eq(
+        &app.store("settings.json").unwrap(),
+        &settings_store
+    ));
     super::native::configure(&recreated);
-    pump(&mut app, &|_| {
-        recreated.inner_size().unwrap() == PhysicalSize::new(2240, 1400)
-    });
+    pump(
+        "restore defaults after failed store open",
+        &mut app,
+        &|_| recreated.inner_size().unwrap() == PhysicalSize::new(2240, 1400),
+    );
     drop(taken);
     let repaired = app.store_builder(STORE_FILE).create_new().build().unwrap();
     let path = app.path().app_data_dir().unwrap().join(STORE_FILE);
@@ -143,7 +164,9 @@ fn native_window_manager_integration() {
     std::fs::remove_dir(&path).unwrap();
     repaired.save().unwrap();
     recreated.close().unwrap();
-    pump(&mut app, &|app| app.get_webview_window("main").is_none());
+    pump("close recreated window", &mut app, &|app| {
+        app.get_webview_window("main").is_none()
+    });
     // Destroyed handles return an OS error. Capture must keep the last valid
     // preference and failed restore must not panic while attaching cleanup.
     super::native::handle_event(&recreated, &repaired, &WindowEvent::Destroyed);

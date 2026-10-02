@@ -235,6 +235,10 @@ startup process runs in a network namespace without external connectivity; no
 developer environment files, account, recordings or API calls are used. Its
 profiles are merged into the same Rust LCOV report, without new coverage waivers.
 Normal `cargo:test` stays headless; Windows/macOS still require native acceptance.
+The window-storage failure injection selects the exact registered window Store
+by identity, never the first Store in unordered resource iteration. It also
+asserts that the separate settings Store remains accessible. Native polling
+timeouts name the operation so a geometry failure is diagnosable in CI logs.
 
 On Ubuntu/Kubuntu install the optional acceptance prerequisites:
 
