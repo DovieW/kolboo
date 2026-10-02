@@ -313,15 +313,6 @@
 		"sha256": "5d6df9cac10b9465f4802fecc9fe4ad9f120d34cde638497163da0fbe30fadb7"
 	},
 	{
-		"filePath": "app/src-tauri/src/secrets.rs",
-		"reason": "Approved 2026-09-30: OS keyring entry construction and serialized store access cannot safely use the real account keyring in headless tests. Isolated keyring credential tests cover rotation, failed-write preservation, idempotent removal and sanitized errors; renderer access to this grant is rejected.",
-		"evidence": ["app/src-tauri/src/secrets.rs"],
-		"lines": [297, 298, 299, 300, 301, 304, 305, 306, 307, 308, 309],
-		"functions": [297, 304],
-		"instantiations": [],
-		"sha256": "b5892e8768552079a944cc0ceac99972968ad6d8e9171206e56d55ded223cf4e"
-	},
-	{
 		"filePath": "app/src-tauri/src/text/key_inject.rs",
 		"reason": "Approved 2026-09-30: platform detection and real Enigo construction interact with native permission/input services. The permission-prompt latch, configured paste chords and cleanup are tested without asking the OS for user input approval.",
 		"evidence": [

@@ -123,6 +123,23 @@ The fallback retains the transcript and avoids reporting a paste that did not ha
 
 ## Focused validation
 
+### Wallet read compatibility
+
+Older KDE Secret Service versions can intermittently negotiate an incompatible
+encrypted session (KDE bug 514194), even when an item exists and is unlocked.
+Kolboo retries that typed cryptographic **read** failure with a fresh encrypted
+session, at most 16 attempts. It never falls back to plaintext transport, retries
+writes, or retries missing items, locked wallets, dismissed prompts or denied
+access. Exhausted reads remain failures; users should check provider settings
+and their system wallet rather than assume that their saved key was deleted.
+Auth-token read failures do not delete otherwise saved session material.
+
+Deterministic tests cover recovery, the attempt limit, permission/absence
+non-retry behavior and session preservation. The isolated native-window harness
+also exercises the actual Wry store/keyring wiring against an in-memory synthetic
+credential backend; it does not access the developer's real wallet. Native
+acceptance must still verify reads on the target desktop's wallet implementation.
+
 For a Linux platform change, prefer:
 
 ```sh

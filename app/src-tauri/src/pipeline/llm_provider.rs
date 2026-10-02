@@ -121,7 +121,7 @@ pub(super) fn resolve_cached_llm_provider_config(
 
     if provider_id != "ollama" && api_key.is_empty() {
         return Err(PipelineError::Config(format!(
-            "LLM provider '{}' requires an API key",
+            "Could not load a usable API key for LLM provider '{}'. Check provider settings and your system wallet",
             provider_id
         )));
     }
