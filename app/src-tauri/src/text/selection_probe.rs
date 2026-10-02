@@ -141,7 +141,7 @@ fn probe_selected_text_via_copy_impl(
         // only accept a selection if the clipboard changes away from that sentinel.
         let mut sentinel: Option<String> = None;
         let mut prepared = false;
-        let mut prepare_clipboard = || {
+        let mut prepare_clipboard = || -> Result<(), String> {
             // A portal dialog can stay open for minutes. Snapshot and write only
             // after approval, otherwise restoration would overwrite newer data.
             previous = clipboard.get_text().ok();

@@ -342,7 +342,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/text/selection_probe.rs",
-		"reason": "Re-reviewed 2026-10-01: removed covered clipboard preparation/portal-denial exceptions after isolated Xvfb regression tests verified rejection without reading stale text, sentinel restoration after delivery failure and successful selection capture. Retained only the previously approved native keyboard and real Wry portal/main-thread dispatch boundaries; no new preparation or denial logic is waived. Actual desktop focus/grant restoration remains native acceptance.",
+		"reason": "Re-reviewed 2026-10-01: removed covered clipboard preparation/portal-denial exceptions after isolated Xvfb regression tests verified rejection without reading stale text, sentinel restoration after delivery failure and successful selection capture. Retained only the previously approved native keyboard and real Wry portal/main-thread dispatch boundaries; no new preparation or denial logic is waived. Actual desktop focus/grant restoration remains native acceptance. Re-reviewed 2026-10-02: added an explicit Result<(), String> return type to the covered preparation closure for Windows compilation; exception locations and behavior are unchanged.",
 		"evidence": [
 			"app/src-tauri/src/text/tests/selection_probe.rs",
 			"app/src-tauri/src/text/tests/wayland_input.rs",
@@ -354,7 +354,7 @@
 		],
 		"functions": [182, 185, 465],
 		"instantiations": [],
-		"sha256": "b76c5d5561ab1e8f2b260c39a844b752dca289ef52a40020ee67e6a702203839"
+		"sha256": "c6a164cdaf10e6d5614ce4f5229d41469fbcce92cfbad48fb366564ebdf841c0"
 	},
 	{
 		"filePath": "app/src-tauri/src/text/wayland_input.rs",
