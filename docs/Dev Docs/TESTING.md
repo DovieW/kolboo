@@ -219,6 +219,13 @@ pnpm cargo:coverage
 
 Coverage supports risk assessment; it does not replace platform and integration acceptance.
 
+The wallet-read recovery tests exercise encrypted-session retry bounds and auth
+read-failure preservation without a real wallet. The private native-window
+process also runs the real secret-storage entry points with synthetic credentials
+and an in-memory credential backend. This now covers the previously exempted
+desktop-input token load/save wiring, so its `secrets.rs` coverage exception has
+been removed. No new read-recovery or session-preservation code is exempted.
+
 Linux Rust coverage also runs `pnpm cargo:test:window-native -- --coverage`.
 This explicitly opted-in integration test uses real GTK/Tauri windows and
 Openbox in Xvfb, a private D-Bus session and temporary application storage.

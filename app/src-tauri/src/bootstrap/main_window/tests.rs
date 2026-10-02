@@ -58,6 +58,7 @@ fn native_window_manager_integration() {
         .unwrap();
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
+    crate::secrets::native_tests::native_wallet_reads(app.handle());
     // A real GTK screen with controlled fractional DPI, not a fake Window.
     gdk::Screen::default().unwrap().set_resolution(168.0);
     let window = WebviewWindowBuilder::new(&app, "main", Default::default())

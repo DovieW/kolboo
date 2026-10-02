@@ -18,6 +18,46 @@ const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
 
 #[test]
+fn unavailable_provider_key_errors_do_not_claim_the_saved_key_is_missing() {
+    let config = PipelineConfig::default();
+    let stt_result = stt_provider::create_cloud_stt_provider(
+        reqwest::Client::new(),
+        stt_provider::SttProviderParams {
+            provider_id: "groq".into(),
+            model: None,
+            language: None,
+            api_key: String::new(),
+            proxy_settings: Default::default(),
+            managed_gateway_url: None,
+            transcription_prompt: None,
+            request_log_store: None,
+            stt_live_output: false,
+        },
+    );
+    let Err(PipelineError::Config(stt_message)) = stt_result else {
+        panic!("unavailable key must fail")
+    };
+    assert_eq!(stt_message,"Could not load a usable API key for STT provider 'groq'. Check provider settings and your system wallet");
+    let llm_result = llm_provider::resolve_cached_llm_provider_config(
+        &config,
+        "groq",
+        LlmProviderParams {
+            model: None,
+            timeout: Duration::from_secs(1),
+            ollama_url: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        },
+    );
+    let Err(PipelineError::Config(llm_message)) = llm_result else {
+        panic!("unavailable key must fail")
+    };
+    assert_eq!(llm_message,"Could not load a usable API key for LLM provider 'groq'. Check provider settings and your system wallet");
+}
+
+#[test]
 fn failed_locks_and_stale_callbacks_fail_closed_without_creating_providers() {
     use super::transcription_flow::TranscriptionCallbacks;
     let pipeline = SharedPipeline::new_for_tests(

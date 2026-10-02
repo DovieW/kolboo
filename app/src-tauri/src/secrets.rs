@@ -5,6 +5,14 @@
 //! and fall back to the store for legacy installs during migration.
 
 #[cfg(desktop)]
+mod read;
+#[cfg(desktop)]
+use read::read_password;
+#[cfg(all(test, desktop, target_os = "linux"))]
+#[path = "secrets/tests/native.rs"]
+pub(crate) mod native_tests;
+
+#[cfg(desktop)]
 use std::error::Error;
 #[cfg(desktop)]
 use std::sync::{Mutex, MutexGuard};
@@ -127,7 +135,7 @@ fn legacy_linux_entry_for_key(store_key: &str) -> Result<Option<Entry>, String> 
 
 #[cfg(all(desktop, target_os = "linux"))]
 fn non_empty_password(entry: &Entry) -> Result<Option<String>, keyring::Error> {
-    match entry.get_password() {
+    match read_password(entry) {
         Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
         Ok(_) | Err(keyring::Error::NoEntry) => Ok(None),
         Err(error) => Err(error),
@@ -381,26 +389,27 @@ mod desktop_input_tests {
 /// Unlike API keys, these do not have a legacy `settings.json` fallback.
 #[cfg(desktop)]
 pub fn get_secret(app: &AppHandle, store_key: &str) -> Option<String> {
+    get_secret_result(app, store_key).ok().flatten()
+}
+
+#[cfg(desktop)]
+fn get_secret_result(app: &AppHandle, store_key: &str) -> Result<Option<String>, String> {
     let _ = app;
     let _guard = lock_secret_store();
-    let entry = entry_for_key(store_key).ok()?;
-    match entry.get_password() {
+    let entry = entry_for_key(store_key)?;
+    match read_password(&entry) {
         Ok(s) => {
             let trimmed = s.trim();
             if trimmed.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(trimmed.to_string())
+                Ok(Some(trimmed.to_string()))
             }
         }
-        Err(keyring::Error::NoEntry) => None,
-        Err(e) => {
-            log::warn!(
-                "Failed to read secret from secure storage ({}): {}",
-                store_key,
-                e
-            );
-            None
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(_) => {
+            log::warn!("Failed to read secret from secure storage ({})", store_key);
+            Err("Could not read the saved credential from the system wallet".into())
         }
     }
 }
@@ -450,7 +459,7 @@ pub fn clear_secret(app: &AppHandle, store_key: &str) -> Result<(), String> {
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(delete_error) => {
             let delete_error = delete_error.to_string();
-            let credential_readback = match entry.get_password() {
+            let credential_readback = match read_password(&entry) {
                 Ok(_) => Ok(Some(())),
                 Err(keyring::Error::NoEntry) => Ok(None),
                 Err(read_error) => Err(read_error.to_string()),
@@ -494,27 +503,18 @@ pub fn persist_auth_session_material(
 
 /// Load desktop auth session material from secure storage.
 ///
-/// If one token is present and the other is missing, the helper clears both to
-/// avoid leaving a partial/inconsistent session footprint.
+/// Clear a genuinely partial session, but never mistake an unreadable token
+/// for a missing token and delete the user's still-saved session.
 #[cfg(desktop)]
 pub fn load_auth_session_material(app: &AppHandle) -> Option<AuthSessionMaterial> {
-    let access = get_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY);
-    let refresh = get_secret(app, AUTH_SESSION_REFRESH_TOKEN_KEY);
-
-    match (access, refresh) {
-        (Some(access_token), Some(refresh_token)) => Some(AuthSessionMaterial {
-            access_token,
-            refresh_token,
-        }),
-        (None, None) => None,
-        _ => {
-            log::warn!(
-                "Detected partial auth session material; clearing secure storage auth session keys"
-            );
-            let _ = clear_auth_session_material(app);
-            None
-        }
-    }
+    let access = get_secret_result(app, AUTH_SESSION_ACCESS_TOKEN_KEY);
+    let refresh = get_secret_result(app, AUTH_SESSION_REFRESH_TOKEN_KEY);
+    read::load_auth_session(access, refresh, || {
+        log::warn!(
+            "Detected partial auth session material; clearing secure storage auth session keys"
+        );
+        let _ = clear_auth_session_material(app);
+    })
 }
 
 #[cfg(desktop)]
@@ -572,7 +572,7 @@ pub fn has_api_key(app: &AppHandle, store_key: &str) -> bool {
 pub fn get_api_key(app: &AppHandle, store_key: &str) -> Option<String> {
     let _guard = lock_secret_store();
     let entry = entry_for_key(store_key).ok()?;
-    match entry.get_password() {
+    match read_password(&entry) {
         Ok(s) => {
             let trimmed = s.trim();
             if trimmed.is_empty() {
@@ -654,7 +654,7 @@ pub fn migrate_api_keys_from_store(app: &AppHandle) -> Result<(), Box<dyn Error>
             Err(_) => continue,
         };
 
-        match entry.get_password() {
+        match read_password(&entry) {
             Ok(existing) => {
                 if !existing.trim().is_empty() {
                     // Secure storage already has it; remove the legacy plaintext copy.

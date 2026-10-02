@@ -3100,6 +3100,7 @@ dependencies = [
  "cpal",
  "crossbeam-queue",
  "dbus",
+ "dbus-secret-service",
  "dirs 6.0.0",
  "dotenvy",
  "enigo",

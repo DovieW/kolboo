@@ -62,7 +62,7 @@ pub(crate) fn create_cloud_stt_provider(
 
     if api_key.trim().is_empty() {
         return Err(PipelineError::Config(format!(
-            "STT provider '{}' requires an API key",
+            "Could not load a usable API key for STT provider '{}'. Check provider settings and your system wallet",
             provider_id
         )));
     }

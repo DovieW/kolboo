@@ -186,6 +186,9 @@ ashpd = { version = "0.13.13", default-features = false, features = ["global_sho
 # Already part of the Linux secure-storage dependency graph; used for short,
 # read-only KWin and optional GNOME Shell window queries.
 dbus = "0.9.12"
+# Already used by keyring; classify encrypted-session failures without parsing
+# potentially sensitive backend error strings.
+dbus-secret-service = { version = "4.1.0", default-features = false }
 gdk = "0.18.2"
 gtk = "0.18.2"
 keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-rust"] }
