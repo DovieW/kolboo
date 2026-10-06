@@ -390,6 +390,54 @@ export interface IterateRewritePromptResponse {
   provider_used: string;
 }
 
+// From: license-state.schema.json
+export type BetaAccessSource = "complimentary_beta";
+export type BetaAccessStatus = "approved" | "revoked";
+export type OrgInferenceMode = "org_byok" | "managed";
+export type LicenseStatus = "signed_out" | "active" | "grace" | "expired";
+export type LicenseTier = "community" | "personal" | "enterprise";
+
+export interface LicenseState {
+  beta_access?: BetaAccess | null;
+  cached_at: string;
+  email?: string | null;
+  expires_at?: string | null;
+  last_validated_at?: string | null;
+  limits: TierLimits;
+  org?: OrgContext | null;
+  portal_available: boolean;
+  status: LicenseStatus;
+  tier: LicenseTier;
+  usage: UsageStats;
+  usage_period?: UsagePeriod | null;
+  user_id?: string | null;
+}
+export interface BetaAccess {
+  limits: TierLimits;
+  source: BetaAccessSource;
+  status: BetaAccessStatus;
+}
+export interface TierLimits {
+  llm_tokens_monthly: number;
+  requests_per_day: number;
+  stt_seconds_monthly: number;
+}
+export interface OrgContext {
+  inference_mode?: OrgInferenceMode | null;
+  org_id: string;
+  org_name: string;
+}
+export interface UsageStats {
+  llm_tokens_used: number;
+  requests_today: number;
+  stt_seconds_used: number;
+}
+export interface UsagePeriod {
+  daily_reset_at: string;
+  monthly_reset_at: string;
+  period_start: string;
+}
+
 // From: llm-complete-response.schema.json
 export interface LlmCompleteResponse {
   model_used: string;

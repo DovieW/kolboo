@@ -1,4 +1,8 @@
+#[path = "src/public_config_validation.rs"]
+mod public_config_validation;
+
 fn main() {
+    embed_public_cloud_config();
     // Ensure Cargo rebuilds the Windows resources (exe icon) when our icon assets change.
     // Without these, `build.rs` may not rerun and Windows can keep embedding the old icon.
     println!("cargo:rerun-if-changed=tauri.conf.json");
@@ -33,7 +37,6 @@ fn main() {
         }
 
         validate_release_cloudflare_access_env();
-        validate_release_cloud_endpoint_env();
     }
 
     // Windows-specific fix for local/CI Rust tests:
@@ -56,24 +59,39 @@ fn main() {
     tauri_build::build()
 }
 
-fn validate_release_cloud_endpoint_env() {
-    if env_flag_is_truthy("KOLBOO_ALLOW_MISSING_RELEASE_CLOUD_ENDPOINTS") {
-        println!("cargo:warning=KOLBOO_ALLOW_MISSING_RELEASE_CLOUD_ENDPOINTS is set; release cloud endpoint validation is bypassed.");
-        return;
-    }
-
-    let required_vars = ["TAURI_API_BASE_URL", "TAURI_MANAGED_INFERENCE_GATEWAY_URL"];
-    let missing = required_vars
+fn embed_public_cloud_config() {
+    let release = std::env::var("PROFILE").as_deref() == Ok("release");
+    let offline = env_flag_is_truthy("KOLBOO_ALLOW_MISSING_RELEASE_CLOUD_ENDPOINTS");
+    println!("cargo:rerun-if-env-changed=KOLBOO_ALLOW_MISSING_RELEASE_CLOUD_ENDPOINTS");
+    println!("cargo:rerun-if-env-changed=TAURI_CLOUD_ENV");
+    println!("cargo:rerun-if-env-changed=VITE_CLOUD_SERVICE_ENABLED");
+    let values: Vec<_> = public_config_validation::PUBLIC_CLOUD_KEYS
         .iter()
-        .copied()
-        .filter(|name| release_env_value(name).is_none())
-        .collect::<Vec<_>>();
-
-    if !missing.is_empty() {
-        panic!(
-            "Refusing to build release with missing required cloud endpoint env vars: {}. Set real deployed api-edge Worker URLs, or set KOLBOO_ALLOW_MISSING_RELEASE_CLOUD_ENDPOINTS=1 for an intentional offline/internal build.",
-            missing.join(", ")
-        );
+        .map(|key| (*key, std::env::var(key).ok()))
+        .collect();
+    let mode = std::env::var("TAURI_CLOUD_ENV").unwrap_or_default();
+    let service = release && !offline && mode == "production";
+    if release && !offline {
+        public_config_validation::validate_package(
+            &mode,
+            &std::env::var("VITE_CLOUD_SERVICE_ENABLED").unwrap_or_default(),
+            &values,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+    }
+    for key in public_config_validation::PUBLIC_CLOUD_KEYS {
+        println!("cargo:rerun-if-env-changed={key}");
+        // Never read a developer .env while constructing a release installer.
+        let value = std::env::var(key)
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        if let Some(value) = value {
+            public_config_validation::validate(key, &value, service)
+                .unwrap_or_else(|error| panic!("{error}"));
+            println!("cargo:rustc-env={key}={}", value.trim());
+        } else if service {
+            panic!("Service release is missing public configuration: {key}");
+        }
     }
 }
 
@@ -94,10 +112,6 @@ fn validate_release_cloudflare_access_env() {
             present.join(", ")
         );
     }
-}
-
-fn release_env_value(name: &str) -> Option<String> {
-    release_raw_env_value(name).and_then(|value| normalize_env_value(&value))
 }
 
 fn release_raw_env_value(name: &str) -> Option<String> {
@@ -131,19 +145,6 @@ fn normalize_nonempty_env_value(value: &str) -> Option<String> {
     }
 
     Some(trimmed.to_string())
-}
-
-fn normalize_env_value(value: &str) -> Option<String> {
-    let trimmed = normalize_nonempty_env_value(value)?;
-    if trimmed.contains("<your-workers-subdomain>") {
-        return None;
-    }
-
-    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
-        return None;
-    }
-
-    Some(trimmed)
 }
 
 fn env_flag_is_truthy(name: &str) -> bool {

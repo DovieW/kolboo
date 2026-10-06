@@ -158,11 +158,9 @@ jobs:
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
       SCCACHE_DIR: ${{ github.workspace }}\\.sccache
-      # Release bundling now hard-fails when the desktop cloud endpoints are missing.
-      # These are public, non-secret origins, so keep CI explicit instead of relying on
-      # a developer-local .env file that GitHub Actions will never see.
-      TAURI_API_BASE_URL: https://kolboo.dovie.dev
-      TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      # 0.3.2 ships Community/BYOK only; service rollout remains separate.
+      TAURI_CLOUD_ENV: community
+      VITE_CLOUD_SERVICE_ENABLED: "false"
       TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
       TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
@@ -247,6 +245,8 @@ jobs:
           TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
+          node --test .github/scripts/validate-desktop-cloud-config.test.mjs
+          node .github/scripts/validate-desktop-cloud-config.mjs
           node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
           node .github/scripts/configure-desktop-sentry.mjs
 

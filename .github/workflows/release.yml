@@ -173,7 +173,7 @@ jobs:
       - name: Create draft GitHub Release for exact-package acceptance
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          name: ${{ needs.build-windows.outputs.publisher-signed == 'true' && format('Kolboo {0}', github.ref_name) || format('Kolboo {0} (unsigned Windows installer)', github.ref_name) }}
+          name: ${{ github.ref_name }}
           body_path: .release/RELEASE_NOTES.md
           draft: true
           files: |

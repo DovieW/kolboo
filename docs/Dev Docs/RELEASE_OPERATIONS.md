@@ -35,6 +35,65 @@ The IdeaPad's unexplained `SIGKILL` on October 1 is a known open reliability
 investigation. The maintainer chose to defer that investigation rather than
 block this maintenance release. No cause or resolution has been established.
 
+## 0.3.2 Community/BYOK packaging
+
+The maintainer explicitly deferred backend/signup launch for 0.3.2. The Windows,
+Linux and Mac workflows build Community/BYOK packages with
+`TAURI_CLOUD_ENV=community` and `VITE_CLOUD_SERVICE_ENABLED=false`. Node preflight
+and Rust build validation reject any inherited public account-service origins or
+Supabase key. This is an explicit channel, not the internal missing-endpoint
+bypass. Account signup, managed models and cloud sync remain unavailable; cached
+sessions are not erased. Sentry and disclosed analytics remain configured.
+
+On October 6 the maintainer also carried forward the public legal-link and full
+Windows/operator rehearsal deferrals for this Community-only 0.3.2 release.
+These checks are deferred, not passed. Automated CI, updater signatures and
+exact-package Linux acceptance remain required. Managed-service launch stays
+disabled. Windows native acceptance is separately waived as recorded below;
+macOS remains an explicitly untested experimental download.
+
+Local preparation validation on October 6 passed `check:ci` (925 frontend tests,
+977 ordinary Rust tests, 14 explicitly opt-in Rust fixtures), `coverage:patch`
+(100% of 780 changed executable lines, only the two approved counterless Tauri
+email-command metadata exceptions), isolated Linux/Wry startup/layout/close
+acceptance, both dependency audit gates, version consistency and 13 release
+configuration/signing-helper tests. These are source/fixture results, not
+acceptance of a release package. Signed commits, CI packages and exact-package
+Linux acceptance remain pending; do not describe 0.3.2 as published.
+
+To enable service packages in a later release, configure the five
+`KOLBOO_PROD_*` public GitHub Actions variables documented in Authentication
+Architecture and switch both mode flags together. Production validation remains
+strict. Live service acceptance is still required before opening signup.
+
+Release titles follow the simple `vX.Y.Z` convention. Unsigned Windows publisher
+identity and experimental macOS limitations are disclosed in the release body,
+not appended to its title.
+
+## Windows startup regression (0.3.2)
+
+The overlay layout helper previously acquired its layout mutex before resolving
+the target monitor. Wry monitor getters synchronously wait for the GUI thread;
+GUI-thread startup also applies the initial layout. Concurrent renderer IPC
+could therefore deadlock startup before tray creation. Monitor/DPI/work-area
+reads now happen before the layout mutex. Size/position writes and the rectangle
+cache remain serialized; do not add synchronous native getters inside that lock.
+
+The isolated Linux/Wry fixture overlaps worker and GUI layouts for 16 rounds,
+checks that the worker cannot own the mutex while waiting for monitor lookup,
+and checks the resulting compact geometry. This is not Windows acceptance.
+Before declaring the Windows failure resolved, test the patched Windows package
+with JavaScript enabled, both fresh and existing completed-setup settings,
+repeated launches, tray activation and a second-instance launch. Do not delete a
+user's settings or persist browser diagnostic flags to make this check pass.
+
+The regression test was also run with the old getter-under-lock ordering and
+failed at the mutex/GUI-wait assertion. Restoring the fix passed the same test.
+
+On October 6 the maintainer explicitly waived patched Windows package/native
+testing for 0.3.2. Record it as untested, not passed. This does not waive production
+signup configuration, service rollout validation or the remaining release gates.
+
 ## Signed updates
 
 Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.

@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { isCloudServiceAvailable } from "../cloudService";
 import { backupAPI, tauriAPI } from "../tauri";
 import type { LicenseState } from "../tauri/types";
 import { trackProductEvent as trackProductEventDefault } from "../telemetry/posthog";
@@ -12,6 +13,7 @@ type MaybePromise<T> = T | Promise<T>;
 export type CloudSyncAction = "push" | "pull";
 
 export type CloudSyncAccessStatus =
+	| "unavailable"
 	| "loading"
 	| "included"
 	| "sign_in_required"
@@ -30,6 +32,13 @@ export interface CloudSyncAccessState {
 export function getCloudSyncAccessState(
 	licenseState: LicenseState | null | undefined,
 ): CloudSyncAccessState {
+	if (!isCloudServiceAvailable()) {
+		return {
+			status: "unavailable", canUseCloudSync: false,
+			badgeLabel: "Coming later", badgeColor: "gray",
+			helperLabel: "Cloud sync is not available in this release. Local backups remain available.",
+		};
+	}
 	if (licenseState === undefined) {
 		return {
 			status: "loading",

@@ -4,13 +4,30 @@ use keyring::credential::{Credential, CredentialApi, CredentialBuilderApi, Crede
 use std::{any::Any, collections::HashMap, sync::Arc};
 
 #[derive(Debug, Default)]
-struct MemoryBuilder(Arc<Mutex<HashMap<String, Arc<keyring::mock::MockCredential>>>>);
+struct MemoryBuilder(
+    Arc<Mutex<HashMap<String, Arc<keyring::mock::MockCredential>>>>,
+    Arc<Mutex<HashMap<String, usize>>>,
+);
 
 #[derive(Debug)]
-struct SharedCredential(Arc<keyring::mock::MockCredential>);
+struct SharedCredential(
+    Arc<keyring::mock::MockCredential>,
+    String,
+    Arc<Mutex<HashMap<String, usize>>>,
+);
 
 impl CredentialApi for SharedCredential {
     fn set_password(&self, value: &str) -> keyring::Result<()> {
+        let mut failures = self.2.lock().unwrap();
+        if let Some(remaining) = failures.get_mut(&self.1) {
+            *remaining -= 1;
+            if *remaining == 0 {
+                failures.remove(&self.1);
+                return Err(keyring::Error::NoStorageAccess(Box::new(
+                    std::io::Error::other("synthetic failed wallet write"),
+                )));
+            }
+        }
         self.0.set_password(value)
     }
     fn get_password(&self) -> keyring::Result<String> {
@@ -48,7 +65,11 @@ impl CredentialBuilderApi for MemoryBuilder {
             .entry(user.into())
             .or_default()
             .clone();
-        Ok(Box::new(SharedCredential(credential)))
+        Ok(Box::new(SharedCredential(
+            credential,
+            user.into(),
+            self.1.clone(),
+        )))
     }
     fn as_any(&self) -> &dyn Any {
         self
@@ -65,6 +86,7 @@ pub(crate) fn native_wallet_reads(app: &AppHandle) {
     );
     let builder = MemoryBuilder::default();
     let credentials = builder.0.clone();
+    let failed_writes = builder.1.clone();
     keyring::set_default_credential_builder(Box::new(builder));
     // Only this opted-in process uses private D-Bus and temporary application data.
     let credential = |name: &str| credentials.lock().unwrap().get(name).unwrap().clone();
@@ -115,14 +137,17 @@ pub(crate) fn native_wallet_reads(app: &AppHandle) {
     assert!(load_auth_session_material(app).is_none());
 
     assert!(get_api_key(app, "groq_api_key").is_none());
+    assert!(!has_api_key_checked(app, "groq_api_key").unwrap());
     let store = app.store("settings.json").unwrap();
     store.set("groq_api_key", serde_json::json!("synthetic-groq-key"));
+    assert!(has_api_key_checked(app, "groq_api_key").unwrap());
     migrate_api_keys_from_store(app).unwrap();
     assert_eq!(
         get_api_key(app, "groq_api_key").as_deref(),
         Some("synthetic-groq-key")
     );
     assert!(store.get("groq_api_key").is_none());
+    assert!(has_api_key_checked(app, "groq_api_key").unwrap());
     credential("groq_api_key").set_error(keyring::Error::PlatformFailure(Box::new(
         dbus_secret_service::Error::Crypto(Box::new(std::io::Error::other(
             "synthetic session mismatch",
@@ -141,5 +166,52 @@ pub(crate) fn native_wallet_reads(app: &AppHandle) {
         Some("synthetic-groq-key")
     );
     clear_api_key(app, "groq_api_key").unwrap();
+    crate::commands::licensing::native_tests::email_code_session_lifecycle(
+        app,
+        |key| {
+            credential(key).set_error(keyring::Error::NoStorageAccess(Box::new(
+                std::io::Error::other("synthetic locked wallet"),
+            )));
+        },
+        |key| {
+            failed_writes.lock().unwrap().insert(key.into(), 1);
+        },
+    );
+    persist_auth_session_material(app, "synthetic-old-access", "synthetic-old-refresh").unwrap();
+    failed_writes
+        .lock()
+        .unwrap()
+        .insert(AUTH_SESSION_REFRESH_TOKEN_KEY.into(), 1);
+    assert!(
+        persist_auth_session_material(app, "synthetic-new-access", "synthetic-new-refresh")
+            .is_err()
+    );
+    let session = load_auth_session_material(app).unwrap();
+    assert_eq!(session.access_token, "synthetic-old-access");
+    assert_eq!(session.refresh_token, "synthetic-old-refresh");
+    clear_auth_session_material(app).unwrap();
+    failed_writes
+        .lock()
+        .unwrap()
+        .insert(AUTH_SESSION_REFRESH_TOKEN_KEY.into(), 1);
+    assert!(
+        persist_auth_session_material(app, "synthetic-new-access", "synthetic-new-refresh")
+            .is_err()
+    );
+    assert!(load_auth_session_material(app).is_none());
+    persist_auth_session_material(app, "synthetic-old-access", "synthetic-old-refresh").unwrap();
+    failed_writes
+        .lock()
+        .unwrap()
+        .insert(AUTH_SESSION_ACCESS_TOKEN_KEY.into(), 2);
+    failed_writes
+        .lock()
+        .unwrap()
+        .insert(AUTH_SESSION_REFRESH_TOKEN_KEY.into(), 1);
+    assert!(
+        persist_auth_session_material(app, "synthetic-new-access", "synthetic-new-refresh")
+            .is_err()
+    );
+    clear_auth_session_material(app).unwrap();
     keyring::set_default_credential_builder(keyring::default::default_credential_builder());
 }

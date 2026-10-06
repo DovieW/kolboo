@@ -17,7 +17,20 @@ const EXCEPTIONS_PATH = path.join(SCRIPT_DIR, "patch-coverage-exceptions.json");
 // paths are tested in history/activity.rs. This is not a command-body exemption.
 // Recheck/remove when the compiler or Tauri macro changes.
 const TAURI_METADATA_EXCEPTIONS = new Map([
-	["app/src-tauri/src/commands/history.rs", "get_history_activity"],
+	[
+		"app/src-tauri/src/commands/history.rs",
+		["pub async fn get_history_activity("],
+	],
+	// Approved 2026-10-06: only counterless metadata at these attributes.
+	// Both command bodies and generated IPC handlers run in the isolated Wry
+	// account fixture; neither their executable code nor errors are exempt.
+	[
+		"app/src-tauri/src/commands/licensing/email_code.rs",
+		[
+			"pub async fn license_request_email_code(email: String) -> CommandResult<()> {",
+			"pub async fn license_verify_email_code(",
+		],
+	],
 ]);
 
 const EXCLUDED_SOURCE_FILES = new Set([
@@ -171,14 +184,14 @@ function failedLinesByPrefix(values, changedLines) {
 }
 
 function approvedMetadataLines(filePath, source, coverage) {
-	const command = TAURI_METADATA_EXCEPTIONS.get(filePath);
-	if (!command || source === undefined) return new Set();
+	const signatures = TAURI_METADATA_EXCEPTIONS.get(filePath);
+	if (!signatures || source === undefined) return new Set();
 	const lines = source.split(/\r?\n/u);
 	const result = new Set();
 	for (let index = 0; index < lines.length; index += 1) {
 		// Fail closed for changed macro syntax, inline bodies, or unknown records.
 		if (lines[index].trim() !== "#[tauri::command]") continue;
-		if (lines[index + 1]?.trim() !== `pub async fn ${command}(`) continue;
+		if (!signatures.includes(lines[index + 1]?.trim())) continue;
 		const line = index + 1;
 		const functions = [...coverage.functions].filter(([key]) =>
 			key.startsWith(`${line}:`),

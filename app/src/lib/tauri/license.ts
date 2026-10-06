@@ -142,6 +142,15 @@ export function getLicenseTransitionFromSettingsPayload(
 }
 
 export const tauriLicenseAPI = {
+	cancelLogin: async (): Promise<void> => { await invoke("license_cancel_login"); },
+	requestEmailCode: async (email: string): Promise<void> => {
+		await invoke("license_request_email_code", { email });
+	},
+	verifyEmailCode: async (email: string, code: string): Promise<LicenseState> => {
+		const state = await invoke<LicenseState>("license_verify_email_code", { email, code });
+		await setSentryLicenseIdentityTags(state);
+		return state;
+	},
 	getState: async (): Promise<LicenseState> => {
 		try {
 			const state = await invoke<LicenseState>("license_get_state");

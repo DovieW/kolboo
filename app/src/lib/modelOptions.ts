@@ -13,9 +13,8 @@ export type ModelOption = {
 
 export type ManagedModelByokTarget = { provider: string; model: string };
 
-// A managed-capable account must remain configurable without a successful
-// catalog refresh. Keep this launch catalog synchronized with API Edge; the
-// live catalog replaces it whenever discovery succeeds.
+// Recognized model identifiers for privacy-safe analytics. This list is not
+// authority to enable managed models; availability comes only from API Edge.
 export const BUNDLED_MANAGED_MODELS: ManagedModel[] = [
 	{
 		id: "whisper-large-v3-turbo",
@@ -61,11 +60,11 @@ export const BUNDLED_MANAGED_MODELS: ManagedModel[] = [
 	},
 ];
 
-export function managedModelsWithBundledFallback(
+export function publishedManagedModels(
 	models: ManagedModel[] | null | undefined,
 ): ManagedModel[] {
-	// An empty Edge catalog intentionally disables all managed models.
-	return models ?? BUNDLED_MANAGED_MODELS;
+	// Missing or empty discovery never silently enables bundled cloud models.
+	return models ?? [];
 }
 
 export function managedModelByokTarget(

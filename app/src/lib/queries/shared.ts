@@ -90,6 +90,7 @@ export async function invalidatePolicyRelatedQueries(
 export async function invalidateLicenseRelatedQueries(
 	queryClient: Pick<QueryClient, "invalidateQueries">,
 ): Promise<void> {
+    await queryClient.invalidateQueries({ queryKey: ["managedModels"] });
 	await applySettingsQueryInvalidations(
 		queryClient,
 		classifySettingsRuntimeEffects({

@@ -60,6 +60,7 @@ pub fn apply_settings_patch(
     const SETTINGS_REVISION_KEY: &str = "settings_revision";
 
     let mut payload: Map<String, Value> = Map::new();
+    super::managed_defaults::relinquish_on_edit(store, &patch, &delete_keys);
 
     for (k, v) in patch {
         store.set(&k, v.clone());

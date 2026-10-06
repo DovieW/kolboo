@@ -5,11 +5,11 @@ import type {
 	LicenseStatus,
 } from "../../lib/tauri";
 
-export type AccountModeLabel = "BYOK" | "Personal" | "Managed Business";
+export type AccountModeLabel = "Community" | "Pro" | "Managed Business";
 
 export function formatAccountStatusLabel(status: LicenseStatus): string {
 	if (status === "active") return "Active";
-	if (status === "grace") return "Grace";
+	if (status === "grace") return "Offline access";
 	if (status === "expired") return "Expired";
 	return "Signed out";
 }
@@ -39,6 +39,7 @@ export function isManagedAccountContext(
 ): boolean {
 	if (!licenseState || !authContext?.authenticated) return false;
 	if (authContext.policy_status !== "allow") return false;
+    if (licenseState.status !== "active" && licenseState.status !== "grace") return false;
 	return licenseState.tier === "personal" || licenseState.tier === "enterprise";
 }
 
@@ -56,9 +57,9 @@ export function getAccountModeLabel(
 		licenseState?.tier === "personal" &&
 		isManagedAccountContext(licenseState, authContext)
 	) {
-		return "Personal";
+		return "Pro";
 	}
-	return "BYOK";
+	return "Community";
 }
 
 export function getAccountModeDescription(params: {
@@ -75,10 +76,10 @@ export function getAccountModeDescription(params: {
 	if (params.modeLabel === "Managed Business") {
 		return "Your organization provides managed access, subject to its policies.";
 	}
-	if (params.modeLabel === "Personal") {
-		return "Your account has managed access. You can still choose your own API keys in AI settings; Meeting uses its own model selection.";
+	if (params.modeLabel === "Pro") {
+		return "Managed models and settings sync. Your own API keys remain available.";
 	}
-	return "You're signed in with Community/BYOK access. Local models and your own keys remain available. Personal adds settings sync and managed access.";
+	return "You're signed in with Community/BYOK access. Approved beta accounts include managed models and settings sync.";
 }
 
 export function getAccountStatusColor(params: {
@@ -96,7 +97,7 @@ export function shouldShowManagedUsage(
 	modeLabel: AccountModeLabel,
 	licenseState: LicenseState | null | undefined,
 ): boolean {
-	if (modeLabel === "BYOK") return false;
+	if (modeLabel === "Community") return false;
 	return Boolean(licenseState);
 }
 

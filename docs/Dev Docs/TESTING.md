@@ -204,6 +204,14 @@ successful serialization, invalid arguments, storage errors, and content-safe
 responses. Recheck and remove this exception when upgrading Rust or Tauri;
 it is not permission to exempt other generated wrappers.
 
+On 2026-10-06 the maintainer approved the same narrowly checked counterless
+metadata exception for the standalone annotations of
+`commands/licensing/email_code.rs::license_request_email_code` and
+`license_verify_email_code`. The isolated Wry account fixture executes both
+generated IPC handlers, malformed-input rejection, and the command bodies with
+synthetic credentials and loopback HTTP. Executable authentication behavior,
+including cancellation and failed secure-storage writes, is not exempt.
+
 On 2026-10-01 the maintainer explicitly approved extending the existing native
 recording/permission-callback wiring exception for the superseded-History and
 request-scoped warning fixes. The helper behavior has deterministic regression

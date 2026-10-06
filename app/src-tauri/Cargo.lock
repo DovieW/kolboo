@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "kolboo"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "arboard",
  "ashpd",
@@ -3146,6 +3146,7 @@ dependencies = [
  "tracing-appender",
  "tracing-log",
  "tracing-subscriber",
+ "url",
  "uuid",
  "webrtc-vad",
  "whisper-rs",

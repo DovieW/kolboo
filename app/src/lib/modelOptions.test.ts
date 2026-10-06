@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-	BUNDLED_MANAGED_MODELS,
 	isManagedModelSelection,
 	managedChatModelOptions,
 	managedModelByokTarget,
-	managedModelsWithBundledFallback,
+	publishedManagedModels,
 	managedTranscriptionModelOptions,
 } from "./modelOptions";
 import type { ManagedModel } from "./tauri";
@@ -28,18 +27,12 @@ const models: ManagedModel[] = [
 
 describe("managed model options", () => {
 	it("respects an empty published catalog", () => {
-		expect(managedModelsWithBundledFallback([])).toEqual([]);
+		expect(publishedManagedModels([])).toEqual([]);
 	});
-	it("keeps managed selection usable when live discovery is unavailable", () => {
-		expect(managedModelsWithBundledFallback(undefined)).toBe(
-			BUNDLED_MANAGED_MODELS,
-		);
-		expect(
-			managedTranscriptionModelOptions(BUNDLED_MANAGED_MODELS, "groq"),
-		).toHaveLength(2);
-		expect(
-			managedChatModelOptions(BUNDLED_MANAGED_MODELS).length,
-		).toBeGreaterThan(0);
+	it("does not offer managed models before successful live discovery", () => {
+        expect(publishedManagedModels(undefined)).toEqual([]);
+        expect(publishedManagedModels(null)).toEqual([]);
+        expect(publishedManagedModels(models)).toBe(models);
 	});
 
 	it("keeps transcription and chat capabilities separate", () => {

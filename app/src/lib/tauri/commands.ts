@@ -714,6 +714,9 @@ export const policyAPI = {
 };
 
 export const licenseAPI = {
+	requestEmailCode: (email: string) => tauriLicenseAPI.requestEmailCode(email),
+	verifyEmailCode: (email: string, code: string) => tauriLicenseAPI.verifyEmailCode(email, code),
+	cancelLogin: () => tauriLicenseAPI.cancelLogin(),
 	getState: () => tauriLicenseAPI.getState(),
 	getAuthContext: () => tauriLicenseAPI.getAuthContext(),
 	startLogin: (request?: {

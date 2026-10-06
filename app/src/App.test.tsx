@@ -199,7 +199,7 @@ describe("Desktop navigation", () => {
 		expect(host.textContent).toContain("Local activity");
 		await act(async () =>
 			[...host.querySelectorAll<HTMLElement>('[role="tab"]')]
-				.find((tab) => tab.textContent === "Spend")
+				.find((tab) => tab.textContent === "Costs")
 				?.click(),
 		);
 		expect(host.querySelector("h3")?.textContent).toBe("Total spend");

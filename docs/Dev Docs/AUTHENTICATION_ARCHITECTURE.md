@@ -10,7 +10,69 @@ This doc explains the target authentication architecture in Kolboo, where the tr
 - Session secrets are stored in OS secure storage (`app/src-tauri/src/secrets.rs` via licensing helpers).
 - UI reads auth state via typed command wrappers in `app/src/lib/tauri/license.ts`.
 - Managed request deny outcomes are mapped to user-facing guidance in `app/src/lib/queries.ts`.
-- Sign-in uses browser-based Authorization Code + PKCE (loopback callback) with desktop-owned session persistence.
+- Primary sign-in uses a six-digit email code. Existing password sign-in and
+  browser Authorization Code + PKCE / hosted-page handoff remain available.
+- Community/BYOK needs no account. Pro beta access is granted by an operator to
+  an approved email, not by client metadata or an invite code.
+
+## 0.3.2 desktop release and deferred service rollout
+
+The maintainer chose to ship 0.3.2 as Community/BYOK only, including the Windows
+startup fix, and finish the backend afterward. All three packaging workflows set
+`TAURI_CLOUD_ENV=community` and `VITE_CLOUD_SERVICE_ENABLED=false`. The build
+rejects inherited account-service endpoints/keys. Account signup, managed model
+selection and cloud sync are unavailable even if an older Pro session is cached;
+the session is preserved unless the user explicitly signs out. First-run setup
+goes directly to BYOK. Sentry and disclosed product analytics are unchanged.
+
+The service implementation below is staged for a later service-enabled update.
+Backend deployment alone cannot enable signup in the cloud-free 0.3.2 installer.
+
+Implementation checkpoint, October 6: these changes are in progress, not a
+service-ready release. Private workspace lint/type/tests/build/contracts and
+offline SQL assertions passed, including real concurrent quota/idempotency
+requests. Desktop validation passed 920 frontend tests, 976 ordinary Rust tests,
+isolated Linux account/window checks and production startup. Patch coverage is
+100% of 744 changed executable lines; the only new exclusions are the two
+explicitly approved counterless email-command metadata annotations, not bodies.
+Final package/platform acceptance remains pending; the live service rollout is
+deferred. Those service implementation checks do not constitute live acceptance.
+
+The desktop requests `/auth/v1/otp` with `create_user: true`, then verifies
+`/auth/v1/verify` with `type: email`. Supabase must have the approved-email
+before-user-created hook and an email template that displays the six-digit code.
+This repository does not activate that hook or provision SMTP by building the app.
+The UI keeps codes/passwords in memory, provides a resend cooldown and browser
+fallback, and cancels outstanding sign-in ownership on exit. Backend cancellation
+invalidates late responses; refreshes serialize session rotation. Logout cannot
+be undone by an older login or refresh completing afterward.
+
+Authentication success and entitlement lookup are distinct. If the account
+service is unavailable after successful authentication, the desktop preserves the
+secure session and presents signed-in Community access, not unverified Pro. A
+later Refresh access can hydrate approval. Pro's wire tier remains `personal`;
+the display label is Pro. Complimentary access has no checkout, invoice or
+payment dependency. Revocation and quotas are enforced by the gateway/database,
+even if a desktop has cached offline-access state.
+
+First-install settings carry an explicit pending marker, established before
+default seeding. Verified active Pro access can select only published managed
+transcription defaults (and an available published rewriting default). Existing
+provider/model choices, explicit null choices and saved provider keys are not
+overwritten. Rewriting is never enabled by sign-in. Failed catalog/setup attempts
+remain retryable; failed persistence restores the previous choices. Button or
+profile edits relinquish first-install ownership.
+
+Saved custom-provider keys have the same ownership protection as built-ins.
+Unreadable wallet entries prevent automatic model replacement rather than being
+treated as missing. A failed refresh-token write attempts to restore the prior
+access token, so a failed sign-in/rotation does not erase a working token pair.
+
+Account allowances show audio hours, LLM tokens, daily managed requests and UTC
+reset boundaries. The Costs tab contains device-local provider estimates, clearly
+labelled **not a bill**. Cross-device estimated provider costs are not currently
+available; server usage reporting must not invent them. Audio, transcripts,
+prompts, provider responses and credentials are excluded from the usage ledger.
 
 ## Trust boundaries
 
@@ -150,7 +212,28 @@ flowchart TD
 
 This keeps frontend logic thin and avoids duplicating auth-state derivation in React.
 
-## Runtime environment knobs
+## Public build configuration
+
+Release builds embed these public GitHub Actions variables. They must not depend
+on the install directory, a developer `.env` file or shell endpoint overrides:
+
+| Actions variable | Embedded setting |
+| --- | --- |
+| `KOLBOO_PROD_API_BASE_URL` | `TAURI_API_BASE_URL` |
+| `KOLBOO_PROD_MANAGED_INFERENCE_GATEWAY_URL` | `TAURI_MANAGED_INFERENCE_GATEWAY_URL` |
+| `KOLBOO_PROD_SUPABASE_URL` | `TAURI_SUPABASE_URL` |
+| `KOLBOO_PROD_SUPABASE_PUBLISHABLE_KEY` | `TAURI_SUPABASE_PUBLISHABLE_KEY` |
+| `KOLBOO_PROD_PUBLIC_AUTH_PAGE_URL` | `TAURI_PUBLIC_AUTH_PAGE_URL` |
+
+Service-enabled packages require `TAURI_CLOUD_ENV=production`,
+`VITE_CLOUD_SERVICE_ENABLED=true` and valid HTTPS production origins in
+release preflight/build validation. Only a publishable/legacy anon Supabase key is
+accepted, never a service-role/secret key. Development-only Cloudflare Access
+headers are not attached in release builds. The explicit internal offline-build
+bypass is for local diagnostics, not service-ready publication.
+
+Debug builds can override public settings from the local environment. Existing
+development browser hints are:
 
 - `TAURI_SUPABASE_URL`
 - `TAURI_SUPABASE_PUBLISHABLE_KEY`
@@ -167,5 +250,6 @@ If Supabase vars are missing, auth commands return `auth_not_configured`.
 - Startup refresh trigger: `app/src-tauri/src/lib.rs`
 - Frontend wrappers: `app/src/lib/tauri/license.ts`
 - Frontend command surface: `app/src/lib/tauri/commands.ts`
-- UI account page: `app/src/components/settings/AccountSettings.tsx`
-- Error-to-message mapping: `app/src/lib/queries.ts`
+- UI account page: `app/src/components/account/AccountView.tsx`
+- Email-code form: `app/src/components/account/EmailCodeSignIn.tsx`
+- Error-to-message mapping: `app/src/lib/queries/shared.ts`

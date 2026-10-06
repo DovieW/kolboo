@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { LicenseAuthContext, LicenseState } from "../../lib/tauri";
 import {
 	calculateUsagePercent,
+    formatAccountStatusLabel,
+    isManagedAccountContext,
 	getAccountModeDescription,
 	getAccountModeLabel,
 	getAccountStatusColor,
@@ -48,6 +50,18 @@ const activeContext: LicenseAuthContext = {
 };
 
 describe("accountPresentation", () => {
+    it("labels offline access honestly and rejects revoked or stale managed access", () => {
+        expect(formatAccountStatusLabel("active")).toBe("Active");
+        expect(formatAccountStatusLabel("expired")).toBe("Expired");
+        expect(formatAccountStatusLabel("signed_out")).toBe("Signed out");
+        expect(formatAccountStatusLabel("grace")).toBe("Offline access");
+        expect(getAccountStatusColor({ status: "grace", reauthRequired: false })).toBe("yellow");
+        expect(isManagedAccountContext({ ...baseState, status: "grace" }, activeContext)).toBe(true);
+        expect(isManagedAccountContext({ ...baseState, status: "expired" }, activeContext)).toBe(false);
+        expect(isManagedAccountContext({ ...baseState, status: "signed_out" }, activeContext)).toBe(false);
+        expect(getAccountModeDescription({ modeLabel: "Pro", signedIn: true, reauthRequired: false })).toContain("Managed models");
+        expect(getAccountModeDescription({ modeLabel: "Managed Business", signedIn: true, reauthRequired: false })).toContain("organization");
+    });
 	it("maps enterprise managed access to Managed Business", () => {
 		const state: LicenseState = {
 			...baseState,
@@ -58,7 +72,7 @@ describe("accountPresentation", () => {
 	});
 
 	it("maps personal managed access to Personal", () => {
-		expect(getAccountModeLabel(baseState, activeContext)).toBe("Personal");
+		expect(getAccountModeLabel(baseState, activeContext)).toBe("Pro");
 	});
 
 	it("falls back to BYOK when not authenticated", () => {
@@ -67,7 +81,7 @@ describe("accountPresentation", () => {
 			authenticated: false,
 		};
 
-		expect(getAccountModeLabel(baseState, signedOutContext)).toBe("BYOK");
+		expect(getAccountModeLabel(baseState, signedOutContext)).toBe("Community");
 	});
 
 	it("treats token-invalid and reauth-required as reauthentication reasons", () => {
@@ -80,14 +94,14 @@ describe("accountPresentation", () => {
 		expect(isReauthRequiredForSession(false, "token_invalid")).toBe(false);
 		expect(
 			getAccountModeDescription({
-				modeLabel: "BYOK",
+				modeLabel: "Community",
 				signedIn: false,
 				reauthRequired: true,
 			}),
 		).toContain("Community/BYOK");
 		expect(
 			getAccountModeDescription({
-				modeLabel: "BYOK",
+				modeLabel: "Community",
 				signedIn: false,
 				reauthRequired: true,
 			}),
@@ -97,21 +111,21 @@ describe("accountPresentation", () => {
 	it("describes signed-in BYOK users as a valid community state", () => {
 		expect(
 			getAccountModeDescription({
-				modeLabel: "BYOK",
+				modeLabel: "Community",
 				signedIn: true,
 				reauthRequired: false,
 			}),
 		).toContain("You're signed in");
 		expect(
 			getAccountModeDescription({
-				modeLabel: "BYOK",
+				modeLabel: "Community",
 				signedIn: true,
 				reauthRequired: false,
 			}),
 		).toContain("Community/BYOK");
 		expect(
 			getAccountModeDescription({
-				modeLabel: "BYOK",
+				modeLabel: "Community",
 				signedIn: true,
 				reauthRequired: false,
 			}),

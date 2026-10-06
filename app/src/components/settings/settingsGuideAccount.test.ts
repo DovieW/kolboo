@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LicenseState } from "../../lib/tauri";
 import {
 	buildSettingsGuideAccountViewModel,
@@ -31,6 +31,26 @@ const baseState: LicenseState = {
 };
 
 describe("buildSettingsGuideAccountViewModel", () => {
+    it("keeps BYOK onboarding available and omits account setup in Community packages", () => {
+        vi.stubEnv("VITE_CLOUD_SERVICE_ENABLED", "false");
+        try {
+            const account = buildSettingsGuideAccountViewModel({ ...baseState, tier: "personal" });
+            expect(account.hasPaidAccess).toBe(false);
+            expect(buildSettingsGuideSteps(true)).toEqual(["groq", "dictation", "wrapup"]);
+            expect(buildSettingsGuideGroqStepViewModel(account).title).toBe("Create a Groq API key");
+        } finally { vi.unstubAllEnvs(); }
+    });
+    it("preserves provider onboarding for expired accounts and recognizes offline Pro", () => {
+        for (const tier of ["personal", "enterprise"] as const) {
+            const expired = buildSettingsGuideAccountViewModel({ ...baseState, tier, status: "expired" });
+            expect(expired.hasPaidAccess).toBe(false);
+            expect(buildSettingsGuideSteps(expired.hasPaidAccess)).toContain("groq");
+            const grace = buildSettingsGuideAccountViewModel({ ...baseState, tier, status: "grace", email: null });
+            expect(grace.hasPaidAccess).toBe(true);
+            expect(grace.detail).toContain("this account");
+            expect(buildSettingsGuideSteps(grace.hasPaidAccess)).not.toContain("groq");
+        }
+    });
 	it("keeps the account step ahead of provider setup", () => {
 		expect(SETTINGS_GUIDE_STEPS).toEqual([
 			"account",
@@ -66,7 +86,7 @@ describe("buildSettingsGuideAccountViewModel", () => {
 		expect(model.isSignedIn).toBe(true);
 		expect(model.hasPaidAccess).toBe(false);
 		expect(model.statusLabel).toBe("Signed-in Community");
-		expect(model.detail).toContain("Payment is optional");
+		expect(model.detail).toContain("dovie@example.test");
 	});
 
 	it("keeps settings sync scoped to Pro", () => {
@@ -77,7 +97,7 @@ describe("buildSettingsGuideAccountViewModel", () => {
 
 		expect(model.mode).toBe("pro");
 		expect(model.hasPaidAccess).toBe(true);
-		expect(model.proSyncLine).toContain("Settings sync is Pro-only");
+		expect(model.proSyncLine).toContain("Approved beta accounts");
 		expect(model.description).toContain("settings sync");
 	});
 
@@ -99,7 +119,7 @@ describe("buildSettingsGuideAccountViewModel", () => {
 		const wrapup = buildSettingsGuideWrapupViewModel(account);
 
 		expect(wrapup.title).toContain("signed in");
-		expect(wrapup.description).toContain("signed-in Community/BYOK mode");
-		expect(wrapup.detail).toContain("Settings sync is Pro-only");
+		expect(wrapup.description).toContain("Pro beta access requires an approved email");
+		expect(wrapup.detail).toContain("Approved beta accounts");
 	});
 });
