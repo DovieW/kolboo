@@ -56,7 +56,38 @@ pub struct OrgContext {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BetaAccessSource {
+    ComplimentaryBeta,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BetaAccessStatus {
+    Approved,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct BetaAccess {
+    pub source: BetaAccessSource,
+    pub status: BetaAccessStatus,
+    pub limits: TierLimits,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct UsagePeriod {
+    pub period_start: DateTime<Utc>,
+    pub monthly_reset_at: DateTime<Utc>,
+    pub daily_reset_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct LicenseState {
+    #[serde(default)]
+    pub beta_access: Option<BetaAccess>,
+    #[serde(default)]
+    pub usage_period: Option<UsagePeriod>,
     pub tier: LicenseTier,
     pub status: LicenseStatus,
     pub user_id: Option<String>,
@@ -139,6 +170,8 @@ pub struct SessionExchangeResponse {
 impl LicenseState {
     pub fn signed_out(now: DateTime<Utc>) -> Self {
         Self {
+            beta_access: None,
+            usage_period: None,
             tier: LicenseTier::Community,
             status: LicenseStatus::SignedOut,
             user_id: None,
@@ -445,6 +478,12 @@ pub fn normalize_license_state(raw: Option<Value>, now: DateTime<Utc>) -> Licens
 
     let tier = parse_tier(map.get("tier"));
     let mut state = LicenseState {
+        beta_access: map
+            .get("beta_access")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+        usage_period: map
+            .get("usage_period")
+            .and_then(|value| serde_json::from_value(value.clone()).ok()),
         tier,
         status: parse_status(map.get("status")),
         user_id: map
@@ -509,6 +548,8 @@ pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> Lic
     // Real access must come back from api-edge so the desktop does not fabricate
     // enterprise/personal state before the durable backend confirms it.
     LicenseState {
+        beta_access: None,
+        usage_period: None,
         tier: LicenseTier::Community,
         status: LicenseStatus::Active,
         user_id: None,
@@ -554,6 +595,36 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use serde_json::json;
+
+    #[test]
+    fn optional_beta_and_usage_period_contracts_survive_cache_roundtrips() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 6, 12, 0, 0).unwrap();
+        let mut raw = serde_json::to_value(LicenseState::signed_out(now)).unwrap();
+        raw["beta_access"] = json!({"source":"complimentary_beta", "status":"approved", "limits":{"stt_seconds_monthly":18000, "llm_tokens_monthly":500000, "requests_per_day":500}});
+        raw["usage_period"] = json!({"period_start":"2026-10-01T00:00:00Z", "monthly_reset_at":"2026-11-01T00:00:00Z", "daily_reset_at":"2026-10-07T00:00:00Z"});
+        let state = normalize_license_state(Some(raw.clone()), now);
+        assert_eq!(
+            state.beta_access.unwrap().status,
+            BetaAccessStatus::Approved
+        );
+        assert_eq!(
+            state.usage_period.unwrap().daily_reset_at,
+            Utc.with_ymd_and_hms(2026, 10, 7, 0, 0, 0).unwrap()
+        );
+        raw["beta_access"]["status"] = json!("revoked");
+        assert_eq!(
+            normalize_license_state(Some(raw.clone()), now)
+                .beta_access
+                .unwrap()
+                .status,
+            BetaAccessStatus::Revoked
+        );
+        raw["beta_access"]["source"] = json!("untrusted");
+        raw["usage_period"]["monthly_reset_at"] = json!("invalid");
+        let malformed = normalize_license_state(Some(raw), now);
+        assert!(malformed.beta_access.is_none());
+        assert!(malformed.usage_period.is_none());
+    }
 
     #[test]
     fn open_ended_entitlement_is_active_until_validation_fails_or_ages_out() {
@@ -690,6 +761,8 @@ mod tests {
     fn telemetry_context_redacts_sensitive_fields() {
         let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
         let state = LicenseState {
+            beta_access: None,
+            usage_period: None,
             tier: LicenseTier::Enterprise,
             status: LicenseStatus::Active,
             user_id: Some("user-secret-abc123".to_string()),

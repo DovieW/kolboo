@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { LLM_MODELS, managedModelsWithBundledFallback } from "../modelOptions";
+import { LLM_MODELS, publishedManagedModels } from "../modelOptions";
 import {
 	byokModelsWithLiveCatalog,
 	fetchModelsDevByokLlmCatalog,
@@ -58,7 +58,7 @@ export function useManagedModels(enabled: boolean) {
 
 	return {
 		...query,
-		data: managedModelsWithBundledFallback(query.data),
+		data: publishedManagedModels(query.data),
 	};
 }
 

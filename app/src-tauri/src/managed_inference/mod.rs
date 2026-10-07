@@ -27,7 +27,7 @@ pub struct ManagedModelCatalogResponse {
 }
 
 #[cfg(desktop)]
-async fn fetch_managed_model_catalog(
+pub(crate) async fn fetch_managed_model_catalog(
     client: &reqwest::Client,
     base_url: &str,
     access_token: &str,
@@ -48,6 +48,7 @@ async fn fetch_managed_model_catalog(
     }
 
     let response = request
+        .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
         .map_err(|error| format!("Managed model catalog request failed: {error}"))?;
@@ -73,11 +74,9 @@ pub async fn managed_inference_get_models(
     use std::time::Duration;
     use tauri_plugin_store::StoreExt;
 
-    let base_url = crate::commands::config::read_first_non_empty_env(&[
-        "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
-        "TAURI_API_BASE_URL",
-    ])
-    .ok_or_else(|| "Managed inference gateway URL is not configured".to_string())?;
+    let base_url =
+        crate::public_config::read(&["TAURI_MANAGED_INFERENCE_GATEWAY_URL", "TAURI_API_BASE_URL"])
+            .ok_or_else(|| "Managed inference gateway URL is not configured".to_string())?;
     let access_token =
         crate::secrets::get_secret(&app, crate::secrets::AUTH_SESSION_ACCESS_TOKEN_KEY)
             .filter(|token| !token.trim().is_empty())
@@ -90,14 +89,10 @@ pub async fn managed_inference_get_models(
         .unwrap_or_default();
     let client =
         crate::network::build_http_client_with_timeout(&proxy_settings, Duration::from_secs(20))?;
-    let cloudflare_client_id =
-        crate::commands::config::read_first_non_empty_env(&["TAURI_CLOUDFLARE_ACCESS_CLIENT_ID"]);
-    let cloudflare_client_secret = crate::commands::config::read_first_non_empty_env(&[
-        "TAURI_CLOUDFLARE_ACCESS_CLIENT_SECRET",
-    ]);
-    let cloudflare_access = cloudflare_client_id
-        .as_deref()
-        .zip(cloudflare_client_secret.as_deref());
+    let access = crate::http::cloudflare_access_headers_for_url(&base_url);
+    let cloudflare_access = access
+        .as_ref()
+        .map(|(id, secret)| (id.as_str(), secret.as_str()));
 
     fetch_managed_model_catalog(&client, &base_url, &access_token, cloudflare_access).await
 }

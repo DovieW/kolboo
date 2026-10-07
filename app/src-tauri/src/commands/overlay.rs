@@ -313,16 +313,19 @@ fn apply_overlay_layout_at_anchor(
         return Err("Overlay window not found".to_string().into());
     };
 
+    // Monitor getters synchronously dispatch to the GUI thread. Resolve all
+    // native reads before locking: GUI-thread startup also applies layouts and
+    // must never wait for a worker that is itself waiting for the GUI thread.
+    let monitor = resolve_target_monitor(&window, app).ok_or("No monitor found")?;
+    let (native_scale, layout_scale) = overlay_display_scale(app, &monitor);
+    let work_area = monitor_work_area(&monitor);
+    let rect = layout::widget_rect(work_area, layout_scale, widget_layout, anchor);
+
     let app_state = app.state::<AppState>();
     let _layout_guard = app_state
         .overlay_layout_lock
         .lock()
         .map_err(|_| "Overlay layout lock poisoned".to_string())?;
-
-    let monitor = resolve_target_monitor(&window, app).ok_or("No monitor found")?;
-    let (native_scale, layout_scale) = overlay_display_scale(app, &monitor);
-    let work_area = monitor_work_area(&monitor);
-    let rect = layout::widget_rect(work_area, layout_scale, widget_layout, anchor);
 
     app_state
         .overlay_expanded

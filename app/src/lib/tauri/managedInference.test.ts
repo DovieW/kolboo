@@ -57,6 +57,9 @@ describe("managedInference", () => {
 			false,
 		);
 		expect(hasManagedInferenceAccess(null)).toBe(false);
+		vi.stubEnv("VITE_CLOUD_SERVICE_ENABLED", "false");
+		try { expect(hasManagedInferenceAccess(context)).toBe(false); }
+		finally { vi.unstubAllEnvs(); }
 	});
 
 	it("attaches bearer auth for relative managed gateway requests", async () => {

@@ -18,7 +18,6 @@ import {
 	listAllLlmModelKeys,
 	listAllSttModelKeys,
 } from "../../lib/modelOptions";
-import { useLicenseState } from "../../lib/queries/license";
 import type { CostTimeframe } from "../../lib/tauri";
 import { ActivityPanel } from "./ActivityPanel";
 import { CostTab, type StatsKindFilter } from "./CostTab";
@@ -26,22 +25,15 @@ import "./usage.css";
 export function UsageStatsView() {
 	const [timeframe, setTimeframe] = useState<CostTimeframe>("30d");
 	const [tab, setTab] = useState<string | null>("activity");
-	const license = useLicenseState();
-	const showSpend = Boolean(
-		license.data &&
-			(license.data.status === "signed_out" ||
-				license.data.tier === "community"),
-	);
-	const activeTab = tab === "spend" && !showSpend ? "activity" : tab;
 	return (
 		<div className="main-content usage-page">
 			<div className="main-content-inner page-content-start">
-				<Tabs value={activeTab} onChange={setTab} keepMounted={false}>
+				<Tabs value={tab} onChange={setTab} keepMounted={false}>
 					<Group className="usage-toolbar" justify="space-between" gap="md">
 						<Tabs.List aria-label="Usage views">
 							<Tabs.Tab value="activity">Activity</Tabs.Tab>
 							<Tabs.Tab value="models">Models</Tabs.Tab>
-							{showSpend && <Tabs.Tab value="spend">Spend</Tabs.Tab>}
+							<Tabs.Tab value="spend">Costs</Tabs.Tab>
 						</Tabs.List>
 						<Select
 							aria-label="Usage period"
@@ -64,11 +56,10 @@ export function UsageStatsView() {
 					<Tabs.Panel value="models">
 						<ActivityPanel timeframe={timeframe} modelsOnly />
 					</Tabs.Panel>
-					{showSpend && (
-						<Tabs.Panel value="spend">
-							<SpendPanel timeframe={timeframe} />
-						</Tabs.Panel>
-					)}
+					<Tabs.Panel value="spend">
+						<Text size="sm" c="dimmed" mb="md">Provider-cost estimates on this device — not a bill. Pro beta access is complimentary.</Text>
+						<SpendPanel timeframe={timeframe} />
+					</Tabs.Panel>
 				</Tabs>
 			</div>
 		</div>

@@ -51,6 +51,16 @@ const personalState: LicenseState = {
 	tier: "personal",
 };
 
+it("blocks cloud sync in a Community package even with cached paid access", async () => {
+	vi.stubEnv("VITE_CLOUD_SERVICE_ENABLED", "false");
+	try {
+		expect(getCloudSyncAccessState(personalState)).toMatchObject({ status: "unavailable", canUseCloudSync: false, badgeLabel: "Coming later" });
+		const deps = createDeps();
+		expect(await runCloudSyncActionRequest("push", deps, createEffects(), personalState)).toMatchObject({ kind: "blocked_by_plan", accessStatus: "unavailable" });
+		expect(deps.applySettingsPatch).not.toHaveBeenCalled();
+	} finally { vi.unstubAllEnvs(); }
+});
+
 function createDeps(
 	overrides: Partial<DataBackupCloudSyncDependencies> = {},
 ): DataBackupCloudSyncDependencies {

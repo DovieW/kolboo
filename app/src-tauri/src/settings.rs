@@ -12,6 +12,8 @@ pub mod default_values;
 pub mod defaults;
 #[path = "settings/doctor.rs"]
 pub mod doctor;
+#[path = "settings/managed_defaults.rs"]
+pub(crate) mod managed_defaults;
 #[path = "settings/migrations.rs"]
 pub mod migrations;
 #[path = "settings/patch.rs"]

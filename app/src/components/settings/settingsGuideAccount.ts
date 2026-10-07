@@ -1,4 +1,5 @@
 import type { LicenseState } from "../../lib/tauri";
+import { isCloudServiceAvailable } from "../../lib/cloudService";
 
 // Keep the first-run guide order centralized here so the setup copy/tests can
 // assert that account setup stays ahead of provider configuration.
@@ -12,9 +13,10 @@ export const SETTINGS_GUIDE_STEPS = [
 export type SettingsGuideStep = (typeof SETTINGS_GUIDE_STEPS)[number];
 
 export function buildSettingsGuideSteps(
-	isSignedIn: boolean,
-): SettingsGuideStep[] {
-	return isSignedIn
+	hasManagedAccess: boolean,
+): [SettingsGuideStep, ...SettingsGuideStep[]] {
+	if (!isCloudServiceAvailable()) return ["groq", "dictation", "wrapup"];
+	return hasManagedAccess
 		? ["account", "dictation", "wrapup"]
 		: [...SETTINGS_GUIDE_STEPS];
 }
@@ -57,9 +59,9 @@ export function buildSettingsGuideAccountViewModel(
 	state: LicenseState | null | undefined,
 ): SettingsGuideAccountViewModel {
 	const proSyncLine =
-		"Settings sync is Pro-only. You can sign in for free now, then upgrade later for sync and managed inference.";
+		"Approved beta accounts include managed models and settings sync. Your own keys work without an account.";
 
-	if (!state || state.status === "signed_out") {
+	if (!isCloudServiceAvailable() || !state || state.status === "signed_out") {
 		return {
 			mode: "signed_out",
 			isSignedIn: false,
@@ -74,7 +76,7 @@ export function buildSettingsGuideAccountViewModel(
 		};
 	}
 
-	if (state.tier === "personal") {
+	if (state.tier === "personal" && (state.status === "active" || state.status === "grace")) {
 		return {
 			mode: "pro",
 			isSignedIn: true,
@@ -88,7 +90,7 @@ export function buildSettingsGuideAccountViewModel(
 		};
 	}
 
-	if (state.tier === "enterprise") {
+	if (state.tier === "enterprise" && (state.status === "active" || state.status === "grace")) {
 		return {
 			mode: "enterprise",
 			isSignedIn: true,
@@ -109,8 +111,8 @@ export function buildSettingsGuideAccountViewModel(
 		title: "You’re signed in — still Community/BYOK",
 		statusLabel: "Signed-in Community",
 		description:
-			"No subscription is attached, so Kolboo keeps behaving like the free Community/BYOK app.",
-		detail: `Signed in as ${accountEmailLabel(state)}. Payment is optional; upgrade later when you want Pro features.`,
+			"Use your own provider keys, or request beta access.",
+		detail: `Signed in as ${accountEmailLabel(state)}.`,
 		proSyncLine,
 	};
 }
@@ -134,7 +136,7 @@ export function buildSettingsGuideGroqStepViewModel(
 		description:
 			"Groq provides free voice dictation (Whisper) and fast LLM rewriting. Create an API key here:",
 		helper:
-			"If you want to stay purely local for now, you can skip this step and come back later from Settings.",
+			"You can add another provider in Settings.",
 		submitLabel: "Set key",
 	};
 }
@@ -147,7 +149,7 @@ export function buildSettingsGuideWrapupViewModel(
 			return {
 				title: "You’re signed in and ready",
 				description:
-					"You finished setup in signed-in Community/BYOK mode. No subscription is attached yet, so Kolboo stays free and local/BYOK until you upgrade.",
+					"Your own provider keys remain available. Pro beta access requires an approved email.",
 				detail: account.proSyncLine,
 			};
 		case "pro":

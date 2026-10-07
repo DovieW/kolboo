@@ -31,6 +31,17 @@ vi.mock("./events", () => ({
 }));
 
 describe("tauri command wrappers", () => {
+    itWithImportTimeout("email-code IPC preserves arguments and returns the hydrated state without sending them to telemetry", async () => {
+        const { licenseAPI } = await import("./commands");
+        const state = { tier: "community", status: "active" };
+        invokeMock.mockResolvedValue(state);
+        await licenseAPI.requestEmailCode("person@example.test");
+        expect(await licenseAPI.verifyEmailCode("person@example.test", "123456")).toEqual(state);
+        await licenseAPI.cancelLogin();
+        expect(invokeMock).toHaveBeenCalledWith("license_request_email_code", { email: "person@example.test" });
+        expect(invokeMock).toHaveBeenCalledWith("license_verify_email_code", { email: "person@example.test", code: "123456" });
+        expect(invokeMock).toHaveBeenCalledWith("license_cancel_login");
+    });
 	itWithImportTimeout(
 		"file import and recovery preserve completion and cleanup outcomes",
 		async () => {

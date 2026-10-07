@@ -260,6 +260,42 @@ end_of_record`;
 			expect(result.metadataExceptions).toEqual([{ filePath: file, line: 1 }]);
 		});
 
+		it.each([
+			"pub async fn license_request_email_code(email: String) -> CommandResult<()> {",
+			"pub async fn license_verify_email_code(",
+		])(
+			"allows only the approved email-code attribute, never its body: %s",
+			(signature) => {
+				const authFile = "app/src-tauri/src/commands/licensing/email_code.rs";
+				const report = lcov.replace(file, authFile);
+				const contents = source.replace(
+					"pub async fn get_history_activity(",
+					signature,
+				);
+				expect(evaluate(report, contents, authFile).metadataExceptions).toEqual(
+					[{ filePath: authFile, line: 1 }],
+				);
+				expect(
+					evaluate(report.replace("DA:3,1", "DA:3,0"), contents, authFile)
+						.failures[0].uncoveredLines,
+				).toEqual([3]);
+				expect(
+					evaluate(
+						report.replace("FNDA:1,_RNv", "FNDA:0,_RNv"),
+						contents,
+						authFile,
+					).metadataExceptions,
+				).toEqual([]);
+				expect(
+					evaluate(
+						report,
+						contents.replace(signature, `${signature} inline_code`),
+						authFile,
+					).metadataExceptions,
+				).toEqual([]);
+			},
+		);
+
 		it("still rejects an uncovered closure inside the body", () => {
 			const result = evaluate(
 				lcov.replace(

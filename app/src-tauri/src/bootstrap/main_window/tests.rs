@@ -54,6 +54,11 @@ fn native_window_manager_integration() {
         ))
         .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![
+            crate::commands::licensing::email_code::license_request_email_code,
+            crate::commands::licensing::email_code::license_verify_email_code,
+            crate::commands::licensing::license_cancel_login,
+        ])
         .build(mock_context(noop_assets()))
         .unwrap();
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
@@ -87,6 +92,7 @@ fn native_window_manager_integration() {
     pump("initial fractional-DPI size", &mut app, &|_| {
         window.inner_size().unwrap() == PhysicalSize::new(2240, 1400)
     });
+    native_overlay_startup_overlap(&mut app);
     window
         .set_size(tauri::Size::Physical(PhysicalSize::new(1925, 1225)))
         .unwrap();
@@ -172,6 +178,82 @@ fn native_window_manager_integration() {
     super::native::handle_event(&recreated, &repaired, &WindowEvent::Destroyed);
     super::native::configure(&recreated);
     assert_eq!(read_state(&repaired).width, 1280.0);
+}
+
+/// Reproduce startup's GUI-thread layout overlapping renderer IPC on a worker.
+/// Uses real synchronous Wry monitor getters and the real layout mutex. This
+/// opt-in native stress check is bounded by the isolated runner, not a sleep in
+/// the ordinary unit suite. Windows acceptance remains a separate requirement.
+#[cfg(target_os = "linux")]
+#[allow(deprecated)]
+fn native_overlay_startup_overlap(app: &mut tauri::App<tauri::Wry>) {
+    use crate::{commands::overlay::apply_overlay_layout, overlay::layout::WidgetLayout};
+    use std::time::{Duration, Instant};
+    use tauri::{Manager, WebviewWindowBuilder};
+
+    let overlay = WebviewWindowBuilder::new(app.handle(), "overlay", Default::default())
+        .visible(false)
+        .build()
+        .unwrap();
+    let settings = app.store("settings.json").unwrap();
+    settings.set("widget_position", serde_json::json!("bottom-center"));
+    settings.set("overlay_monitor_target", serde_json::json!("main"));
+    for _ in 0..16 {
+        let handle = app.handle().clone();
+        let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx
+                .send(apply_overlay_layout(&handle, WidgetLayout::Compact))
+                .unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // Let the worker reach the synchronous monitor request before pumping
+        // the GUI queue. With the old ordering it owns the mutex at this point;
+        // the GUI startup layout below then deadlocks against that worker.
+        let deadline = Instant::now() + Duration::from_millis(8);
+        let mut worker_holds_layout_lock = false;
+        while Instant::now() < deadline {
+            if app
+                .state::<crate::state::AppState>()
+                .overlay_layout_lock
+                .try_lock()
+                .is_err()
+            {
+                worker_holds_layout_lock = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(
+            !worker_holds_layout_lock,
+            "worker owns overlay mutex before the GUI can service its monitor request"
+        );
+        apply_overlay_layout(app.handle(), WidgetLayout::Expanded).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(result) = done_rx.try_recv() {
+                result.unwrap();
+                break;
+            }
+            assert!(Instant::now() < deadline, "worker overlay layout stalled");
+            app.run_iteration(|_, _| {});
+        }
+        worker.join().unwrap();
+        assert!(!app
+            .state::<crate::state::AppState>()
+            .overlay_expanded
+            .load(std::sync::atomic::Ordering::SeqCst));
+        let cached = *app
+            .state::<crate::state::AppState>()
+            .overlay_last_applied_rect
+            .lock()
+            .unwrap();
+        let (_, _, width, height) = cached.unwrap();
+        assert_eq!(width, height, "compact overlay must finish square");
+    }
+    overlay.close().unwrap();
 }
 
 #[test]

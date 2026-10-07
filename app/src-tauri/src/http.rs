@@ -69,13 +69,23 @@ fn url_matches_configured_hosts(target_url: &str, configured_hosts: &[String]) -
 }
 
 pub fn cloudflare_access_headers_for_url(target_url: &str) -> Option<(String, String)> {
-    if !url_matches_configured_hosts(target_url, &cloudflare_access_target_hosts()) {
-        return None;
+    // Release binaries never attach development-only Access credentials, even
+    // if inherited from a user's shell environment.
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = target_url;
+        None
     }
+    #[cfg(debug_assertions)]
+    {
+        if !url_matches_configured_hosts(target_url, &cloudflare_access_target_hosts()) {
+            return None;
+        }
 
-    let client_id = non_empty_env("TAURI_CLOUDFLARE_ACCESS_CLIENT_ID")?;
-    let client_secret = non_empty_env("TAURI_CLOUDFLARE_ACCESS_CLIENT_SECRET")?;
-    Some((client_id, client_secret))
+        let client_id = non_empty_env("TAURI_CLOUDFLARE_ACCESS_CLIENT_ID")?;
+        let client_secret = non_empty_env("TAURI_CLOUDFLARE_ACCESS_CLIENT_SECRET")?;
+        Some((client_id, client_secret))
+    }
 }
 
 /// Attach Cloudflare Access service-token headers for requests aimed at configured

@@ -55,7 +55,6 @@ export function AccountSummaryCard(props: {
 			<Stack gap="lg">
 				<Group justify="space-between" align="flex-start" gap="md" wrap="wrap">
 					<Stack gap={6}>
-						<Text className="account-panel-kicker">Account access</Text>
 						<Title order={2} className="account-summary-title">
 							{summaryTitle}
 						</Title>
@@ -74,29 +73,12 @@ export function AccountSummaryCard(props: {
 					</Group>
 				</Group>
 
-				<div className="account-summary-meta-grid">
-					<div className="account-meta-pill">
-						<Text className="account-meta-label">Account</Text>
-						<Text className="account-meta-value">
-							{email ?? "Not signed in"}
-						</Text>
-					</div>
-					<div className="account-meta-pill">
-						<Text className="account-meta-label">Access level</Text>
-						<Text className="account-meta-value">{modeLabel}</Text>
-					</div>
-					<div className="account-meta-pill">
-						<Text className="account-meta-label">Account status</Text>
-						<Text className="account-meta-value">{statusLabel}</Text>
-					</div>
-				</div>
+				{email && <Text size="sm">{email}</Text>}
 
 				{reauthRequired ? (
 					<div className="account-callout account-callout-warning">
 						<Text size="sm">
-							Managed access could not be verified. Try Refresh access first.
-							Sign in again only if your session is no longer valid. Local and
-							BYOK features remain available.
+							Refresh access or sign in again. Your own API keys still work.
 						</Text>
 					</div>
 				) : null}

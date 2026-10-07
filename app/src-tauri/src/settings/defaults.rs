@@ -21,7 +21,8 @@ use super::{default_definitions, default_values, migrations};
 pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let store = app.store("settings.json")?;
 
-    let mut dirty = migrations::run_settings_migrations(&store)?;
+    let mut dirty = super::managed_defaults::initialize(&store);
+    dirty |= migrations::run_settings_migrations(&store)?;
 
     // Keep these defaults aligned with pipeline defaults / expected backend behavior.
     // We intentionally seed these so a brand new install has the same effective

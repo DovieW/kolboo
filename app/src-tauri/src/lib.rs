@@ -34,6 +34,7 @@ mod history;
 mod history_request_lifecycle;
 mod http;
 mod licensing;
+pub use licensing::{BetaAccess, LicenseState, UsagePeriod};
 mod llm;
 mod managed_inference;
 mod network;
@@ -43,6 +44,9 @@ mod pipeline;
 mod platform_capabilities;
 mod policy;
 mod prompt_builders;
+mod public_config;
+#[cfg(test)]
+mod public_config_validation;
 mod recording_completion;
 mod recording_media_protocol;
 mod recording_orchestration;
@@ -1143,6 +1147,9 @@ pub fn run() {
             commands::licensing::license_get_session_access_token,
             commands::licensing::license_start_login,
             commands::licensing::license_sign_up,
+            commands::licensing::email_code::license_request_email_code,
+            commands::licensing::email_code::license_verify_email_code,
+            commands::licensing::license_cancel_login,
             commands::licensing::license_request_password_reset,
             commands::licensing::license_exchange_session,
             commands::licensing::license_logout,

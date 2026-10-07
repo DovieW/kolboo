@@ -141,11 +141,15 @@ describe("license query-layer function builders", () => {
 		await invalidateLicenseRelatedQueries({ invalidateQueries });
 
 		expect(invalidateQueries).toHaveBeenNthCalledWith(1, {
-			queryKey: ["licenseState"],
+			queryKey: ["managedModels"],
 		});
 		expect(invalidateQueries).toHaveBeenNthCalledWith(2, {
+			queryKey: ["licenseState"],
+		});
+		expect(invalidateQueries).toHaveBeenNthCalledWith(3, {
 			queryKey: ["licenseAuthContext"],
 		});
+		expect(invalidateQueries).toHaveBeenCalledTimes(3);
 	});
 
 	it("invalidates auth and policy queries on logout", async () => {

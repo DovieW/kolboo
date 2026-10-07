@@ -7,30 +7,25 @@ import {
 	PasswordInput,
 	Text,
 	Textarea,
-	TextInput,
 	Title,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
-	type FormEvent,
 	useCallback,
 	useEffect,
 	useMemo,
 	useRef,
 	useState,
 } from "react";
-import { formatErrorMessage } from "../../lib/formatError";
 import { frontendLog } from "../../lib/frontendLog";
 import {
 	useLicenseState,
-	useRequestLicensePasswordReset,
 	useSettings,
-	useSignUpLicense,
-	useStartLicenseLogin,
 } from "../../lib/queries";
 import { type HotkeyConfig, tauriAPI } from "../../lib/tauri";
 import { Logo } from "../Logo";
+import { AccountAuthentication } from "../account/AccountAuthentication";
 import {
 	buildSettingsGuideAccountViewModel,
 	buildSettingsGuideGroqStepViewModel,
@@ -44,8 +39,6 @@ type Phase = "welcome" | "guide";
 type Step = SettingsGuideStep;
 
 type NavStep = "welcome" | Step;
-
-type AccountAuthMode = "sign_up" | "sign_in";
 
 function HotkeyCombo({ config }: { config: HotkeyConfig | null }) {
 	const parts = useMemo(() => {
@@ -89,14 +82,11 @@ export function SettingsGuideOverlay({
 
 	const { data: settings } = useSettings();
 	const licenseState = useLicenseState();
-	const startLicenseLogin = useStartLicenseLogin();
-	const signUpLicense = useSignUpLicense();
-	const requestPasswordReset = useRequestLicensePasswordReset();
 	const toggleHotkey = settings?.toggle_hotkey ?? null;
 	const accountView = buildSettingsGuideAccountViewModel(licenseState.data);
 	const navSteps = useMemo<NavStep[]>(
-		() => ["welcome", ...buildSettingsGuideSteps(accountView.isSignedIn)],
-		[accountView.isSignedIn],
+		() => ["welcome", ...buildSettingsGuideSteps(accountView.hasPaidAccess)],
+		[accountView.hasPaidAccess],
 	);
 	const groqView = buildSettingsGuideGroqStepViewModel(accountView);
 	const wrapupView = buildSettingsGuideWrapupViewModel(accountView);
@@ -110,7 +100,8 @@ export function SettingsGuideOverlay({
 	const welcomeTimersRef = useRef<number[]>([]);
 
 	const [phase, setPhase] = useState<Phase>("welcome");
-	const [step, setStep] = useState<Step>("account");
+	const firstStep = buildSettingsGuideSteps(accountView.hasPaidAccess)[0];
+	const [step, setStep] = useState<Step>(firstStep);
 
 	const [welcomeIconVisible, setWelcomeIconVisible] = useState(false);
 	const [welcomeTextVisible, setWelcomeTextVisible] = useState(false);
@@ -119,17 +110,6 @@ export function SettingsGuideOverlay({
 	const [welcomeContinueSeen, setWelcomeContinueSeen] = useState(false);
 
 	const [skipVisible, setSkipVisible] = useState(false);
-	const [showInlineSignIn, setShowInlineSignIn] = useState(false);
-	const [accountAuthMode, setAccountAuthMode] =
-		useState<AccountAuthMode>("sign_up");
-	const [accountAuthSubmittingMode, setAccountAuthSubmittingMode] =
-		useState<AccountAuthMode | null>(null);
-	const accountAuthPending = accountAuthSubmittingMode !== null;
-	const [accountEmail, setAccountEmail] = useState("");
-	const [accountPassword, setAccountPassword] = useState("");
-	const [accountMessage, setAccountMessage] = useState<string | null>(null);
-	const [accountError, setAccountError] = useState<string | null>(null);
-
 	const { data: groqApiKeyValue } = useQuery({
 		queryKey: ["apiKeyValue", "groq_api_key"],
 		enabled: opened,
@@ -184,7 +164,7 @@ export function SettingsGuideOverlay({
 
 		// Always restart the intro from scratch.
 		setPhase("welcome");
-		setStep("account");
+		setStep(firstStep);
 		setSkipVisible(false);
 
 		setWelcomeIconVisible(false);
@@ -207,7 +187,7 @@ export function SettingsGuideOverlay({
 		}
 
 		welcomeTimersRef.current = timers;
-	}, [clearWelcomeTimers]);
+	}, [clearWelcomeTimers, firstStep]);
 
 	useEffect(() => {
 		if (!opened) return;
@@ -225,13 +205,6 @@ export function SettingsGuideOverlay({
 		setFinishSeen(false);
 		setWelcomeContinueSeen(false);
 		setDictationText("");
-		setShowInlineSignIn(false);
-		setAccountAuthMode("sign_up");
-		setAccountAuthSubmittingMode(null);
-		setAccountEmail("");
-		setAccountPassword("");
-		setAccountMessage(null);
-		setAccountError(null);
 		return () => {
 			clearWelcomeTimers();
 		};
@@ -272,10 +245,10 @@ export function SettingsGuideOverlay({
 	}, [opened, phase, step]);
 
 	useEffect(() => {
-		if (accountView.isSignedIn && step === "groq") {
+		if (accountView.hasPaidAccess && step === "groq") {
 			setStep("dictation");
 		}
-	}, [accountView.isSignedIn, step]);
+	}, [accountView.hasPaidAccess, step]);
 
 	useEffect(() => {
 		if (!opened) return;
@@ -316,12 +289,6 @@ export function SettingsGuideOverlay({
 
 		return true;
 	})();
-	const accountAuthFormVisible =
-		phase === "guide" &&
-		step === "account" &&
-		!accountView.isSignedIn &&
-		showInlineSignIn;
-
 	const goBack = () => {
 		if (!canGoBack) return;
 
@@ -334,17 +301,6 @@ export function SettingsGuideOverlay({
 		}
 
 		enterGuideAt(next);
-	};
-
-	const handleBack = () => {
-		if (accountAuthFormVisible) {
-			setShowInlineSignIn(false);
-			setAccountError(null);
-			setAccountMessage(null);
-			return;
-		}
-
-		goBack();
 	};
 
 	const goForward = () => {
@@ -388,121 +344,6 @@ export function SettingsGuideOverlay({
 		}
 	};
 
-	const showAccountForm = (mode: AccountAuthMode) => {
-		setAccountAuthMode(mode);
-		setAccountAuthSubmittingMode(null);
-		setShowInlineSignIn(true);
-		setAccountMessage(null);
-		setAccountError(null);
-	};
-
-	const handleInlineAccountAuth = (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		setAccountAuthSubmittingMode(accountAuthMode);
-		setAccountError(null);
-
-		if (accountAuthMode === "sign_up") {
-			setAccountMessage("Creating your free Kolboo account…");
-			signUpLicense.mutate(
-				{
-					email: accountEmail,
-					password: accountPassword,
-				},
-				{
-					onSuccess: (response) => {
-						setAccountPassword("");
-						if (response.confirmation_required) {
-							setAccountAuthMode("sign_in");
-							setAccountMessage(
-								"Account created. Check your email to confirm it, then return here to sign in.",
-							);
-							return;
-						}
-
-						const model = buildSettingsGuideAccountViewModel(response.state);
-						setAccountMessage(
-							model.hasPaidAccess
-								? "Account created and signed in. Your Pro account includes settings sync and managed models."
-								: "Account created and signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
-						);
-					},
-					onError: (error) => {
-						setAccountMessage(null);
-						setAccountError(formatErrorMessage(error));
-					},
-					onSettled: () => setAccountAuthSubmittingMode(null),
-				},
-			);
-			return;
-		}
-
-		setAccountMessage("Signing in…");
-		startLicenseLogin.mutate(
-			{
-				provider_hint: "personal",
-				email: accountEmail,
-				password: accountPassword,
-			},
-			{
-				onSuccess: (state) => {
-					const model = buildSettingsGuideAccountViewModel(state);
-					setAccountPassword("");
-					setAccountMessage(
-						model.hasPaidAccess
-							? "Signed in. Your Pro account includes settings sync and managed models."
-							: "Signed in. Payment is optional, so Kolboo will continue in Community/BYOK mode. If a new invite or upgrade still looks missing, you can refresh it later from Account.",
-					);
-				},
-				onError: (error) => {
-					setAccountMessage(null);
-					setAccountError(formatErrorMessage(error));
-				},
-				onSettled: () => setAccountAuthSubmittingMode(null),
-			},
-		);
-	};
-
-	const handlePasswordReset = () => {
-		const email = accountEmail.trim();
-		setAccountError(null);
-		setAccountMessage(null);
-		if (!email) {
-			setAccountError("Enter your email address first.");
-			return;
-		}
-
-		requestPasswordReset.mutate(email, {
-			onSuccess: () => {
-				setAccountMessage(
-					"Check your email for a link to choose a new password.",
-				);
-			},
-			onError: (error) => setAccountError(formatErrorMessage(error)),
-		});
-	};
-
-	const handleBrowserAccountAuth = () => {
-		setAccountError(null);
-		setAccountMessage("Opening Kolboo account sign-in in your browser…");
-		startLicenseLogin.mutate(
-			{ provider_hint: "personal" },
-			{
-				onSuccess: (state) => {
-					const model = buildSettingsGuideAccountViewModel(state);
-					setAccountMessage(
-						model.hasPaidAccess
-							? "Signed in. Your account includes settings sync and managed models."
-							: "Signed in. Kolboo will continue in Community/BYOK mode.",
-					);
-				},
-				onError: (error) => {
-					setAccountMessage(null);
-					setAccountError(formatErrorMessage(error));
-				},
-			},
-		);
-	};
-
 	if (!opened) return null;
 
 	return (
@@ -537,7 +378,7 @@ export function SettingsGuideOverlay({
 								Welcome to Kolboo
 							</Title>
 							<Text c="dimmed" size="sm" style={{ marginTop: 6 }}>
-								Let’s set up your account options and voice dictation.
+								Let’s set up your voice dictation.
 							</Text>
 						</div>
 					</div>
@@ -550,7 +391,7 @@ export function SettingsGuideOverlay({
 								? " tang-guide-fade-in"
 								: "")
 						}
-						onClick={() => enterGuideAt("account")}
+						onClick={() => enterGuideAt(firstStep)}
 					>
 						<span>Start</span>
 						<ChevronRight size={16} />
@@ -577,8 +418,7 @@ export function SettingsGuideOverlay({
 						<button
 							type="button"
 							className="tang-guide-back tang-guide-fade-in"
-							onClick={handleBack}
-							disabled={accountAuthPending}
+							onClick={goBack}
 						>
 							<ChevronLeft size={16} />
 							<span>Back</span>
@@ -586,180 +426,27 @@ export function SettingsGuideOverlay({
 					)}
 
 					<div className="tang-guide-content tang-guide-fade-in">
-						{step === "account" && (
-							<div className="tang-guide-step">
-								<Title order={3}>
-									{accountView.isSignedIn ? "Account setup" : accountView.title}
-								</Title>
-								{!accountAuthFormVisible ? (
-									<Text
-										className="tang-guide-account-intro"
-										c="dimmed"
-										size="sm"
-									>
-										{accountView.description}
-									</Text>
-								) : null}
-
-								{accountView.isSignedIn ? (
-									<Group justify="center" gap="xs" mt="md">
-										<Text size="sm" c="dimmed">
-											{accountView.detail}
-										</Text>
-										<Badge color="green" variant="light" size="sm">
-											{accountTierLabel}
-										</Badge>
-									</Group>
-								) : null}
-
-								{accountMessage && !accountView.isSignedIn ? (
-									<Text size="sm" className="tang-guide-account-message">
-										{accountMessage}
-									</Text>
-								) : null}
-								{accountError ? (
-									<Text size="sm" className="tang-guide-account-error">
-										{accountError}
-									</Text>
-								) : null}
-
-								{accountView.isSignedIn ? (
-									<Group justify="center" mt="lg">
-										<Button color="orange" onClick={goForward}>
-											Continue setup
-										</Button>
-									</Group>
-								) : (
-									<div
-										className={`tang-guide-account-choice${
-											accountAuthFormVisible
-												? " tang-guide-account-choice--form"
-												: ""
-										}`}
-									>
-										{!showInlineSignIn ? (
-											<div className="tang-guide-account-actions">
-												<Button
-													type="button"
-													color="orange"
-													onClick={() => showAccountForm("sign_up")}
-												>
-													Create account
-												</Button>
-												<Button
-													type="button"
-													variant="default"
-													onClick={() => showAccountForm("sign_in")}
-												>
-													Sign in
-												</Button>
-												<Button
-													type="button"
-													variant="subtle"
-													onClick={() => enterGuideAt("groq")}
-												>
-													Continue without an account
-												</Button>
-											</div>
-										) : (
-											<form
-												className="tang-guide-account-form"
-												onSubmit={handleInlineAccountAuth}
-											>
-												<div className="tang-guide-account-form-heading">
-													<Text fw={700} size="lg">
-														{accountAuthMode === "sign_up"
-															? "Create account"
-															: "Sign in"}
-													</Text>
-												</div>
-												<TextInput
-													label="Email"
-													type="email"
-													value={accountEmail}
-													onChange={(event) =>
-														setAccountEmail(event.currentTarget.value)
-													}
-													autoComplete="email"
-													disabled={accountAuthPending}
-													required
-												/>
-												<PasswordInput
-													label="Password"
-													value={accountPassword}
-													onChange={(event) =>
-														setAccountPassword(event.currentTarget.value)
-													}
-													autoComplete={
-														accountAuthMode === "sign_up"
-															? "new-password"
-															: "current-password"
-													}
-													disabled={accountAuthPending}
-													required
-												/>
-												{accountAuthMode === "sign_in" ? (
-													<Group justify="space-between">
-														<Button
-															type="button"
-															variant="subtle"
-															onClick={handlePasswordReset}
-															loading={requestPasswordReset.isPending}
-															disabled={accountAuthPending}
-															style={{ paddingInline: 0 }}
-														>
-															Forgot password?
-														</Button>
-														<Button
-															type="button"
-															variant="subtle"
-															onClick={handleBrowserAccountAuth}
-															loading={
-																startLicenseLogin.isPending &&
-																accountAuthSubmittingMode === null
-															}
-															disabled={
-																accountAuthPending ||
-																requestPasswordReset.isPending
-															}
-															style={{ paddingInline: 0 }}
-														>
-															Use browser instead
-														</Button>
-													</Group>
-												) : (
-													<Button
-														type="button"
-														variant="subtle"
-														onClick={handleBrowserAccountAuth}
-														loading={startLicenseLogin.isPending}
-														disabled={accountAuthPending}
-														style={{
-															alignSelf: "flex-start",
-															paddingInline: 0,
-														}}
-													>
-														Use browser instead
-													</Button>
-												)}
-												<Group justify="flex-end">
-													<Button
-														type="submit"
-														loading={
-															accountAuthSubmittingMode === accountAuthMode
-														}
-													>
-														{accountAuthMode === "sign_up"
-															? "Create free account"
-															: "Sign in"}
-													</Button>
-												</Group>
-											</form>
-										)}
-									</div>
-								)}
-							</div>
-						)}
+                        {step === "account" && (
+                            <div className="tang-guide-step">
+                                {accountView.isSignedIn ? (
+                                    <>
+                                        <Title order={3}>{accountView.title}</Title>
+                                        <Group justify="center" gap="xs" mt="md">
+                                            <Text size="sm" c="dimmed">{accountView.detail}</Text>
+                                            <Badge variant="light">{accountTierLabel}</Badge>
+                                        </Group>
+                                        <Button mt="lg" onClick={goForward}>Continue setup</Button>
+                                    </>
+                                ) : (
+                                    <div className="tang-guide-account-choice tang-guide-account-choice--form">
+                                        <AccountAuthentication />
+                                        <Button variant="subtle" onClick={() => enterGuideAt("groq")}>
+                                            Continue without an account
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
 						{step === "groq" && (
 							<div className="tang-guide-step">

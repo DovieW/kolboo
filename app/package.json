@@ -1,6 +1,6 @@
 {
 	"name": "kolboo",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Customizable AI-powered voice dictation",
 	"engines": {
 		"node": ">=24"
@@ -122,7 +122,8 @@
 			"brace-expansion@>=4.0.0 <5.0.12": "5.0.12",
 			"js-yaml@>=4.0.0 <4.3.2": "4.3.2",
 			"nanoid@<3.3.18": "3.3.18",
-			"rollup@>=4.0.0 <4.59.0": "4.59.0"
+			"rollup@>=4.0.0 <4.59.0": "4.59.0",
+			"source-map-js@>=1.0.0 <1.2.2": "1.2.2"
 		}
 	}
 }

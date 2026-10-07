@@ -106,10 +106,10 @@ pub fn get_runtime_config() -> RuntimeConfigResponse {
             read_first_non_empty_env(&["TAURI_APP_VERSION"])
                 .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string()),
         ),
-        api_base_url: normalize_optional_base_url(read_first_non_empty_env(&[
+        api_base_url: normalize_optional_base_url(crate::public_config::read(&[
             "TAURI_API_BASE_URL",
         ])),
-        managed_inference_gateway_url: normalize_optional_base_url(read_first_non_empty_env(&[
+        managed_inference_gateway_url: normalize_optional_base_url(crate::public_config::read(&[
             "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
         ])),
         // Dev-only Cloudflare Access service tokens must stay in the backend.
@@ -483,7 +483,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .unwrap_or(crate::settings::default_values::DEFAULT_STT_USE_MANAGED_INFERENCE);
 
     let managed_gateway_url: Option<String> =
-        normalize_optional_base_url(read_first_non_empty_env(&[
+        normalize_optional_base_url(crate::public_config::read(&[
             "TAURI_MANAGED_INFERENCE_GATEWAY_URL",
         ]));
 

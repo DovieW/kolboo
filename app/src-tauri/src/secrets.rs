@@ -488,13 +488,15 @@ pub fn persist_auth_session_material(
     access_token: &str,
     refresh_token: &str,
 ) -> Result<(), String> {
+    let previous_access = get_secret_result(app, AUTH_SESSION_ACCESS_TOKEN_KEY)?;
     set_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY, access_token)?;
     if let Err(e) = set_secret(app, AUTH_SESSION_REFRESH_TOKEN_KEY, refresh_token) {
-        if let Err(clear_err) = clear_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY) {
-            log::warn!(
-                "Auth session rollback failed after refresh write error: {}",
-                clear_err
-            );
+        let rollback = match previous_access {
+            Some(value) => set_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY, &value),
+            None => clear_secret(app, AUTH_SESSION_ACCESS_TOKEN_KEY),
+        };
+        if rollback.is_err() {
+            log::warn!("Auth session rollback failed after refresh write error");
         }
         return Err(e);
     }
@@ -561,6 +563,19 @@ fn get_legacy_api_key_from_store(app: &AppHandle, store_key: &str) -> Option<Str
 #[cfg(desktop)]
 pub fn has_api_key(app: &AppHandle, store_key: &str) -> bool {
     get_api_key(app, store_key).is_some()
+}
+
+/// First-install setup must distinguish an empty wallet from an unreadable
+/// one. On failure leave the user's provider choices intact and retry later.
+#[cfg(desktop)]
+pub(crate) fn has_api_key_checked(app: &AppHandle, store_key: &str) -> Result<bool, String> {
+    Ok(get_secret_result(app, store_key)?.is_some()
+        || get_legacy_api_key_from_store(app, store_key).is_some())
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn has_api_key_checked(_app: &AppHandle, _store_key: &str) -> Result<bool, String> {
+    Ok(false)
 }
 
 /// Get an API key.

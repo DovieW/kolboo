@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isCloudServiceAvailable } from "../cloudService";
 import { authReasonCodeToMessage, normalizeAuthReasonCode } from "./license";
 import { loadRuntimeConfig } from "./runtimeConfig";
 import type {
@@ -42,6 +43,7 @@ export function hasManagedInferenceAccess(
 	context: LicenseAuthContext | null | undefined,
 ): boolean {
 	return (
+		isCloudServiceAvailable() &&
 		context?.authenticated === true &&
 		context.policy_status === "allow" &&
 		context.entitlements.includes("managed_inference")

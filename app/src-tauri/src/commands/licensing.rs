@@ -13,6 +13,15 @@ use tokio::{
 };
 use uuid::Uuid;
 
+pub mod email_code;
+mod session_owner;
+static SESSION_OWNER: session_owner::SessionOwner = session_owner::SessionOwner::new();
+static SESSION_REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+#[cfg(all(test, desktop, target_os = "linux"))]
+#[path = "licensing/tests/native.rs"]
+pub(crate) mod native_tests;
+
 use crate::commands::{CommandError, CommandResult};
 use crate::events;
 use crate::licensing::{
@@ -118,18 +127,16 @@ enum BrowserAuthCallback {
 }
 
 fn supabase_auth_config() -> Result<(String, String), CommandError> {
-    let supabase_url = crate::commands::config::read_first_non_empty_env(&["TAURI_SUPABASE_URL"])
-        .ok_or_else(|| {
+    let supabase_url = crate::public_config::read(&["TAURI_SUPABASE_URL"]).ok_or_else(|| {
         CommandError::new("Supabase auth is not configured", "auth")
             .with_code("auth_not_configured")
     })?;
 
-    let publishable_key =
-        crate::commands::config::read_first_non_empty_env(&["TAURI_SUPABASE_PUBLISHABLE_KEY"])
-            .ok_or_else(|| {
-                CommandError::new("Supabase publishable key is not configured", "auth")
-                    .with_code("auth_not_configured")
-            })?;
+    let publishable_key = crate::public_config::read(&["TAURI_SUPABASE_PUBLISHABLE_KEY"])
+        .ok_or_else(|| {
+            CommandError::new("Supabase publishable key is not configured", "auth")
+                .with_code("auth_not_configured")
+        })?;
 
     Ok((
         supabase_url.trim_end_matches('/').to_string(),
@@ -138,16 +145,13 @@ fn supabase_auth_config() -> Result<(String, String), CommandError> {
 }
 
 fn api_base_url() -> Option<String> {
-    crate::commands::config::read_first_non_empty_env(&["TAURI_API_BASE_URL"])
+    crate::public_config::read(&["TAURI_API_BASE_URL"])
         .map(|value| value.trim_end_matches('/').to_string())
 }
 
 fn public_auth_page_url() -> Option<String> {
-    crate::commands::config::read_first_non_empty_env(&[
-        "TAURI_PUBLIC_AUTH_PAGE_URL",
-        "TAURI_AUTH_PAGE_URL",
-    ])
-    .map(|value| value.trim().to_string())
+    crate::public_config::read(&["TAURI_PUBLIC_AUTH_PAGE_URL", "TAURI_AUTH_PAGE_URL"])
+        .map(|value| value.trim().to_string())
 }
 
 fn license_api_client() -> reqwest::Client {
@@ -203,25 +207,25 @@ async fn fetch_license_state_from_api(
         request.bearer_auth(access_token),
         &url,
     )
+    .timeout(Duration::from_secs(20))
     .send()
     .await
-    .map_err(|e| {
-        CommandError::new(format!("License hydration request failed: {e}"), "auth")
+    .map_err(|_| {
+        CommandError::new("Unable to reach the account service.", "auth")
             .with_code("license_state_unavailable")
     })?;
 
     if !response.status().is_success() {
-        let (status, text) = crate::http::status_and_text(response).await;
         return Err(CommandError::new(
-            format!("License hydration failed ({status}): {text}"),
+            "Account access could not be verified. Try Refresh access.",
             "auth",
         )
         .with_code("license_state_unavailable"));
     }
 
-    let raw = response.json::<serde_json::Value>().await.map_err(|e| {
+    let raw = response.json::<serde_json::Value>().await.map_err(|_| {
         CommandError::new(
-            format!("Failed to parse license hydration response: {e}"),
+            "The account service returned an invalid access response.",
             "auth",
         )
         .with_code("license_state_parse_failed")
@@ -245,26 +249,24 @@ async fn fetch_license_portal_url_from_api(
     )
     .send()
     .await
-    .map_err(|e| {
-        CommandError::new(format!("Billing portal lookup failed: {e}"), "auth")
+    .map_err(|_| {
+        CommandError::new("Account management is temporarily unavailable.", "auth")
             .with_code("portal_unavailable")
     })?;
 
     if !response.status().is_success() {
-        let (status, text) = crate::http::status_and_text(response).await;
-        return Err(CommandError::new(
-            format!("Billing portal lookup failed ({status}): {text}"),
-            "auth",
-        )
-        .with_code("portal_unavailable"));
+        return Err(
+            CommandError::new("Account management is temporarily unavailable.", "auth")
+                .with_code("portal_unavailable"),
+        );
     }
 
     response
         .json::<LicensePortalUrlResponse>()
         .await
-        .map_err(|e| {
+        .map_err(|_| {
             CommandError::new(
-                format!("Failed to parse billing portal response: {e}"),
+                "The account service returned an invalid management response.",
                 "auth",
             )
             .with_code("portal_unavailable")
@@ -288,18 +290,17 @@ async fn exchange_supabase_auth_code(
         }))
         .send()
         .await
-        .map_err(|e| {
+        .map_err(|_| {
             CommandError::new(
-                format!("Browser sign-in token exchange failed: {e}"),
+                "Unable to complete browser sign-in. Please try again.",
                 "auth",
             )
             .with_code("auth_sign_in_failed")
         })?;
 
     if !response.status().is_success() {
-        let (status, text) = crate::http::status_and_text(response).await;
         return Err(CommandError::new(
-            format!("Browser sign-in failed during token exchange ({status}): {text}"),
+            "Unable to complete browser sign-in. Please try again.",
             "auth",
         )
         .with_code("auth_sign_in_failed"));
@@ -308,9 +309,12 @@ async fn exchange_supabase_auth_code(
     response
         .json::<SupabaseSessionAuthResponse>()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Failed to parse sign in response: {e}"), "auth")
-                .with_code("auth_response_parse_failed")
+        .map_err(|_| {
+            CommandError::new(
+                "The account service returned an invalid sign-in response.",
+                "auth",
+            )
+            .with_code("auth_response_parse_failed")
         })
 }
 
@@ -348,9 +352,12 @@ async fn sign_in_supabase_with_password(
     response
         .json::<SupabaseSessionAuthResponse>()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Failed to parse sign in response: {e}"), "auth")
-                .with_code("auth_response_parse_failed")
+        .map_err(|_| {
+            CommandError::new(
+                "The account service returned an invalid sign-in response.",
+                "auth",
+            )
+            .with_code("auth_response_parse_failed")
         })
 }
 
@@ -496,9 +503,12 @@ async fn sign_up_supabase_with_password(
     response
         .json::<SupabaseSignupAuthResponse>()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Failed to parse sign-up response: {e}"), "auth")
-                .with_code("auth_response_parse_failed")
+        .map_err(|_| {
+            CommandError::new(
+                "The account service returned an invalid sign-up response.",
+                "auth",
+            )
+            .with_code("auth_response_parse_failed")
         })
 }
 
@@ -511,10 +521,17 @@ async fn persist_session_material_and_hydrate_license_state(
     hydration_path: &str,
     save_reason: &str,
     hydration_failure_context: &str,
+    ticket: u64,
 ) -> CommandResult<LicenseState> {
-    persist_session_material(app, &session_material)
-        .map_err(|e| CommandError::new("Failed to persist session", "auth").with_code(e))?;
-
+    // Authentication may already have consumed a one-time code. Save its token
+    // pair before optional network work, so startup refresh can recover after
+    // an interrupted lookup. Do not emit an intermediate signed-in UI state.
+    SESSION_OWNER.commit(ticket, || {
+        persist_session_material(app, &session_material).map_err(|_| {
+            CommandError::new("Failed to persist session", "auth")
+                .with_code("auth_session_save_failed")
+        })
+    })?;
     let fallback_state = build_signed_in_fallback_state(user_id, user_email, Utc::now());
     let state = match fetch_license_state_from_api(
         &session_material.access_token,
@@ -537,7 +554,12 @@ async fn persist_session_material_and_hydrate_license_state(
             fallback_state
         }
     };
-    save_license_state(app, &state, save_reason)?;
+    let defaults = first_install_catalog(app, &state, &session_material.access_token).await;
+    SESSION_OWNER.commit(ticket, || {
+        save_license_state(app, &state, save_reason)?;
+        apply_first_install_models(app, defaults.as_deref());
+        Ok(())
+    })?;
 
     if let Err(e) = crate::commands::config::sync_pipeline_config(app.clone()) {
         log::warn!(
@@ -549,6 +571,90 @@ async fn persist_session_material_and_hydrate_license_state(
     Ok(state)
 }
 
+async fn first_install_catalog(
+    app: &AppHandle,
+    state: &LicenseState,
+    access_token: &str,
+) -> Option<Vec<crate::managed_inference::ManagedModel>> {
+    use crate::settings::managed_defaults::PENDING;
+    if state.tier != LicenseTier::Personal || state.status != LicenseStatus::Active {
+        return None;
+    }
+    let store = app.store("settings.json").ok()?;
+    if store.get(PENDING).and_then(|value| value.as_bool()) != Some(true) {
+        return None;
+    }
+    let base =
+        crate::public_config::read(&["TAURI_MANAGED_INFERENCE_GATEWAY_URL", "TAURI_API_BASE_URL"])?;
+    let access = crate::http::cloudflare_access_headers_for_url(&base);
+    crate::managed_inference::fetch_managed_model_catalog(
+        &license_api_client(),
+        &base,
+        access_token,
+        access
+            .as_ref()
+            .map(|(id, secret)| (id.as_str(), secret.as_str())),
+    )
+    .await
+    .ok()
+    .map(|catalog| catalog.models)
+}
+
+fn apply_first_install_models(
+    app: &AppHandle,
+    models: Option<&[crate::managed_inference::ManagedModel]>,
+) {
+    if try_apply_first_install_models(app, models).is_err() {
+        // Authentication already succeeded. Do not consume the code and report a
+        // false sign-in failure merely because optional model defaults failed.
+        log::warn!("First-install model settings could not be saved; refresh access to retry.");
+    }
+}
+
+fn try_apply_first_install_models(
+    app: &AppHandle,
+    models: Option<&[crate::managed_inference::ManagedModel]>,
+) -> CommandResult<()> {
+    let Some(models) = models else {
+        return Ok(());
+    };
+    let store = app
+        .store("settings.json")
+        .map_err(|_| CommandError::new("Model settings are unavailable.", "settings"))?;
+    let custom = crate::custom_providers::load_checked(app)
+        .map_err(|_| CommandError::new("Model settings are unavailable.", "settings"))?;
+    let keys = crate::secrets::API_KEY_SETTING_KEYS
+        .iter()
+        .map(|key| key.to_string())
+        .chain(
+            custom
+                .iter()
+                .map(crate::custom_providers::CustomProvider::key_name),
+        );
+    let mut has_saved_key = false;
+    for key in keys {
+        if crate::secrets::has_api_key_checked(app, &key).map_err(|_| {
+            CommandError::new(
+                "Provider credentials are unavailable. Refresh access to retry.",
+                "settings",
+            )
+        })? {
+            has_saved_key = true;
+            break;
+        }
+    }
+    if let Some(patch) = crate::settings::managed_defaults::selection(&store, models, has_saved_key)
+    {
+        let payload = crate::settings::managed_defaults::persist_selection(&store, patch, || {
+            store
+                .save()
+                .map_err(|_| CommandError::new("Model settings could not be saved.", "settings"))
+        })?;
+        crate::app_shared::emit_settings_changed(app, payload);
+    }
+    Ok(())
+}
+
 async fn persist_session_and_hydrate_license_state(
     app: &AppHandle,
     auth: SupabaseSessionAuthResponse,
@@ -556,6 +662,7 @@ async fn persist_session_and_hydrate_license_state(
     hydration_path: &str,
     save_reason: &str,
     hydration_failure_context: &str,
+    ticket: u64,
 ) -> CommandResult<LicenseState> {
     persist_session_material_and_hydrate_license_state(
         app,
@@ -569,6 +676,7 @@ async fn persist_session_and_hydrate_license_state(
         hydration_path,
         save_reason,
         hydration_failure_context,
+        ticket,
     )
     .await
 }
@@ -935,25 +1043,26 @@ async fn refresh_supabase_session(
         }))
         .send()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Session refresh request failed: {e}"), "auth")
+        .map_err(|_| {
+            CommandError::new("Unable to reach the session service.", "auth")
                 .with_code("auth_refresh_failed")
         })?;
 
     if !response.status().is_success() {
-        let (status, text) = crate::http::status_and_text(response).await;
-        return Err(CommandError::new(
-            format!("Session refresh failed ({status}): {text}"),
-            "auth",
-        )
-        .with_code("auth_refresh_failed"));
+        let status = response.status();
+        let message = if status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED {
+            "Invalid refresh token. Please sign in again."
+        } else {
+            "Session refresh is temporarily unavailable."
+        };
+        return Err(CommandError::new(message, "auth").with_code("auth_refresh_failed"));
     }
 
     response
         .json::<SupabaseRefreshAuthResponse>()
         .await
-        .map_err(|e| {
-            CommandError::new(format!("Failed to parse refresh response: {e}"), "auth")
+        .map_err(|_| {
+            CommandError::new("The session service returned an invalid response.", "auth")
                 .with_code("auth_response_parse_failed")
         })
 }
@@ -1171,10 +1280,7 @@ pub async fn license_get_state(app: AppHandle) -> CommandResult<LicenseState> {
 pub async fn license_get_auth_context(app: AppHandle) -> CommandResult<LicenseAuthContext> {
     let state = load_license_state(&app)?;
     let has_secure_session = load_session_material(&app).is_some();
-    let issuer = crate::commands::config::read_first_non_empty_env(&[
-        "TAURI_SUPABASE_URL",
-        "TAURI_AUTH_ISSUER",
-    ]);
+    let issuer = crate::public_config::read(&["TAURI_SUPABASE_URL", "TAURI_AUTH_ISSUER"]);
     Ok(build_auth_context(&state, has_secure_session, issuer))
 }
 
@@ -1205,6 +1311,7 @@ pub async fn license_start_login(
     app: AppHandle,
     request: Option<LoginRequest>,
 ) -> CommandResult<LicenseState> {
+    let ticket = SESSION_OWNER.begin();
     let request = request.unwrap_or(LoginRequest {
         provider_hint: None,
         auth_provider: None,
@@ -1221,6 +1328,7 @@ pub async fn license_start_login(
             "/v1/license/state",
             "password_login_success",
             "Password login",
+            ticket,
         )
         .await;
     }
@@ -1282,23 +1390,38 @@ pub async fn license_start_login(
             .with_code("auth_browser_open_failed")
     })?;
 
-    match wait_for_browser_auth_callback(listener, &state_token).await? {
+    complete_browser_auth(
+        &app,
+        wait_for_browser_auth_callback(listener, &state_token).await?,
+        &code_verifier,
+        ticket,
+    )
+    .await
+}
+
+async fn complete_browser_auth(
+    app: &AppHandle,
+    callback: BrowserAuthCallback,
+    code_verifier: &str,
+    ticket: u64,
+) -> CommandResult<LicenseState> {
+    match callback {
         BrowserAuthCallback::AuthorizationCode(auth_code) => {
-            let auth =
-                exchange_supabase_auth_code(auth_code.as_str(), code_verifier.as_str()).await?;
+            let auth = exchange_supabase_auth_code(auth_code.as_str(), code_verifier).await?;
             persist_session_and_hydrate_license_state(
-                &app,
+                app,
                 auth,
                 Method::GET,
                 "/v1/license/state",
                 "login_success",
                 "Browser login",
+                ticket,
             )
             .await
         }
         BrowserAuthCallback::Session(callback) => {
             persist_session_material_and_hydrate_license_state(
-                &app,
+                app,
                 callback.session,
                 callback.user_id,
                 callback.email,
@@ -1306,6 +1429,7 @@ pub async fn license_start_login(
                 "/v1/license/state",
                 "browser_handoff_login_success",
                 "Browser auth handoff",
+                ticket,
             )
             .await
         }
@@ -1317,6 +1441,7 @@ pub async fn license_sign_up(
     app: AppHandle,
     request: SignupRequest,
 ) -> CommandResult<SignupResponse> {
+    let ticket = SESSION_OWNER.begin();
     let (email, password) = resolve_signup_credentials(&request)?;
     let signup = sign_up_supabase_with_password(email.as_str(), password.as_str()).await?;
     let response_email = signup.display_email().or_else(|| Some(email.clone()));
@@ -1329,6 +1454,7 @@ pub async fn license_sign_up(
             "/v1/license/state",
             "password_signup_success",
             "Password signup",
+            ticket,
         )
         .await?;
 
@@ -1363,6 +1489,15 @@ pub async fn license_request_password_reset(email: String) -> CommandResult<()> 
 
 #[tauri::command]
 pub async fn license_logout(app: AppHandle) -> CommandResult<LicenseState> {
+    SESSION_OWNER.invalidate_and_commit(|| logout_session(&app))
+}
+
+#[tauri::command]
+pub fn license_cancel_login() {
+    SESSION_OWNER.begin();
+}
+
+fn logout_session(app: &AppHandle) -> CommandResult<LicenseState> {
     if let Err(error) = clear_session_material(&app) {
         log::warn!("Logout could not clear secure session material: {}", error);
         return Err(CommandError::new("Failed to clear session", "auth")
@@ -1394,9 +1529,13 @@ pub async fn license_refresh_entitlement(
     app: AppHandle,
     simulate_failure: Option<bool>,
 ) -> CommandResult<LicenseState> {
+    let _refresh = SESSION_REFRESH.lock().await;
+    let ticket = SESSION_OWNER.current();
     let Some(session) = load_session_material(&app) else {
         let state = LicenseState::signed_out(Utc::now());
-        save_license_state(&app, &state, "session_missing")?;
+        SESSION_OWNER.commit(ticket, || {
+            save_license_state(&app, &state, "session_missing")
+        })?;
         tracing::warn!(
             target: "licensing",
             context = %telemetry_context_for_state(&state),
@@ -1408,6 +1547,7 @@ pub async fn license_refresh_entitlement(
     let current = load_license_state(&app)?;
     let now = Utc::now();
     let failed = simulate_failure.unwrap_or(false);
+    let mut catalog_access_token = session.access_token.clone();
 
     let (next, save_reason, refresh_error) = if failed {
         (apply_refresh_failure(current, now), "refresh_failed", None)
@@ -1420,9 +1560,13 @@ pub async fn license_refresh_entitlement(
                         .refresh_token
                         .unwrap_or_else(|| session.refresh_token.clone()),
                 };
+                catalog_access_token = refreshed_session.access_token.clone();
 
-                persist_session_material(&app, &refreshed_session).map_err(|e| {
-                    CommandError::new("Failed to persist refreshed session", "auth").with_code(e)
+                SESSION_OWNER.commit(ticket, || {
+                    persist_session_material(&app, &refreshed_session).map_err(|_| {
+                        CommandError::new("Failed to persist refreshed session", "auth")
+                            .with_code("auth_session_save_failed")
+                    })
                 })?;
 
                 let refreshed_user_id = refresh.user.as_ref().map(|user| user.id.clone());
@@ -1513,7 +1657,16 @@ pub async fn license_refresh_entitlement(
         }
     };
 
-    save_license_state(&app, &next, save_reason)?;
+    let defaults = if refresh_error.is_none() && !failed {
+        first_install_catalog(&app, &next, &catalog_access_token).await
+    } else {
+        None
+    };
+    SESSION_OWNER.commit(ticket, || {
+        save_license_state(&app, &next, save_reason)?;
+        apply_first_install_models(&app, defaults.as_deref());
+        Ok(())
+    })?;
 
     if let Err(e) = crate::commands::config::sync_pipeline_config(app.clone()) {
         log::warn!(

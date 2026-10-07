@@ -82,6 +82,18 @@ export function useRequestLicensePasswordReset() {
 	});
 }
 
+export function useRequestLicenseEmailCode() {
+	return useMutation({ mutationFn: (email: string) => licenseAPI.requestEmailCode(email) });
+}
+
+export function useVerifyLicenseEmailCode() {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (request: { email: string; code: string }) => licenseAPI.verifyEmailCode(request.email, request.code),
+		onSuccess: () => { void invalidateLicenseRelatedQueries(queryClient); },
+	});
+}
+
 export function useLogoutLicense() {
 	const queryClient = useQueryClient();
 	return useMutation({

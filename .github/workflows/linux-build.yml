@@ -8,6 +8,7 @@ on:
       - "app/**"
       - ".github/scripts/configure-desktop-sentry*"
       - ".github/scripts/upload-desktop-symbols*"
+      - ".github/scripts/validate-desktop-cloud-config*"
       - ".github/workflows/linux-build.yml"
   workflow_dispatch:
   workflow_call:
@@ -42,8 +43,9 @@ jobs:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
-      TAURI_API_BASE_URL: https://kolboo.dovie.dev
-      TAURI_MANAGED_INFERENCE_GATEWAY_URL: https://kolboo.dovie.dev
+      # 0.3.2 ships Community/BYOK only; service rollout remains separate.
+      TAURI_CLOUD_ENV: community
+      VITE_CLOUD_SERVICE_ENABLED: "false"
       TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
       TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
@@ -97,6 +99,8 @@ jobs:
           TAURI_SENTRY_DSN: ${{ secrets.TAURI_SENTRY_DSN }}
         run: |
           set -euo pipefail
+          node --test .github/scripts/validate-desktop-cloud-config.test.mjs
+          node .github/scripts/validate-desktop-cloud-config.mjs
           node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
           node .github/scripts/configure-desktop-sentry.mjs
           version=$(node -p "require('./app/package.json').version")

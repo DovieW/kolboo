@@ -487,6 +487,8 @@ export interface OrgContext {
 }
 
 export interface LicenseState {
+    beta_access?: { source: "complimentary_beta"; status: "approved" | "revoked"; limits: TierLimits } | null;
+    usage_period?: { period_start: string; monthly_reset_at: string; daily_reset_at: string } | null;
 	tier: LicenseTier;
 	status: LicenseStatus;
 	user_id: string | null;

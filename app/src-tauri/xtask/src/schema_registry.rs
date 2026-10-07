@@ -285,6 +285,7 @@ fn gen_export_windows_internet_proxy_settings_schema() -> RootSchema {
 }
 
 pub(crate) const SCHEMAS: &[SchemaSpec] = &[
+    SchemaSpec::new("license-state.schema.json", "LicenseState", || schemars::schema_for!(kolboo_lib::LicenseState)),
     schema_spec!(
         "audio-capture-diagnostics.schema.json",
         "AudioCaptureDiagnostics",

@@ -33,7 +33,7 @@ pub struct SyncStatus {
 
 #[cfg(desktop)]
 fn api_base_url() -> Option<String> {
-    let env_value = crate::commands::config::read_first_non_empty_env(&["TAURI_API_BASE_URL"])?;
+    let env_value = crate::public_config::read(&["TAURI_API_BASE_URL"])?;
 
     Some(env_value.trim_end_matches('/').to_string())
 }

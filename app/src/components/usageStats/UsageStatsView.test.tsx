@@ -68,37 +68,24 @@ afterEach(async () => {
 it("shows activity during account loading without mounting or flashing cost data", async () => {
 	await render();
 	expect(host.textContent).toContain("Activity data 30d");
-	expect(host.textContent).not.toContain("Spend");
+	expect(host.textContent).toContain("Costs");
 	expect(cost).not.toHaveBeenCalled();
 	await clickTab("Models");
 	expect(host.textContent).toContain("Models data");
 	expect(host.textContent).not.toContain("Activity data");
 });
-it("allows Community spend but removes it immediately when managed access arrives", async () => {
-	state.license = { status: "signed_out", tier: "community" };
-	await render();
-	await clickTab("Spend");
-	expect(host.textContent).toContain("Cost estimates");
-	expect(cost).toHaveBeenLastCalledWith({
-		timeframe: "30d",
-		kind: "all",
-		sttModelKeys: [],
-		llmModelKeys: [],
-		excludeFreeTier: true,
-	});
-	state.license = { status: "authenticated", tier: "personal" };
-	cost.mockClear();
-	await render();
-	expect(host.textContent).not.toContain("Spend");
-	expect(host.textContent).not.toContain("Cost estimates");
-	expect(host.textContent).toContain("Activity data");
-	expect(cost).not.toHaveBeenCalled();
-	state.license = { status: "authenticated", tier: "enterprise" };
-	await render();
-	expect(host.textContent).not.toContain("Spend");
-	state.license = { status: "authenticated", tier: "community" };
-	await render();
-	expect(host.textContent).toContain("Spend");
+it("shows costs for Community and Pro without presenting estimates as a bill", async () => {
+    for (const tier of ["community", "personal", "enterprise"]) {
+        state.license = { status: "active", tier };
+        await render();
+        await clickTab("Costs");
+        expect(host.textContent).toContain("Cost estimates");
+        expect(host.textContent).toContain("not a bill");
+        expect(host.textContent).toContain("complimentary");
+        expect(cost).toHaveBeenLastCalledWith({
+            timeframe: "30d", kind: "all", sttModelKeys: [], llmModelKeys: [], excludeFreeTier: true,
+        });
+    }
 });
 it("changes the period for every tab", async () => {
 	await render();
@@ -119,7 +106,7 @@ it("changes the period for every tab", async () => {
 it("applies and resets spend filters rather than only changing their appearance", async () => {
 	state.license = { status: "signed_out", tier: "community" };
 	await render();
-	await clickTab("Spend");
+	await clickTab("Costs");
 	await act(async () =>
 		host.querySelector<HTMLButtonElement>('[aria-label="Filters"]')?.click(),
 	);
