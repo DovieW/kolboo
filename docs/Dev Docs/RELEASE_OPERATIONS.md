@@ -54,12 +54,15 @@ macOS remains an explicitly untested experimental download.
 
 Local preparation validation on October 6 passed `check:ci` (925 frontend tests,
 977 ordinary Rust tests, 14 explicitly opt-in Rust fixtures), `coverage:patch`
-(100% of 780 changed executable lines, only the two approved counterless Tauri
+(100% of 784 changed executable lines, only the two approved counterless Tauri
 email-command metadata exceptions), isolated Linux/Wry startup/layout/close
 acceptance, both dependency audit gates, version consistency and 13 release
 configuration/signing-helper tests. These are source/fixture results, not
-acceptance of a release package. Signed commits, CI packages and exact-package
-Linux acceptance remain pending; do not describe 0.3.2 as published.
+acceptance of a release package. The signed preparation commit and its initial
+PR checks passed; PR #108 remains open. Its account-session review fix also
+passed local coverage, including stalled-lookup recovery and concurrent logout.
+Release packages and exact-package Linux acceptance remain pending; do not
+describe 0.3.2 as published.
 
 To enable service packages in a later release, configure the five
 `KOLBOO_PROD_*` public GitHub Actions variables documented in Authentication

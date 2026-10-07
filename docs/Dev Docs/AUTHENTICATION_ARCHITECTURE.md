@@ -31,9 +31,9 @@ Backend deployment alone cannot enable signup in the cloud-free 0.3.2 installer.
 Implementation checkpoint, October 6: these changes are in progress, not a
 service-ready release. Private workspace lint/type/tests/build/contracts and
 offline SQL assertions passed, including real concurrent quota/idempotency
-requests. Desktop validation passed 920 frontend tests, 976 ordinary Rust tests,
+requests. Desktop validation passed 925 frontend tests, 977 ordinary Rust tests,
 isolated Linux account/window checks and production startup. Patch coverage is
-100% of 744 changed executable lines; the only new exclusions are the two
+100% of 784 changed executable lines; the only new exclusions are the two
 explicitly approved counterless email-command metadata annotations, not bodies.
 Final package/platform acceptance remains pending; the live service rollout is
 deferred. Those service implementation checks do not constitute live acceptance.
@@ -54,6 +54,13 @@ later Refresh access can hydrate approval. Pro's wire tier remains `personal`;
 the display label is Pro. Complimentary access has no checkout, invoice or
 payment dependency. Revocation and quotas are enforced by the gateway/database,
 even if a desktop has cached offline-access state.
+
+The authenticated token pair is committed under session ownership **before**
+entitlement hydration or first-install model discovery. Each optional lookup has
+a 20-second request/body deadline. An interrupted lookup leaves secure material
+available to startup refresh without consuming another email code; it does not
+emit an intermediate signed-in cache transition. A logout during either lookup
+clears those tokens and invalidates its final cache/settings commit.
 
 First-install settings carry an explicit pending marker, established before
 default seeding. Verified active Pro access can select only published managed
@@ -117,6 +124,7 @@ sequenceDiagram
 	participant IdP as Auth Provider
 	participant Loopback as Local Callback
 	participant Sec as Secure Storage
+	participant Service as Account / Model Service
 	participant Store as settings.json
 
 	User->>UI: Click Sign in
@@ -129,6 +137,8 @@ sequenceDiagram
 	Cmd->>IdP: token exchange (code + verifier)
 	IdP-->>Cmd: access_token + refresh_token + user
 	Cmd->>Sec: persist_session_material(...)
+	Cmd->>Service: bounded entitlement / optional model lookup
+	Service-->>Cmd: verified access or Community fallback
 	Cmd->>Store: save LicenseState(active)
 	Cmd-->>API: LicenseState
 	API-->>UI: LicenseState

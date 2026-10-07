@@ -211,6 +211,10 @@ metadata exception for the standalone annotations of
 generated IPC handlers, malformed-input rejection, and the command bodies with
 synthetic credentials and loopback HTTP. Executable authentication behavior,
 including cancellation and failed secure-storage writes, is not exempt.
+The same fixture pauses real loopback entitlement/catalog responses to assert
+that consumed-code tokens are already secure, interrupted commands recover via
+startup's refresh path, and logout prevents late cache/model commits. These
+checks use explicit request barriers rather than timing sleeps.
 
 On 2026-10-01 the maintainer explicitly approved extending the existing native
 recording/permission-callback wiring exception for the superseded-History and

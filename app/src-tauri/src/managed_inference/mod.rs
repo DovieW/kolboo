@@ -48,6 +48,7 @@ pub(crate) async fn fetch_managed_model_catalog(
     }
 
     let response = request
+        .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
         .map_err(|error| format!("Managed model catalog request failed: {error}"))?;

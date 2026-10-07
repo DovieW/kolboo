@@ -207,6 +207,7 @@ async fn fetch_license_state_from_api(
         request.bearer_auth(access_token),
         &url,
     )
+    .timeout(Duration::from_secs(20))
     .send()
     .await
     .map_err(|_| {
@@ -522,6 +523,15 @@ async fn persist_session_material_and_hydrate_license_state(
     hydration_failure_context: &str,
     ticket: u64,
 ) -> CommandResult<LicenseState> {
+    // Authentication may already have consumed a one-time code. Save its token
+    // pair before optional network work, so startup refresh can recover after
+    // an interrupted lookup. Do not emit an intermediate signed-in UI state.
+    SESSION_OWNER.commit(ticket, || {
+        persist_session_material(app, &session_material).map_err(|_| {
+            CommandError::new("Failed to persist session", "auth")
+                .with_code("auth_session_save_failed")
+        })
+    })?;
     let fallback_state = build_signed_in_fallback_state(user_id, user_email, Utc::now());
     let state = match fetch_license_state_from_api(
         &session_material.access_token,
@@ -546,10 +556,6 @@ async fn persist_session_material_and_hydrate_license_state(
     };
     let defaults = first_install_catalog(app, &state, &session_material.access_token).await;
     SESSION_OWNER.commit(ticket, || {
-        persist_session_material(app, &session_material).map_err(|_| {
-            CommandError::new("Failed to persist session", "auth")
-                .with_code("auth_session_save_failed")
-        })?;
         save_license_state(app, &state, save_reason)?;
         apply_first_install_models(app, defaults.as_deref());
         Ok(())

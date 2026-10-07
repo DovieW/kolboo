@@ -46,11 +46,28 @@ impl Drop for Environment {
 }
 
 async fn server(responses: Vec<(u16, String)>) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+    let (base, task, _, _) = server_with_pause(responses, None).await;
+    (base, task)
+}
+
+async fn server_with_pause(
+    responses: Vec<(u16, String)>,
+    pause_at: Option<usize>,
+) -> (
+    String,
+    tokio::task::JoinHandle<Vec<String>>,
+    tokio::sync::oneshot::Receiver<()>,
+    tokio::sync::oneshot::Sender<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let (reached, waiting) = tokio::sync::oneshot::channel();
+    let (release, resume) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
+        let mut reached = Some(reached);
+        let mut resume = Some(resume);
         let mut captured = Vec::new();
-        for (status, body) in responses {
+        for (index, (status, body)) in responses.into_iter().enumerate() {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = Vec::new();
             let mut buffer = [0; 4096];
@@ -73,11 +90,15 @@ async fn server(responses: Vec<(u16, String)>) -> (String, tokio::task::JoinHand
                 }
             }
             captured.push(String::from_utf8(request).unwrap());
+            if pause_at == Some(index) {
+                reached.take().unwrap().send(()).unwrap();
+                resume.take().unwrap().await.unwrap();
+            }
             socket.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
         }
         captured
     });
-    (format!("http://{address}"), task)
+    (format!("http://{address}"), task, waiting, release)
 }
 
 pub(crate) fn email_code_session_lifecycle(
@@ -319,6 +340,100 @@ pub(crate) fn email_code_session_lifecycle(
             Some("person@example.test".into()),
             Utc::now(),
         );
+        // A consumed code must survive interruption at either optional lookup.
+        // Synchronize on the actual HTTP request, not sleeps or a mocked helper.
+        let mut pro = community.clone();
+        pro.tier = LicenseTier::Personal;
+        let store = app.store("settings.json").unwrap();
+        let pending_before = store.get(crate::settings::managed_defaults::PENDING);
+        for pause_at in [1, 2] {
+            for logout in [false, true] {
+                license_logout(app.clone()).await.unwrap();
+                store.set(crate::settings::managed_defaults::PENDING, json!(true));
+                let responses = if pause_at == 1 {
+                    vec![
+                        (200, auth.clone()),
+                        (200, serde_json::to_string(&community).unwrap()),
+                    ]
+                } else {
+                    vec![
+                        (200, auth.clone()),
+                        (200, serde_json::to_string(&pro).unwrap()),
+                        (200, catalog_for_test()),
+                    ]
+                };
+                let (base, server_task, waiting, release) =
+                    server_with_pause(responses, Some(pause_at)).await;
+                environment.configure(&base);
+                let handle = app.clone();
+                let login = tokio::spawn(async move {
+                    email_code::license_verify_email_code(
+                        handle,
+                        "person@example.test".into(),
+                        "123456".into(),
+                    )
+                    .await
+                });
+                waiting.await.unwrap();
+                let saved = load_session_material(app)
+                    .expect("tokens must be saved before lookup responds");
+                assert_eq!(saved.access_token, "synthetic-access");
+                assert_eq!(saved.refresh_token, "synthetic-refresh");
+                // No intermediate cache/event grants account access while the
+                // lookup is pending or forces the sign-in form to unmount.
+                assert_eq!(
+                    load_license_state(app).unwrap().status,
+                    LicenseStatus::SignedOut
+                );
+                if logout {
+                    license_logout(app.clone()).await.unwrap();
+                    release.send(()).unwrap();
+                    assert_eq!(
+                        login.await.unwrap().unwrap_err().code.as_deref(),
+                        Some("auth_operation_superseded")
+                    );
+                    server_task.await.unwrap();
+                    assert!(load_session_material(app).is_none());
+                    assert_eq!(
+                        load_license_state(app).unwrap().status,
+                        LicenseStatus::SignedOut
+                    );
+                    assert_eq!(
+                        store.get(crate::settings::managed_defaults::PENDING),
+                        Some(json!(true))
+                    );
+                } else {
+                    // Dropping the in-flight command represents shutdown. The
+                    // same startup refresh path can recover without another OTP.
+                    login.abort();
+                    assert!(login.await.unwrap_err().is_cancelled());
+                    server_task.abort();
+                    assert!(server_task.await.unwrap_err().is_cancelled());
+                    drop(release);
+                    let (base, task) = server(vec![
+                        (200, auth.clone()),
+                        (200, serde_json::to_string(&community).unwrap()),
+                    ])
+                    .await;
+                    environment.configure(&base);
+                    let recovered = license_refresh_entitlement(app.clone(), None)
+                        .await
+                        .unwrap();
+                    assert_eq!(recovered.status, LicenseStatus::Active);
+                    assert_eq!(recovered.user_id.as_deref(), Some("synthetic-user"));
+                    let requests = task.await.unwrap();
+                    assert!(requests[0].contains("grant_type=refresh_token"));
+                    assert!(requests[0].contains("synthetic-refresh"));
+                    assert_eq!(load_license_state(app).unwrap().user_id, recovered.user_id);
+                }
+            }
+        }
+        match pending_before {
+            Some(value) => store.set(crate::settings::managed_defaults::PENDING, value),
+            None => {
+                store.delete(crate::settings::managed_defaults::PENDING);
+            }
+        }
         for browser in [false, true] {
             let (base, task) = server(vec![
                 (200, auth.clone()),
@@ -537,11 +652,7 @@ pub(crate) fn email_code_session_lifecycle(
             old_session.access_token
         );
         let auth = json!({"access_token":"failed-access", "refresh_token":"failed-refresh", "user":{"id":"synthetic-user","email":"person@example.test"}}).to_string();
-        let (base, task) = server(vec![
-            (200, auth),
-            (200, serde_json::to_string(&pro).unwrap()),
-        ])
-        .await;
+        let (base, task) = server(vec![(200, auth)]).await;
         environment.configure(&base);
         fail_write(crate::secrets::AUTH_SESSION_ACCESS_TOKEN_KEY);
         assert_eq!(
