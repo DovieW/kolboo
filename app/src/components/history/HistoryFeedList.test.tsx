@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import WaveSurfer from "wavesurfer.js";
 import { groupHistoryForDisplay } from "../../lib/history/readModel";
 import { tauriAPI } from "../../lib/tauri";
 import type { RecordingPlayerControls } from "../../lib/useRecordingPlayer";
@@ -359,6 +360,35 @@ describe("History cards and reader", () => {
 		expect(
 			document.querySelector(".history-waveform-stage--revealed"),
 		).not.toBeNull();
+	});
+	it("normalizes quiet recordings visually without replacing the playback media or peaks", async () => {
+		const media = document.createElement("audio");
+		media.volume = 0.6;
+		const peaks = [-0.002, 0.006, -0.001, 0];
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<HistoryAudioPlayer
+						player={{
+							...player,
+							media,
+							waveform: { duration_seconds: 100, peaks },
+						}}
+						recordingId="one"
+					/>
+				</MantineProvider>,
+			),
+		);
+		expect(WaveSurfer.create).toHaveBeenCalledWith(
+			expect.objectContaining({
+				media,
+				peaks: [peaks],
+				normalize: true,
+				height: 64,
+			}),
+		);
+		expect(media.volume).toBe(0.6);
+		expect(peaks).toEqual([-0.002, 0.006, -0.001, 0]);
 	});
 	it("allows listening and seeking while optional waveform analysis is pending", async () => {
 		const readyPlayer = {

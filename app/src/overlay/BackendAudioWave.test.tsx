@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { readFileSync } from "node:fs";
+import { Window } from "happy-dom";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -166,3 +168,31 @@ it("shows mirrored inward and outward processing pulses without opening the mic"
 	expect(bars[0]?.style.transform).toBe("scaleY(0.07)");
 	expect(host.querySelectorAll(".overlay-wave-pulse")).toHaveLength(0);
 });
+it.each(["no-preference", "reduce"])(
+	"keeps the processing animation enabled with the desktop motion preference %s",
+	async (motion) => {
+		await act(async () =>
+			root.render(<BackendAudioWave isActive={false} isProcessing />),
+		);
+		const browser = new Window({
+			settings: { device: { prefersReducedMotion: motion } },
+		});
+		const style = browser.document.createElement("style");
+		style.textContent = readFileSync("src/app.css", "utf8");
+		browser.document.head.append(style);
+		browser.document.body.innerHTML = host.innerHTML;
+		expect(browser.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(
+			motion === "reduce",
+		);
+		const pulse = browser.document.querySelector(".overlay-wave-pulse");
+		expect(pulse).not.toBeNull();
+		const computed = browser.getComputedStyle(
+			pulse as NonNullable<typeof pulse>,
+		);
+		expect(computed.animation).toBe(
+			"overlay-wave-pulse 2.3s ease-in-out infinite",
+		);
+		expect(computed.display).not.toBe("none");
+		await browser.happyDOM.close();
+	},
+);
