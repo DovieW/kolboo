@@ -250,7 +250,7 @@ export function TranscribeSettingsSection({
 									data={sttModelOptions}
 									value={selectedSttModelForUi}
 									onChange={onSttModelChange}
-									placeholder="Select model"
+									placeholder="Provider default"
 									withCheckIcon={false}
 									styles={{
 										input: {

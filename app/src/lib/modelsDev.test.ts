@@ -71,18 +71,23 @@ describe("models.dev BYOK catalog", () => {
 		});
 	});
 
-	it("replaces live provider lists but keeps bundled unsupported providers", () => {
+	it("keeps verified bundled launches while enriching duplicates with live pricing", () => {
 		const bundled = {
-			openai: [{ value: "gpt-bundled", label: "GPT Bundled" }],
+			openai: [
+				{ value: "gpt-bundled", label: "GPT Bundled" },
+				{ value: "gpt-live", label: "Old label" },
+			],
 			ollama: [],
 		};
 		const live = {
 			openai: [{ value: "gpt-live", label: "GPT Live" }],
 		};
 		expect(byokModelsWithLiveCatalog(bundled, live)).toEqual({
-			openai: live.openai,
+			openai: [...live.openai, bundled.openai[0]],
 			ollama: [],
 		});
+		expect(byokModelsWithLiveCatalog(bundled, null)).toBe(bundled);
+		expect(byokModelsWithLiveCatalog(bundled, {})).toEqual(bundled);
 	});
 
 	it("caches the compact supported catalog and reuses it within one day", async () => {

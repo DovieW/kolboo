@@ -9,7 +9,13 @@ Kolboo supports two transcription modes:
 | **Batch** | Record → stop → upload all audio → get transcript | After recording stops (+ network round-trip) |
 | **Streaming** | Open WebSocket at record-start → feed audio chunks during recording → get partials in real time | Words appear *while* you speak |
 
-Streaming is toggled by the **"Live Output (experimental)"** setting (`stt_live_output`). When enabled and the selected provider supports it, the pipeline opens a streaming session at recording start and types partial transcripts into the target window as you speak.
+Streaming **input** and live **output** are distinct. At recording start the
+dictation pipeline attempts concurrent streaming for a capable selected model, even when
+**Live Output (experimental)** (`stt_live_output`) is off. Live Output controls
+pasting committed segments while recording; it does not turn WebSocket audio
+upload on/off. With Live Output off, the final result is used after recording stops.
+Simulated streaming is a separate opt-in path for batch-only providers. Home
+history-only recordings do not start this live dictation path.
 
 ---
 
@@ -57,14 +63,14 @@ Streaming is toggled by the **"Live Output (experimental)"** setting (`stt_live_
 | Provider | Batch | Streaming | Batch Transport | Stream Transport | Partials? | Notes |
 |----------|:-----:|:---------:|----------------|-----------------|:---------:|-------|
 | **Speechmatics** | ✅ | ✅ | WSS (`eu.rt`) | WSS (`eu2.rt`) | ✅ `AddPartialTranscript` | Batch uses RT endpoint but sends all audio upfront |
-| **Fireworks** | ✅ | ✅ | HTTP POST | WSS | ✅ (custom stability logic) | Needs segment stability + age-based commit |
+| **Fireworks (legacy)** | legacy | legacy | HTTP POST | WSS | custom stability logic | Upstream audio inference deprecated June 10, 2026; no new STT selections |
 | **ElevenLabs** | ✅ | ✅ | HTTP POST | WSS | ✅ | Streaming can be 20x+ faster than batch |
-| **OpenAI** | ✅ | ✅ | HTTP POST | WSS (Realtime API) | ✅ | `gpt-4o-realtime-transcribe` is stream-only |
-| **AssemblyAI** | ✅ | ✅ | HTTP POST | WSS (v3) | ✅ turn-based | Uses `turn_is_formatted` for final turns |
+| **OpenAI** | ✅ | ✅ | HTTP POST | WSS (Realtime API) | ✅ | `gpt-live-transcribe` and legacy realtime IDs are stream-only |
+| **AssemblyAI** | ✅ | ✅ | HTTP POST | WSS (v3) | ✅ turn-based | Final turns require both `end_of_turn` and `turn_is_formatted` |
 | **Groq** | ✅ | ❌ | HTTP POST | — | — | |
 | **Deepgram** | ✅ | ✅ | HTTP POST | WSS (`/v1/listen`) | ✅ `is_final` flag | Same models work for batch + streaming |
 | **Aquavoice** | ✅ | ❌ | HTTP POST | — | — | |
-| **Local Whisper** | ✅ | ❌ | Local process | — | — | |
+| **Local Whisper (paused)** | optional build | ❌ | Local process | — | — | Not enabled in normal builds |
 
 ---
 
@@ -77,6 +83,9 @@ Two separate WebSocket endpoints:
 - **Streaming** (`run_streaming_task`): connects to `wss://eu2.rt.speechmatics.com/v2/`, uses `tokio::select!` to concurrently send audio chunks from `audio_rx` and receive `AddPartialTranscript` / `AddTranscript` messages.
 
 ### Fireworks
+
+This section describes the retained legacy adapter, not an available new audio
+product. See the [upstream deprecation](https://docs.fireworks.ai/updates/changelog).
 
 Single WSS endpoint for streaming: `wss://audio-streaming.api.fireworks.ai/v1/audio/transcriptions/streaming`.
 
@@ -91,7 +100,22 @@ WSS at `wss://api.elevenlabs.io/v1/speech-to-text/realtime`. Sends base64-encode
 
 ### OpenAI
 
-Uses the Realtime API at `wss://api.openai.com/v1/realtime?intent=transcription`. Sends binary PCM chunks, receives structured transcription events. The `gpt-4o-realtime-transcribe` model is streaming-only (`requires_streaming() = true`).
+Uses the Realtime API at `wss://api.openai.com/v1/realtime?intent=transcription`.
+Audio is resampled to 24 kHz mono PCM16, base64 encoded and sent in JSON
+`input_audio_buffer.append` messages, followed by `input_audio_buffer.commit`.
+It is not sent as binary WebSocket frames.
+
+- `gpt-live-transcribe`: GA `session.update` with `type: transcription`, nested
+  `audio.input`, `languages` array and disabled turn detection. No beta header or
+  server VAD is sent to this model.
+- Legacy realtime IDs: retain their `transcription_session.update` contract,
+  beta header, singular language field and existing server VAD configuration.
+- File `gpt-transcribe`: multipart `languages[]`; older Whisper-compatible
+  model IDs retain singular `language`. Recorded requests reflect this distinction.
+
+Realtime-only IDs set `requires_streaming()`: do not silently use a batch endpoint
+after a streaming failure. Mock WebSocket tests cover both session contracts,
+authentication headers, audio encoding, commit, partials and final text.
 
 ### Deepgram
 
@@ -110,7 +134,22 @@ Protocol:
 
 ### AssemblyAI
 
-WSS at `wss://streaming.assemblyai.com/v3/ws`. Turn-based protocol — the server groups speech into "turns" and sends partial/final updates per turn. Uses `turn_is_formatted: true` for punctuated final output.
+WSS at `wss://streaming.assemblyai.com/v3/ws`. Turn-based protocol — the server
+groups speech into turns and sends partial/final updates per turn.
+
+- Pin `speech_model` to the selected realtime model. Long-lived keys are sent
+  only in `Authorization`, never as a URL `token` (that parameter is for temporary
+  tokens). Request logs omit credentials and parse errors omit payload contents.
+- Universal 3.6 Pro accepts the existing language hint as `language_code`, reduced
+  to its base ISO code; no legacy `format_turns` parameter is sent.
+- Legacy Universal Streaming uses `format_turns=true`; commit only when both
+  `end_of_turn` and `turn_is_formatted` are true, avoiding duplicate commits of
+  the unformatted predecessor. Intermediate text remains a partial.
+- Universal 3.5 Pro and Universal 2 currently use file upload/polling. Sync,
+  Dictation and Universal 3.5 realtime require separate protocol work.
+
+Local mock-server tests exercise upload/model selection/polling and WebSocket
+authentication, intermediate/final turns, termination and sanitized failures.
 
 ---
 
@@ -127,17 +166,17 @@ kolboo.exe pipeline stream --provider speechmatics --model enhanced --wav "audio
 
 # Stream at max speed (dumps audio as fast as possible — useful for latency testing,
 # but misleading for real-time providers since they still process at ~1x)
-kolboo.exe pipeline stream --provider fireworks --wav "audio.wav" --speed 0
+kolboo.exe pipeline stream --provider assemblyai --model universal-3-6-pro --wav "audio.wav" --speed 0
 
 # With language
-kolboo.exe pipeline transcribe --provider fireworks --model whisper-v3-turbo --wav "audio.wav" --language en
+kolboo.exe pipeline transcribe --provider groq --model whisper-large-v3-turbo --wav "audio.wav" --language en
 ```
 
 Output is JSON: `{"text": "...", "elapsed_ms": 1234}`.
 
 There's also a benchmark script at `scripts/benchmark-streaming-vs-batch.ps1`:
 ```powershell
-.\scripts\benchmark-streaming-vs-batch.ps1 -WavFile "C:\path\to\audio.wav" -Repeat 2 -Providers speechmatics,fireworks
+.\scripts\benchmark-streaming-vs-batch.ps1 -WavFile "C:\path\to\audio.wav" -Repeat 2 -Providers speechmatics,deepgram
 ```
 
 ---
@@ -167,12 +206,40 @@ The UI marks this as "(experimental)" because:
 
 ---
 
+## Catalog and streaming review (2026-10-08)
+
+Keep session lifecycle, cancellation, finalization and shared audio normalization
+in the existing shared modules. Provider-local adapters own the wire protocol and
+turn accumulation. Similar JSON messages are not grounds for a new shared adapter.
+
+The next model-selection improvement should express capabilities explicitly
+(file transcription vs realtime, languages, diarization, account/preview access)
+instead of inferring everything from model names or exposing another language
+picker. Retain provider-based key setup, but make model choices searchable and
+explain which recording modes each supports. Keep defaults distinct from an
+explicit saved model, and keep the managed catalog server-authoritative.
+
+The recording entry point (`core/recording.rs`) starts concurrent input independently
+of `stt_live_output`; the model selector should explain that network timing. The
+pipeline owns the active session and cancellation token. Connection/finalization
+are cancellation-aware, but the session's join handle is detached when the session
+is dropped, with sender closure driving protocol shutdown. Review explicit abort
+ownership and bounded tail draining before expanding streaming modes, with tests
+for cancellation while connecting, sending, draining and live-pasting. Do not
+introduce a second streaming state machine in the UI.
+
+Before adding AssemblyAI Sync/Dictation/3.5 realtime, Deepgram Flux, or a dedicated
+Yiddish provider, verify the exact protocol and lifecycle with local contract tests
+and representative opt-in audio samples. A provider's language-support list is not
+an accuracy benchmark. Existing custom OpenAI-compatible STT supports testing an
+appropriate vendor without prematurely creating a new adapter.
+
 ## Adding Streaming to a New Provider
 
 1. Implement `run_streaming_task()` — an async function that:
    - Connects to the provider's WSS endpoint
    - Uses `tokio::select!` to concurrently:
-     - Read audio chunks from `audio_rx` (mpsc receiver of `Vec<f32>`) → convert to PCM → send as binary WS frames
+     - Read audio chunks from `audio_rx` (mpsc receiver of `Vec<f32>`) → convert to the documented encoding → send binary or base64 JSON frames as required by that provider
      - Read WS messages → parse partials → send via `partial_tx` (mpsc sender of `String`)
    - On `audio_rx` close (recording stopped), send end-of-stream signal and drain final results
 

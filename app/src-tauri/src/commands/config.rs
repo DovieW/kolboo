@@ -252,7 +252,6 @@ pub struct AvailableProvidersResponse {
 const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("groq", "Groq", false),
     ("openai", "OpenAI", false),
-    ("fireworks", "Fireworks", false),
     ("aquavoice", "Aquavoice", false),
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),

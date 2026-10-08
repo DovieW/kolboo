@@ -171,6 +171,24 @@ fn hotkey_action_label(action: HotkeyAction) -> &'static str {
         HotkeyAction::Retry => "Retry",
         HotkeyAction::QuickAskHold => "QuickAskHold",
         HotkeyAction::QuickAskToggle => "QuickAskToggle",
+        HotkeyAction::ShowWindow => "ShowWindow",
+    }
+}
+
+#[cfg(all(test, desktop))]
+mod hotkey_action_tests {
+    use super::*;
+    #[test]
+    fn open_window_cards_round_trip_and_do_not_change_legacy_defaults() {
+        let card: HotkeyShortcutCard = serde_json::from_value(serde_json::json!({
+            "id": "open", "type": "show_window", "hotkey": { "modifiers": ["ctrl"], "key": "KeyK" }
+        }))
+        .unwrap();
+        assert_eq!(hotkey_action_label(card.kind), "ShowWindow");
+        validate_hotkey_shortcut_cards(std::slice::from_ref(&card)).unwrap();
+        let patch = build_hotkey_shortcuts_patch(std::slice::from_ref(&card)).unwrap();
+        assert_eq!(patch["hotkey_shortcuts"][0]["type"], "show_window");
+        assert!(patch["toggle_hotkey"].is_null());
     }
 }
 

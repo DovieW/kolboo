@@ -51,7 +51,7 @@ Hotkeys are now stored as **cards** in the store (`settings.json`):
 
 - `hotkey_shortcuts`: array of cards
   - `id`: stable ID for the UI
-  - `type`: action type (`toggle`, `hold`, `paste_last`, `retry`, `quick_ask_hold`, `quick_ask_toggle`)
+  - `type`: action type (`toggle`, `hold`, `paste_last`, `retry`, `quick_ask_hold`, `quick_ask_toggle`, `show_window`)
   - `hotkey`: `{ modifiers: string[], key: string } | null`
 
 Legacy keys are still written for backwards compatibility (older builds):
@@ -68,6 +68,18 @@ Legacy keys are still written for backwards compatibility (older builds):
 - **Invalid value** ⇒ treated as “use default” (or disabled in some registration paths).
 
 This “null means explicitly disabled” convention is relied on throughout the app.
+
+### Open Kolboo
+
+Add an **Open Kolboo** card in Settings → Shortcuts and choose a binding. This
+action is **unset by default**: it never takes an extra global key on upgrade.
+On key press it uses the shared main-window show/focus path; key release does
+nothing, and it does not start recording. It routes through the existing Windows,
+macOS/X11 and Wayland adapters (portal ID `show-window`, description `Open Kolboo`).
+Legacy shortcut records without this action remain valid.
+
+The common dispatch and native Linux window path have automated regression tests;
+Windows/macOS registration still needs platform smoke testing for new bindings.
 
 ---
 

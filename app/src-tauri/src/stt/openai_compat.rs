@@ -8,7 +8,7 @@
 use super::SttError;
 use crate::request_log::RequestLogStore;
 use reqwest::multipart;
-use serde_json::json;
+use serde_json::{json, Value as JsonValue};
 
 pub(super) fn normalize_optional_text(s: Option<&str>) -> Option<String> {
     let s = s.map(str::trim).filter(|v| !v.is_empty())?;
@@ -35,7 +35,15 @@ pub(super) fn wav_transcription_form(
     }
 
     if let Some(language) = normalize_optional_text(language) {
-        form = form.text("language", language);
+        // GPT Transcribe's multipart API uses a repeated array field, unlike
+        // older Whisper-compatible models. Custom OpenAI-compatible endpoints
+        // selecting this exact model ID use the same documented contract.
+        let field = if model == "gpt-transcribe" {
+            "languages[]"
+        } else {
+            "language"
+        };
+        form = form.text(field, language);
     }
 
     Ok(form)
@@ -62,7 +70,7 @@ where
     MapNetworkError: FnOnce(reqwest::Error) -> SttError,
 {
     if let Some(store) = request_log_store {
-        let request_json = json!({
+        let mut request_json = json!({
             "provider": provider,
             "endpoint": endpoint,
             "content_type": "multipart/form-data",
@@ -78,6 +86,20 @@ where
                 "data": "<binary audio omitted>",
             }
         });
+
+        if model == "gpt-transcribe" {
+            let fields = request_json["fields"]
+                .as_object_mut()
+                .expect("request fields object");
+            fields.remove("language");
+            fields.insert(
+                "languages".to_string(),
+                match language {
+                    Some(value) => json!([value]),
+                    None => JsonValue::Null,
+                },
+            );
+        }
 
         store.with_current(|log| {
             log.stt_request_json = Some(request_json);

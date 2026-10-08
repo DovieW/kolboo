@@ -3,7 +3,7 @@
 //! Supports three modes:
 //! - Legacy Whisper API (whisper-1) - uses /v1/audio/transcriptions
 //! - Audio chat models (e.g., gpt-4o-audio-preview) - uses /v1/responses with audio input
-//! - Realtime transcription (gpt-4o-realtime-transcribe, gpt-4o-mini-realtime-transcribe) -
+//! - Realtime transcription (gpt-live-transcribe and legacy gpt-4o realtime aliases) -
 //!   uses WebSocket wss://api.openai.com/v1/realtime for concurrent streaming.
 //!   These are separate model entries that map to OpenAI's transcription models
 //!   (gpt-4o-transcribe, gpt-4o-mini-transcribe) within the realtime session.
@@ -150,7 +150,8 @@ impl OpenAiSttProvider {
     ///
     /// Audio is resampled to 24 kHz (the only rate supported by the Realtime API),
     /// encoded as PCM s16le, and sent as `input_audio_buffer.append` events.
-    /// Server-side VAD detects speech turns and emits per-turn transcripts.
+    /// Legacy models use server VAD. GPT Live Transcribe uses a final client
+    /// commit when recording stops; server VAD is unsupported by that model.
     async fn start_streaming_session(
         &self,
         sample_rate: u32,

@@ -264,6 +264,7 @@ fn hotkey_action_label(action: HotkeyAction) -> &'static str {
         HotkeyAction::Retry => "Retry",
         HotkeyAction::QuickAskHold => "QuickAskHold",
         HotkeyAction::QuickAskToggle => "QuickAskToggle",
+        HotkeyAction::ShowWindow => "ShowWindow",
     }
 }
 
@@ -272,4 +273,24 @@ struct ShortcutRegistration {
     action: HotkeyAction,
     shortcut_str: String,
     shortcut: Shortcut,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn open_window_card_registers_as_a_regular_global_shortcut() {
+        let cards = vec![HotkeyShortcutCard {
+            id: "open".into(),
+            kind: HotkeyAction::ShowWindow,
+            hotkey: Some(HotkeyConfig {
+                modifiers: vec!["ctrl".into()],
+                key: "KeyK".into(),
+            }),
+        }];
+        let registrations = collect_global_shortcuts(&cards);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].action, HotkeyAction::ShowWindow);
+        assert_eq!(hotkey_action_label(registrations[0].action), "ShowWindow");
+    }
 }

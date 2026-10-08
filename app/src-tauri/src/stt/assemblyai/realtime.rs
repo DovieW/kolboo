@@ -127,37 +127,30 @@ pub(super) fn streaming_ws_url(
         AssemblyAiSttProvider::DEFAULT_STREAMING_WS_URL.to_string()
     };
 
-    let mut params = vec![
-        format!("sample_rate={}", sample_rate),
-        "encoding=pcm_s16le".to_string(),
-        "format_turns=true".to_string(),
-        // AssemblyAI requires the WS token in the query string. We still send the
-        // header too because some environments accept both and the old adapter did.
-        format!("token={}", provider.api_key),
-    ];
-
-    if let Some(lang) = &provider.language_code {
-        let streaming_lang = match lang.as_str() {
-            // Any English locale maps to `en` for the streaming API.
-            value if value.starts_with("en") => "en",
-            // Non-English explicit language on the multilingual model maps to `multi`.
-            _ if provider.model == "universal-streaming-multilingual" => "multi",
-            // The english-only model should simply rely on the server default for
-            // surprising non-English inputs instead of inventing a lossy mapping.
-            _ => "",
-        };
-        if !streaming_lang.is_empty() {
-            params.push(format!("language={}", streaming_lang));
+    let mut url = reqwest::Url::parse(&base)
+        .map_err(|_| SttError::Config("Invalid AssemblyAI streaming endpoint".to_string()))?;
+    {
+        let mut params = url.query_pairs_mut();
+        params.append_pair("sample_rate", &sample_rate.to_string());
+        params.append_pair("encoding", "pcm_s16le");
+        params.append_pair("speech_model", &provider.model);
+        // Raw API keys belong only in the Authorization header. The token query
+        // parameter is for temporary tokens, not the user's long-lived key.
+        if provider.model == "universal-3-6-pro" {
+            if let Some(language) = &provider.language_code {
+                let code = language.split(['_', '-']).next().unwrap_or(language);
+                params.append_pair("language_code", code);
+            }
+        } else {
+            // Legacy Universal Streaming emits a second formatted final. Wait
+            // for that final instead of committing its unformatted predecessor.
+            params.append_pair("format_turns", "true");
         }
-    } else if provider.model == "universal-streaming-english" {
-        params.push("language=en".to_string());
+        if provider.language_detection && provider.model != "universal-streaming-english" {
+            params.append_pair("language_detection", "true");
+        }
     }
-
-    if provider.language_detection {
-        params.push("language_detection=true".to_string());
-    }
-
-    Ok(format!("{}?{}", base, params.join("&")))
+    Ok(url.to_string())
 }
 
 pub(super) async fn start_streaming_session(
@@ -195,7 +188,7 @@ pub(super) async fn start_streaming_session(
     if let Some(store) = &request_log_store {
         let request_json = json!({
             "provider": "assemblyai",
-            "endpoint": redact_token_in_url(&ws_url),
+            "endpoint": ws_url,
             "content_type": "websocket-binary-streaming",
             "mode": "concurrent",
             "fields": {
@@ -321,15 +314,15 @@ async fn run_streaming_task(
                     Ok(Some(Message::Text(text))) => {
                         let value: JsonValue = serde_json::from_str(&text).map_err(|error| {
                             SttError::Api(format!(
-                                "AssemblyAI streaming: failed to parse JSON: {} (raw={})",
-                                error,
-                                text,
+                                "AssemblyAI streaming: invalid JSON at line {}, column {}",
+                                error.line(),
+                                error.column(),
                             ))
                         })?;
 
                         match parse_server_event(&value) {
-                            AssemblyAiServerEvent::Begin { id } => {
-                                log::info!("AssemblyAI streaming session started (id={})", id);
+                            AssemblyAiServerEvent::Begin { .. } => {
+                                log::info!("AssemblyAI streaming session started");
                             }
                             AssemblyAiServerEvent::Turn {
                                 transcript,
@@ -370,7 +363,7 @@ async fn run_streaming_task(
                         }
                     }
                     Ok(Some(Message::Close(frame))) => {
-                        log::warn!("AssemblyAI streaming: server sent Close frame {:?}", frame);
+                        log::warn!("AssemblyAI streaming: server closed session (code={:?})", frame.map(|value| value.code));
                         ws_done = true;
                     }
                     Ok(None) => {
@@ -435,17 +428,6 @@ async fn run_streaming_task(
     Ok(final_text)
 }
 
-fn redact_token_in_url(url: &str) -> String {
-    let Some(index) = url.find("token=") else {
-        return url.to_string();
-    };
-
-    let token_end = url[index..]
-        .find('&')
-        .map_or(url.len(), |offset| index + offset);
-    format!("{}token=REDACTED{}", &url[..index], &url[token_end..])
-}
-
 fn parse_server_event(value: &JsonValue) -> AssemblyAiServerEvent {
     let message_type = value
         .get("type")
@@ -470,7 +452,11 @@ fn parse_server_event(value: &JsonValue) -> AssemblyAiServerEvent {
             is_formatted: value
                 .get("turn_is_formatted")
                 .and_then(|is_formatted| is_formatted.as_bool())
-                .unwrap_or(false),
+                .unwrap_or(false)
+                && value
+                    .get("end_of_turn")
+                    .and_then(JsonValue::as_bool)
+                    .unwrap_or(false),
         },
         "Termination" => AssemblyAiServerEvent::Termination {
             audio_duration_seconds: value
@@ -504,6 +490,203 @@ mod tests {
     use super::*;
 
     #[test]
+    fn formatted_partial_is_not_a_final_turn() {
+        assert_eq!(
+            parse_server_event(&json!({
+                "type": "Turn", "transcript": "partial", "turn_is_formatted": true, "end_of_turn": false
+            })),
+            AssemblyAiServerEvent::Turn {
+                transcript: "partial".into(),
+                is_formatted: false
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn closed_stream_does_not_expose_close_reason() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::protocol::{frame::coding::CloseCode, CloseFrame};
+        for frame in [
+            None,
+            Some(CloseFrame {
+                code: CloseCode::Normal,
+                reason: "private-close-reason".into(),
+            }),
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+                while let Some(Ok(message)) = ws.next().await {
+                    if matches!(message, Message::Text(_)) {
+                        ws.send(Message::Close(frame)).await.unwrap();
+                        return;
+                    }
+                }
+            });
+            let provider = AssemblyAiSttProvider::new(
+                "synthetic-key".into(),
+                Some("universal-3-6-pro".into()),
+                None,
+            )
+            .with_api_base_url(format!("http://{addr}"));
+            assert_eq!(
+                start_streaming_session(&provider, 16000)
+                    .await
+                    .unwrap()
+                    .finalize()
+                    .await
+                    .unwrap(),
+                ""
+            );
+            server.await.unwrap();
+        }
+    }
+
+    #[test]
+    fn pro_streaming_pins_model_and_maps_existing_language_hints_without_secrets() {
+        for (language, expected) in [
+            (None, None),
+            (Some("en-US"), Some("en")),
+            (Some("he"), Some("he")),
+        ] {
+            let provider = AssemblyAiSttProvider::new(
+                "secret&key".to_string(),
+                Some("universal-3-6-pro".to_string()),
+                language.map(str::to_string),
+            );
+            let url = reqwest::Url::parse(&streaming_ws_url(&provider, 16000).unwrap()).unwrap();
+            let params = url
+                .query_pairs()
+                .collect::<std::collections::HashMap<_, _>>();
+            assert_eq!(
+                params.get("speech_model").map(|value| value.as_ref()),
+                Some("universal-3-6-pro")
+            );
+            assert_eq!(
+                params.get("language_code").map(|value| value.as_ref()),
+                expected
+            );
+            assert!(!params.contains_key("format_turns"));
+            assert!(!url.as_str().contains("secret"));
+        }
+        let invalid = AssemblyAiSttProvider::new("key".into(), None, None)
+            .with_api_base_url("not a URL".into());
+        assert!(matches!(
+            streaming_ws_url(&invalid, 16000),
+            Err(SttError::Config(_))
+        ));
+    }
+
+    #[tokio::test]
+    // The external WebSocket handshake callback fixes this large error type.
+    #[allow(clippy::result_large_err)]
+    async fn streaming_contract_authenticates_in_header_and_commits_formatted_turns_once() {
+        use futures_util::{SinkExt, StreamExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                    assert_eq!(request.headers()["authorization"], "synthetic-key");
+                    assert!(!request.uri().to_string().contains("synthetic-key"));
+                    assert!(request
+                        .uri()
+                        .to_string()
+                        .contains("speech_model=universal-3-6-pro"));
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            for event in [
+                json!({ "type": "Begin", "id": "synthetic-session" }),
+                json!({ "type": "Turn", "transcript": "first", "turn_is_formatted": false }),
+                json!({ "type": "Turn", "transcript": "first turn", "end_of_turn": true, "turn_is_formatted": false }),
+                json!({ "type": "Turn", "transcript": "First turn.", "end_of_turn": true, "turn_is_formatted": true }),
+                json!({ "type": "Turn", "transcript": "Second turn.", "end_of_turn": true, "turn_is_formatted": true }),
+            ] {
+                ws.send(Message::Text(event.to_string().into()))
+                    .await
+                    .unwrap();
+            }
+            let text = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            assert_eq!(
+                serde_json::from_str::<JsonValue>(&text).unwrap()["type"],
+                "Terminate"
+            );
+            ws.send(Message::Text(
+                json!({ "type": "Termination" }).to_string().into(),
+            ))
+            .await
+            .unwrap();
+        });
+        let store = RequestLogStore::new();
+        store.start_request("assemblyai".into(), Some("universal-3-6-pro".into()));
+        let provider = AssemblyAiSttProvider::new(
+            "synthetic-key".into(),
+            Some("universal-3-6-pro".into()),
+            None,
+        )
+        .with_request_log_store(Some(store.clone()))
+        .with_api_base_url(format!("http://{addr}"));
+        let mut session = start_streaming_session(&provider, 16000).await.unwrap();
+        let mut partials = session.take_partial_rx().unwrap();
+        let reader = tokio::spawn(async move {
+            let mut committed = Vec::new();
+            while let Some(partial) = partials.recv().await {
+                if let Some(text) = partial.committed_text {
+                    committed.push(text);
+                }
+            }
+            committed
+        });
+        assert_eq!(
+            session.finalize().await.unwrap(),
+            "First turn. Second turn."
+        );
+        assert_eq!(reader.await.unwrap(), ["First turn.", "Second turn."]);
+        let logs = store.get_logs(None);
+        let request = logs[0].stt_request_json.as_ref().unwrap();
+        assert!(!request.to_string().contains("synthetic-key"));
+        assert_eq!(request["fields"]["model"], "universal-3-6-pro");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_streaming_payload_does_not_leak_content_into_error() {
+        use futures_util::SinkExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.send(Message::Text("private-transcript-not-json".into()))
+                .await
+                .unwrap();
+        });
+        let provider = AssemblyAiSttProvider::new(
+            "synthetic-key".into(),
+            Some("universal-3-6-pro".into()),
+            None,
+        )
+        .with_api_base_url(format!("http://{addr}"));
+        let error = start_streaming_session(&provider, 16000)
+            .await
+            .unwrap()
+            .finalize()
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("invalid JSON"));
+        assert!(!error.contains("private-transcript"));
+        server.await.unwrap();
+    }
+
+    #[test]
     fn streaming_ws_url_english_no_language() {
         let provider = AssemblyAiSttProvider::new(
             "my-api-key".to_string(),
@@ -515,10 +698,12 @@ mod tests {
         assert!(url.contains("sample_rate=48000"));
         assert!(url.contains("encoding=pcm_s16le"));
         assert!(url.contains("format_turns=true"));
-        assert!(url.contains("token=my-api-key"));
-        assert!(url.contains("language=en"));
+        assert!(url.contains("speech_model=universal-streaming-english"));
+        assert!(!url.contains("my-api-key"));
+        assert!(!url.contains("token="));
+        assert!(!url.contains("language=en"));
         assert!(!url.contains("language=en_us"));
-        assert!(url.contains("language_detection=true"));
+        assert!(!url.contains("language_detection=true"));
     }
 
     #[test]
@@ -542,7 +727,7 @@ mod tests {
             Some("fr".to_string()),
         );
         let url = streaming_ws_url(&provider, 48000).expect("ws url");
-        assert!(url.contains("language=multi"));
+        assert!(!url.contains("language=multi"));
         assert!(!url.contains("language=fr"));
         assert!(!url.contains("language_detection=true"));
     }
@@ -575,7 +760,8 @@ mod tests {
             parse_server_event(&json!({
                 "type": "Turn",
                 "transcript": "hello world",
-                "turn_is_formatted": true
+                "turn_is_formatted": true,
+                "end_of_turn": true
             })),
             AssemblyAiServerEvent::Turn {
                 transcript: "hello world".to_string(),

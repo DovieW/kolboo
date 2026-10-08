@@ -2,6 +2,7 @@ import { API_KEYS } from "../../../lib/apiKeys";
 import {
 	managedChatModelOptions,
 	managedTranscriptionModelOptions,
+	retainSavedModelOption,
 	STT_MODELS,
 } from "../../../lib/modelOptions";
 import {
@@ -356,7 +357,7 @@ export function usePromptProviderOptions({
 		];
 	};
 
-	const sttModelOptions = effectiveSttProvider
+	const currentSttModelOptions = effectiveSttProvider
 		? managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? managedTranscriptionModelOptions(managedModels, effectiveSttProvider)
 			: (availableProviders?.stt
@@ -366,19 +367,40 @@ export function usePromptProviderOptions({
 				[])
 		: [];
 
-	const llmModelOptions = getLlmModelOptionsForProvider(effectiveLlmProvider);
-	const quickAskModelOptions = getLlmModelOptionsForProvider(
-		effectiveQuickAskProvider,
+	// Catalog refreshes must not blank out or silently replace a saved model.
+	// Managed-only availability remains authoritative; saved BYOK IDs are not
+	// permission to enable a model through the managed service.
+	const retainSaved =
+		managedAccessEnabled && !showAllProvidersAndModels
+			? (
+					options: Array<{ value: string; label: string }>,
+					_model: string | null,
+				) => options
+			: retainSavedModelOption;
+	const sttModelOptions = retainSaved(
+		currentSttModelOptions,
+		effectiveSttModel,
 	);
-	const quickReplaceModelOptions = getLlmModelOptionsForProvider(
-		effectiveQuickReplaceProvider,
+	const llmModelOptions = retainSaved(
+		getLlmModelOptionsForProvider(effectiveLlmProvider),
+		isDefaultScope ? (settings?.llm_model ?? null) : localProfileLlmModel,
+	);
+	const quickAskModelOptions = retainSaved(
+		getLlmModelOptionsForProvider(effectiveQuickAskProvider),
+		effectiveQuickAskModel,
+	);
+	const quickReplaceModelOptions = retainSaved(
+		getLlmModelOptionsForProvider(effectiveQuickReplaceProvider),
+		isDefaultScope
+			? (localProfileQuickReplaceModel ?? settings?.llm_model ?? null)
+			: localProfileQuickReplaceModel,
 	);
 
 	const selectedSttModelForUi =
 		sttModelOptions.length === 0
 			? null
 			: isDefaultScope
-				? (settings?.stt_model ?? sttModelOptions[0]?.value ?? null)
+				? (settings?.stt_model ?? null)
 				: localProfileSttModel;
 
 	const selectedQuickAskModelForUi =
@@ -389,7 +411,6 @@ export function usePromptProviderOptions({
 					(effectiveQuickAskProvider === effectiveLlmProvider
 						? settings?.llm_model
 						: null) ??
-					quickAskModelOptions[0]?.value ??
 					null)
 				: localProfileQuickAskModel;
 
@@ -401,7 +422,6 @@ export function usePromptProviderOptions({
 					(effectiveQuickReplaceProvider === effectiveLlmProvider
 						? settings?.llm_model
 						: null) ??
-					quickReplaceModelOptions[0]?.value ??
 					null)
 				: localProfileQuickReplaceModel;
 
@@ -416,7 +436,7 @@ export function usePromptProviderOptions({
 		llmModelOptions.length === 0
 			? null
 			: isDefaultScope
-				? (settings?.llm_model ?? llmModelOptions[0]?.value ?? null)
+				? (settings?.llm_model ?? null)
 				: localProfileLlmModel;
 
 	return {

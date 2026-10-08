@@ -6,7 +6,7 @@
 //! Implementation notes:
 //! - Uses the OpenAI-compatible `POST /audio/transcriptions` endpoint.
 //! - Auth is via `Authorization: Bearer <api_key>`.
-//! - Model defaults to `avalon-v1-en`.
+//! - Model defaults to `avalon-v1.5`; explicit legacy selections are preserved.
 
 use super::http;
 use super::language;
@@ -28,19 +28,16 @@ pub struct AquavoiceSttProvider {
 }
 
 impl AquavoiceSttProvider {
-    // Primary Aquovoice Avalon API base URL.
-    // Observed working endpoint:
-    //   https://api.aquavoice.com/api/v1/audio/transcriptions
-    const DEFAULT_BASE_URL: &'static str = "https://api.aquavoice.com/api/v1";
-    // NOTE: The dashboard API uses `avalon-v1-en` style model identifiers.
-    const DEFAULT_MODEL: &'static str = "avalon-v1-en";
+    // Current public API: https://aquavoice.com/docs/api
+    const DEFAULT_BASE_URL: &'static str = "https://api.aquavoice.com/v1";
+    const DEFAULT_MODEL: &'static str = "avalon-v1.5";
     const PROMPT_MAX_CHARS: usize = 224;
 
     /// Create a new Aquavoice STT provider.
     ///
     /// # Arguments
     /// * `api_key` - Aquavoice API key
-    /// * `model` - Model to use (default: `avalon-v1-en`)
+    /// * `model` - Model to use (default: `avalon-v1.5`)
     /// * `default_prompt` - Optional transcription prompt (OpenAI-compatible `prompt` field)
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
@@ -82,7 +79,7 @@ impl AquavoiceSttProvider {
         }
     }
 
-    /// Override the API base URL (defaults to https://api.aquavoice.com/api/v1).
+    /// Override the API base URL (defaults to https://api.aquavoice.com/v1).
     ///
     /// This is primarily intended for deterministic contract tests (e.g., Wiremock).
     #[cfg_attr(not(test), allow(dead_code))]

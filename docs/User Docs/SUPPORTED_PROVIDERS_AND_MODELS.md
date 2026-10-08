@@ -9,8 +9,18 @@ Source of truth:
 
 Notes:
 
-- Some providers support **dynamic model discovery** (e.g. Ollama, Local Whisper). Those do not have a fixed list here.
-- “Supported” here means “wired up end-to-end and selectable in Settings” (not “every possible upstream model string”).
+- Ollama discovers installed models. BYOK language-model discovery merges its
+  results with the bundled catalog; an unavailable discovery service does not
+  remove bundled choices. Local Whisper remains paused in normal builds.
+- “Supported” here means implemented and selectable, not that every model has
+  been tested against a paid vendor account. Account access and preview availability
+  still depend on the vendor. Catalog review: **2026-10-08**.
+- Saved model IDs remain visible as saved selections when a catalog changes.
+  This does not guarantee a retired upstream model still works, and never switches
+  the request to another provider. An unset model displays **Provider default**,
+  not the first catalog entry. Explicitly selecting a new provider/model saves it.
+- New models without a verified cost estimate show unknown pricing, not free
+  usage. Live discovery can supply pricing; it is an estimate, not your invoice.
 - For users with Managed access, Settings initially filters these lists to the
   models returned by the authenticated Managed catalog. The full lists remain
   available through **Show all providers and models** for BYOK/local use.
@@ -49,15 +59,22 @@ For a Managed account, enable **Show all providers and models** to select them.
 
 ### `openai` (OpenAI)
 
+- `gpt-transcribe` — GPT Transcribe _(file transcription)_
+- `gpt-live-transcribe` — GPT Live Transcribe _(realtime only)_
 - `gpt-4o-realtime-transcribe` — GPT-4o Realtime Transcribe _(realtime streaming)_
 - `gpt-4o-mini-realtime-transcribe` — GPT-4o Mini Realtime Transcribe _(realtime streaming)_
 - `gpt-4o-transcribe` — GPT-4o Transcribe
 - `gpt-4o-mini-transcribe` — GPT-4o Mini Transcribe
-- `whisper-1` — Whisper-1 _(realtime streaming)_
+- `gpt-4o-transcribe-diarize` — GPT-4o Transcribe with speaker labels
+- `whisper-1` — Whisper-1 _(file transcription)_
 
 ### `aquavoice` (Aquavoice)
 
-- `avalon-v1-en` — Avalon v1
+- `avalon-v1.5` — Avalon v1.5 (new default; API base `https://api.aquavoice.com/v1`)
+- `avalon-v1-en` — Avalon v1 (legacy saved selections remain supported)
+
+The Avalon v1.5 estimate uses $0.39/audio hour with the documented ten-second
+minimum for non-empty audio. It does not invent an unpublished rounding increment.
 
 ### `groq` (Groq)
 
@@ -66,9 +83,17 @@ For a Managed account, enable **Show all providers and models** to select them.
 
 ### `assemblyai` (AssemblyAI)
 
-- `universal` — Universal
-- `slam-1` — Slam-1
-- `best` — Best (Legacy)
+- `universal-3-6-pro` — Universal 3.6 Pro _(realtime; 32 languages)_
+- `universal-3-5-pro` — Universal 3.5 Pro _(file transcription; 18 languages)_
+- `universal-2` — Universal 2 _(file transcription; 99 languages)_
+- `universal-streaming-english` — Universal Streaming English _(realtime)_
+- `universal-streaming-multilingual` — Universal Streaming Multilingual _(realtime)_
+- `universal` — legacy server-default alias (unchanged for existing defaults)
+
+`slam-1` and `best` are no longer offered to new selections; saved IDs are not
+rewritten. Sync, Dictation and Universal 3.5 realtime are separate integration work,
+not enabled by adding a file-transcription model ID. Existing language hints are
+preserved; no additional language picker was added.
 
 ### `speechmatics` (Speechmatics)
 
@@ -85,12 +110,23 @@ For a Managed account, enable **Show all providers and models** to select them.
 
 ### `whisper` (Local Whisper)
 
-- No fixed list here (models are managed locally; the Settings picker does not enumerate Whisper models from `modelOptions.ts`).
+- Paused/absent in normal builds; not reintroduced by this catalog refresh.
+
+### `whisper-server` (Whisper-compatible server)
+
+- `whisper-1` — conservative default; configured server models may differ.
 
 ### `elevenlabs` (ElevenLabs)
 
 - `scribe_v2` — Scribe v2 _(realtime streaming)_
 - `scribe_v1` — Scribe v1
+
+### Fireworks audio (retired upstream)
+
+Fireworks deprecated audio inference on June 10, 2026. It is no longer offered
+as a new STT provider. The legacy adapter remains for saved configurations/history;
+retaining it does not promise the upstream endpoint still operates. Fireworks LLM
+support remains available.
 
 ---
 
@@ -98,16 +134,14 @@ For a Managed account, enable **Show all providers and models** to select them.
 
 ### `cerebras` (Cerebras)
 
-- `llama-3.3-70b` — Llama 3.3 70B
-- `llama3.1-8b` — Llama 3.1 8B
+- `qwen-3.8-27b` — Qwen 3.8 27B
 - `gpt-oss-120b` — GPT-OSS 120B
-- `qwen-3-32b` — Qwen 3 32B
-- `qwen-3-235b-a22b-instruct-2507` — Qwen 3 235B Instruct (Preview)
-- `zai-glm-4.7` — GLM 4.7 (Preview)
-- `zai-glm-4.6` — GLM 4.6 (Preview)
 
 ### `openai` (OpenAI, LLM)
 
+- `gpt-6.1-sol` — GPT-6.1 Sol
+- `gpt-6-astra` — GPT-6 Astra
+- `gpt-6-luna` — GPT-6 Luna
 - `gpt-5.2` — GPT-5.2
 - `gpt-5.1` — GPT-5.1
 - `gpt-5` — GPT-5
@@ -116,10 +150,18 @@ For a Managed account, enable **Show all providers and models** to select them.
 - `gpt-4.1` — GPT-4.1
 - `gpt-4.1-mini` — GPT-4.1 Mini
 - `gpt-4.1-nano` — GPT-4.1 Nano
+- `gpt-4o-mini` — GPT-4o Mini (unchanged backend default)
+
+Reasoning options are model-specific. GPT-6 Astra does not offer `none`;
+temperature is sent to GPT-6 only with supported, explicitly selected `none`.
 
 ### `gemini` (Google AI Studio)
 
-- `models/gemini-3-pro-preview` — Gemini 3 Pro (Preview)
+- `gemini-3.8-flash` — Gemini 3.8 Flash
+- `gemini-3.7-flash` — Gemini 3.7 Flash
+- `gemini-3.6-flash` — Gemini 3.6 Flash
+- `gemini-3.5-flash-lite` — Gemini 3.5 Flash-Lite
+- `gemini-3.1-pro-preview` — Gemini 3.1 Pro (Preview)
 - `models/gemini-3-flash-preview` — Gemini 3 Flash (Preview)
 - `gemini-2.5-pro` — Gemini 2.5 Pro
 - `gemini-2.5-flash` — Gemini 2.5 Flash
@@ -127,20 +169,71 @@ For a Managed account, enable **Show all providers and models** to select them.
 
 ### `anthropic` (Anthropic)
 
+- `claude-fable-5-1` — Claude Fable 5.1
+- `claude-opus-5-5` — Claude Opus 5.5
+- `claude-sonnet-5-5` — Claude Sonnet 5.5
+- `claude-haiku-5-5` — Claude Haiku 5.5
 - `claude-sonnet-4-5` — Claude Sonnet 4.5
 - `claude-haiku-4-5` — Claude Haiku 4.5
 - `claude-opus-4-5` — Claude Opus 4.5
-- `claude-3-5-haiku-latest` — Claude 3.5 Haiku
-- `claude-3-5-sonnet-latest` — Claude 3.5 Sonnet
-- `claude-3-opus-latest` — Claude 3 Opus
+
+The obsolete manual thinking-budget control is not offered for Claude 5.x;
+saved older budget values are not sent to those models.
 
 ### `groq` (Groq, LLM)
 
-- `llama-3.3-70b-versatile` — Llama 3.3 70B Versatile
-- `llama-3.1-8b-instant` — Llama 3.1 8B Instant
 - `openai/gpt-oss-120b` — GPT-OSS 120B
 - `openai/gpt-oss-20b` — GPT-OSS 20B
+- `qwen/qwen3.8-27b` — Qwen 3.8 27B (Preview)
+- `llama-3.3-70b-versatile` — Llama 3.3 70B (Enterprise access)
+- `llama-3.1-8b-instant` — Llama 3.1 8B (Enterprise access)
+
+### `fireworks` (Fireworks, LLM)
+
+- `accounts/fireworks/models/deepseek-v4p1-flash` — DeepSeek V4.1 Flash
+- `accounts/fireworks/models/glm-5p3` — GLM 5.3
+- `accounts/fireworks/models/kimi-k3` — Kimi K3
+- `accounts/fireworks/models/llama-v3p1-8b-instruct` — Llama 3.1 8B
+- `accounts/fireworks/models/llama-v3p1-70b-instruct` — Llama 3.1 70B
+
+### `cohere` (Cohere)
+
+- `command-a-plus-05-2026` — Command A+
+- `command-a-03-2025` — Command A
+- `command-r-plus-08-2024` — Command R+
+- `command-r-08-2024` — Command R
 
 ### `ollama` (Ollama)
 
 - No fixed list here (models are discovered from what you have installed in Ollama).
+
+## Defaults and catalog scope
+
+An explicit saved ID is never migrated just because a newer model exists.
+For an unset LLM model, backend defaults are: Cerebras `gpt-oss-120b`, OpenAI
+`gpt-4o-mini`, Gemini `gemini-3.5-flash-lite`, Anthropic `claude-haiku-5-5`,
+Groq `openai/gpt-oss-20b`, Fireworks `accounts/fireworks/models/llama-v3p1-8b-instruct`,
+and Cohere `command-r-08-2024`. Managed availability remains server-authoritative;
+this BYOK catalog does not grant service access or transmit managed credentials.
+
+## Upstream references
+
+- [AssemblyAI streaming models](https://www.assemblyai.com/docs/streaming/select-the-speech-model)
+  and [file models](https://www.assemblyai.com/docs/pre-recorded-audio/select-the-speech-model).
+- [OpenAI models](https://developers.openai.com/api/docs/models) and
+  [Realtime transcription](https://developers.openai.com/api/docs/guides/realtime-transcription).
+- [Gemini models](https://ai.google.dev/gemini-api/docs/models) and
+  [thinking options](https://ai.google.dev/gemini-api/docs/thinking).
+- [Claude models](https://platform.claude.com/docs/en/models/overview).
+- [Cerebras models](https://inference-docs.cerebras.ai/models/overview),
+  [Groq models](https://console.groq.com/docs/models), and
+  [Cohere models](https://docs.cohere.com/docs/models).
+- [Fireworks recommended models](https://docs.fireworks.ai/guides/recommended-models)
+  and [audio deprecation](https://docs.fireworks.ai/updates/changelog).
+- [Aquavoice API](https://aquavoice.com/docs/api).
+
+## OCR context label
+
+Rewrite, Quick Ask and Quick Replace label automatic active-window OCR as
+**Always**. This is a wording correction: the stored value remains `auto`, existing
+settings are unchanged, and no additional screen capture is enabled on upgrade.

@@ -191,6 +191,7 @@ pub enum HotkeyAction {
     Retry,
     QuickAskHold,
     QuickAskToggle,
+    ShowWindow,
 }
 
 /// Card-based hotkey entry (stored in settings.json).

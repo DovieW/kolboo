@@ -3,15 +3,16 @@
 //! Supports both batch (pre-recorded) and real-time streaming transcription:
 //!
 //! **Batch** (upload → submit → poll):
-//! - Models: "universal" (default), "slam-1", "best" (legacy)
+//! - Models: "universal-3-5-pro", "universal-2", "universal" (legacy default)
 //! - Upload to `/v2/upload`, submit to `/v2/transcript`, poll until done.
 //!
 //! **Streaming** (WebSocket):
-//! - Models: "universal-streaming-english", "universal-streaming-multilingual"
+//! - Models: "universal-3-6-pro", "universal-streaming-english",
+//!   "universal-streaming-multilingual"
 //! - Endpoint: `wss://streaming.assemblyai.com/v3/ws`
 //! - Audio: PCM 16-bit LE, mono at capture sample rate (`encoding=pcm_s16le`)
 //! - Protocol: binary audio frames → Turn messages with `turn_is_formatted`
-//!   flag for live-output commits. Send `{"type": "Terminate"}` to end session.
+//!   and `end_of_turn` flags for commits. Send `{"type": "Terminate"}` to end session.
 //!
 //! Docs:
 //! - <https://www.assemblyai.com/docs/api-reference/files/upload>
@@ -73,6 +74,7 @@ pub struct AssemblyAiSttProvider {
 
 /// Models that use the real-time WebSocket streaming API.
 const STREAMING_MODELS: &[&str] = &[
+    "universal-3-6-pro",
     "universal-streaming-english",
     "universal-streaming-multilingual",
 ];
@@ -89,10 +91,9 @@ impl AssemblyAiSttProvider {
 
     /// Create a new AssemblyAI provider.
     ///
-    /// Supported models (per API docs):
-    /// - "universal" (default)
-    /// - "slam-1"
-    /// - "best" (legacy)
+    /// Use the explicit selected model, or retain the legacy "universal" default.
+    /// The selectable batch/realtime catalog is documented above; previously saved
+    /// identifiers are forwarded without silently changing model/provider.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(api_key: String, model: Option<String>, language: Option<String>) -> Self {
         let client = crate::network::build_plain_http_client_with_timeout(Duration::from_secs(120));
@@ -451,6 +452,18 @@ mod tests {
 
     #[test]
     fn test_streaming_model_detection() {
+        let pro = AssemblyAiSttProvider::new(
+            "key".to_string(),
+            Some("universal-3-6-pro".to_string()),
+            None,
+        );
+        assert!(pro.supports_streaming());
+        assert!(pro.requires_streaming());
+        for model in ["universal-3-5-pro", "universal-2"] {
+            let batch =
+                AssemblyAiSttProvider::new("key".to_string(), Some(model.to_string()), None);
+            assert!(!batch.requires_streaming());
+        }
         let batch =
             AssemblyAiSttProvider::new("key".to_string(), Some("universal".to_string()), None);
         assert!(!batch.is_streaming_model());

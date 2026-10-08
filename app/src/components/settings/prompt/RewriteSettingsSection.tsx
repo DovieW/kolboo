@@ -265,7 +265,7 @@ export function RewriteSettingsSection({
 								<Select
 									data={[
 										{ value: "off", label: "Off" },
-										{ value: "auto", label: "Auto" },
+										{ value: "auto", label: "Always" },
 										{ value: "manual", label: "Manual" },
 									]}
 									value={localProfileRewriteActiveWindowOcrMode}
@@ -362,13 +362,11 @@ export function RewriteSettingsSection({
 									data={llmModelOptions}
 									value={
 										isDefaultScope
-											? (settings?.llm_model ??
-												llmModelOptions[0]?.value ??
-												null)
+											? (settings?.llm_model ?? null)
 											: localProfileLlmModel
 									}
 									onChange={onLlmModelChange}
-									placeholder="Select model"
+									placeholder="Provider default"
 									withCheckIcon={false}
 									styles={{
 										input: {

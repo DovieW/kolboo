@@ -117,6 +117,66 @@ fn native_window_manager_integration() {
     pump("initial fractional-DPI size", &mut app, &|_| {
         window.inner_size().unwrap() == PhysicalSize::new(2240, 1400)
     });
+    // Exercise the actual cross-platform shortcut dispatcher, including saved
+    // card decoding and release-only events. No real desktop key is registered.
+    {
+        use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
+        let settings = app.store("settings.json").unwrap();
+        let card = crate::settings::HotkeyShortcutCard {
+            id: "open-window-test".into(),
+            kind: crate::settings::HotkeyAction::ShowWindow,
+            hotkey: Some(crate::settings::HotkeyConfig {
+                modifiers: vec!["ctrl".into(), "alt".into()],
+                key: "KeyK".into(),
+            }),
+        };
+        settings.set("hotkey_shortcuts", serde_json::json!([card]));
+        let shortcut: Shortcut = "Ctrl+Alt+KeyK".parse().unwrap();
+        window.hide().unwrap();
+        pump("hide before open shortcut", &mut app, &|_| {
+            !window.is_visible().unwrap()
+        });
+        crate::shortcuts::handle_shortcut_event(
+            app.handle(),
+            &shortcut,
+            &ShortcutEvent {
+                id: shortcut.id(),
+                state: ShortcutState::Released,
+            },
+        );
+        assert!(
+            !window.is_visible().unwrap(),
+            "release must not open a window"
+        );
+        crate::shortcuts::handle_shortcut_event(
+            app.handle(),
+            &shortcut,
+            &ShortcutEvent {
+                id: shortcut.id(),
+                state: ShortcutState::Pressed,
+            },
+        );
+        pump("open via saved shortcut", &mut app, &|_| {
+            window.is_visible().unwrap()
+        });
+        assert!(!app
+            .state::<AppState>()
+            .is_recording
+            .load(std::sync::atomic::Ordering::SeqCst));
+        app.state::<AppState>()
+            .paste_key_held
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::shortcuts::handle_hotkey_action_event(
+            app.handle(),
+            crate::settings::HotkeyAction::PasteLast,
+            false,
+        );
+        assert!(!app
+            .state::<AppState>()
+            .paste_key_held
+            .load(std::sync::atomic::Ordering::SeqCst));
+        settings.delete("hotkey_shortcuts");
+    }
     native_overlay_startup_overlap(&mut app);
     window
         .set_size(tauri::Size::Physical(PhysicalSize::new(1925, 1225)))

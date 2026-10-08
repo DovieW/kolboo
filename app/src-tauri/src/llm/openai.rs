@@ -127,13 +127,16 @@ impl OpenAiLlmProvider {
         // We keep a conservative allowlist to avoid 400s on unsupported models.
         //
         // Docs: https://platform.openai.com/docs/guides/structured-outputs
-        model.starts_with("gpt-4.1") || model.starts_with("gpt-4o") || model.starts_with("gpt-5")
+        model.starts_with("gpt-4.1")
+            || model.starts_with("gpt-4o")
+            || model.starts_with("gpt-5")
+            || model.starts_with("gpt-6")
     }
 
     fn supports_reasoning_effort(model: &str) -> bool {
-        // OpenAI docs: "gpt-5 and o-series models only".
+        // GPT-5/6 and o-series models support model-specific reasoning effort.
         // We treat any model starting with "o" as o-series.
-        model.starts_with("gpt-5") || model.starts_with('o')
+        model.starts_with("gpt-5") || model.starts_with("gpt-6") || model.starts_with('o')
     }
 
     fn allowed_reasoning_efforts(model: &str) -> &'static [&'static str] {
@@ -141,7 +144,11 @@ impl OpenAiLlmProvider {
         // - gpt-5.1 supports: none, low, medium, high
         // - models before gpt-5.1 do not support `none`
         // We keep this conservative so users don't hit 400s.
-        if model.starts_with("gpt-5.1") || model.starts_with("gpt-5.2") {
+        if model.starts_with("gpt-6-luna") || model.starts_with("gpt-6-sol") {
+            &["none", "low", "medium", "high", "xhigh", "max"]
+        } else if model.starts_with("gpt-6") {
+            &["low", "medium", "high", "xhigh", "max"]
+        } else if model.starts_with("gpt-5.1") || model.starts_with("gpt-5.2") {
             &["none", "low", "medium", "high"]
         } else if model.starts_with("gpt-5") {
             &["low", "medium", "high"]
@@ -178,6 +185,11 @@ impl OpenAiLlmProvider {
     }
 
     fn supports_temperature_param(model: &str, reasoning_effort: Option<&str>) -> bool {
+        // GPT-6 defaults to reasoning; sampling controls are valid only with
+        // explicitly disabled reasoning on variants that allow it.
+        if model.starts_with("gpt-6") {
+            return reasoning_effort == Some("none");
+        }
         // Docs (GPT-5.2 parameter compatibility):
         // - temperature/top_p/logprobs only supported when reasoning effort is `none`
         //   for gpt-5.2 and gpt-5.1

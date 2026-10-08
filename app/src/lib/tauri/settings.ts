@@ -169,7 +169,7 @@ function normalizeHotkeyShortcutCards(
 function buildShortcutCardsFromLegacy(
 	legacy: LegacyHotkeySettings,
 ): HotkeyShortcutCard[] {
-	const byType: Record<HotkeyType, HotkeyConfig | null> = {
+	const byType: Partial<Record<HotkeyType, HotkeyConfig | null>> = {
 		toggle: legacy.toggle_hotkey,
 		hold: legacy.hold_hotkey,
 		paste_last: legacy.paste_last_hotkey,

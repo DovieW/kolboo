@@ -551,6 +551,7 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
         HotkeyAction::Retry,
         HotkeyAction::QuickAskHold,
         HotkeyAction::QuickAskToggle,
+        HotkeyAction::ShowWindow,
     ]
     .into_iter()
     .find(|action| matches_action(*action));
@@ -571,6 +572,12 @@ pub fn handle_shortcut_event(app: &AppHandle, shortcut: &Shortcut, event: &Short
 /// prevents the platform adapters from drifting.
 #[cfg(desktop)]
 pub(crate) fn handle_hotkey_action_event(app: &AppHandle, action: HotkeyAction, is_down: bool) {
+    if action == HotkeyAction::ShowWindow {
+        if is_down {
+            crate::bootstrap::show_main_window(app, "Open Kolboo shortcut", None);
+        }
+        return;
+    }
     let state = app.state::<AppState>();
     let sound_enabled: bool = get_setting_from_store(app, "sound_enabled", true);
     let audio_cue_raw: String = get_setting_from_store(app, "audio_cue", "kolboo".to_string());
@@ -645,6 +652,13 @@ pub(crate) fn handle_modifier_key_event(
     let hotkey_debug = crate::windows_modifier_hotkeys::hotkey_debug_runtime_enabled();
 
     let cards = get_hotkey_cards_from_store(app);
+    if cards
+        .iter()
+        .any(|card| card.kind == HotkeyAction::ShowWindow && card_matches_modifier_only(card, key))
+    {
+        handle_hotkey_action_event(app, HotkeyAction::ShowWindow, is_down);
+        return;
+    }
     let is_toggle = cards
         .iter()
         .any(|card| card.kind == HotkeyAction::Toggle && card_matches_modifier_only(card, key));

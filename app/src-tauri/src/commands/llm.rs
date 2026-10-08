@@ -191,22 +191,18 @@ fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
             id: "cerebras".to_string(),
             name: "Cerebras".to_string(),
             requires_api_key: true,
-            default_model: "llama-3.3-70b".to_string(),
-            models: vec![
-                "llama-3.3-70b".to_string(),
-                "llama3.1-8b".to_string(),
-                "gpt-oss-120b".to_string(),
-                "qwen-3-32b".to_string(),
-                "qwen-3-235b-a22b-instruct-2507".to_string(),
-                "zai-glm-4.6".to_string(),
-            ],
+            default_model: "gpt-oss-120b".to_string(),
+            models: vec!["qwen-3.8-27b".to_string(), "gpt-oss-120b".to_string()],
         },
         LlmProviderInfo {
             id: "openai".to_string(),
             name: "OpenAI".to_string(),
             requires_api_key: true,
-            default_model: "gpt-5".to_string(),
+            default_model: "gpt-4o-mini".to_string(),
             models: vec![
+                "gpt-6.1-sol".to_string(),
+                "gpt-6-astra".to_string(),
+                "gpt-6-luna".to_string(),
                 "gpt-5.2".to_string(),
                 "gpt-5.1".to_string(),
                 "gpt-5".to_string(),
@@ -215,21 +211,20 @@ fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
                 "gpt-4.1".to_string(),
                 "gpt-4.1-mini".to_string(),
                 "gpt-4.1-nano".to_string(),
-                // Older models kept for backwards compatibility.
                 "gpt-4o-mini".to_string(),
-                "gpt-4o".to_string(),
-                "gpt-4-turbo".to_string(),
-                "gpt-3.5-turbo".to_string(),
             ],
         },
         LlmProviderInfo {
             id: "gemini".to_string(),
             name: "Google AI Studio".to_string(),
             requires_api_key: true,
-            default_model: "gemini-2.5-flash".to_string(),
+            default_model: "gemini-3.5-flash-lite".to_string(),
             models: vec![
-                // Gemini 3 (preview) - uses full model path IDs
-                "models/gemini-3-pro-preview".to_string(),
+                "gemini-3.8-flash".to_string(),
+                "gemini-3.7-flash".to_string(),
+                "gemini-3.6-flash".to_string(),
+                "gemini-3.5-flash-lite".to_string(),
+                "gemini-3.1-pro-preview".to_string(),
                 "models/gemini-3-flash-preview".to_string(),
                 // Gemini 2.5 (stable)
                 "gemini-2.5-pro".to_string(),
@@ -241,27 +236,28 @@ fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
             id: "anthropic".to_string(),
             name: "Anthropic".to_string(),
             requires_api_key: true,
-            default_model: "claude-3-haiku-20240307".to_string(),
+            default_model: "claude-haiku-5-5".to_string(),
             models: vec![
+                "claude-fable-5-1".to_string(),
+                "claude-opus-5-5".to_string(),
+                "claude-sonnet-5-5".to_string(),
+                "claude-haiku-5-5".to_string(),
                 "claude-sonnet-4-5".to_string(),
                 "claude-haiku-4-5".to_string(),
                 "claude-opus-4-5".to_string(),
-                "claude-3-haiku-20240307".to_string(),
-                "claude-3-sonnet-20240229".to_string(),
-                "claude-3-opus-20240229".to_string(),
-                "claude-3-5-sonnet-20241022".to_string(),
             ],
         },
         LlmProviderInfo {
             id: "groq".to_string(),
             name: "Groq".to_string(),
             requires_api_key: true,
-            default_model: "llama-3.3-70b-versatile".to_string(),
+            default_model: "openai/gpt-oss-20b".to_string(),
             models: vec![
                 "llama-3.3-70b-versatile".to_string(),
                 "llama-3.1-8b-instant".to_string(),
                 "openai/gpt-oss-120b".to_string(),
                 "openai/gpt-oss-20b".to_string(),
+                "qwen/qwen3.8-27b".to_string(),
             ],
         },
         LlmProviderInfo {
@@ -270,6 +266,7 @@ fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
             requires_api_key: true,
             default_model: "command-r-08-2024".to_string(),
             models: vec![
+                "command-a-plus-05-2026".to_string(),
                 "command-a-03-2025".to_string(),
                 "command-r-plus-08-2024".to_string(),
                 "command-r-08-2024".to_string(),
@@ -283,6 +280,9 @@ fn builtin_llm_providers() -> Vec<LlmProviderInfo> {
             // Keep this list short here; the Settings UI fetches the full catalog via
             // `fireworks_list_models`.
             models: vec![
+                "accounts/fireworks/models/deepseek-v4p1-flash".to_string(),
+                "accounts/fireworks/models/glm-5p3".to_string(),
+                "accounts/fireworks/models/kimi-k3".to_string(),
                 "accounts/fireworks/models/llama-v3p1-8b-instruct".to_string(),
                 "accounts/fireworks/models/llama-v3p1-70b-instruct".to_string(),
             ],
@@ -964,6 +964,25 @@ fn get_current_pipeline_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_catalog_defaults_match_runtime_and_are_selectable() {
+        for provider in builtin_llm_providers() {
+            assert_eq!(
+                Some(provider.default_model.as_str()),
+                crate::llm::default_llm_model_for_provider(&provider.id)
+            );
+            assert!(provider.models.contains(&provider.default_model));
+            assert_eq!(
+                provider
+                    .models
+                    .iter()
+                    .collect::<std::collections::HashSet<_>>()
+                    .len(),
+                provider.models.len()
+            );
+        }
+    }
 
     #[test]
     fn test_get_llm_providers() {

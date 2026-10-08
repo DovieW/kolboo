@@ -13,6 +13,20 @@ export type ModelOption = {
 
 export type ManagedModelByokTarget = { provider: string; model: string };
 
+/** Keep an explicitly saved ID visible when discovery or the bundled list changes. */
+export function retainSavedModelOption(
+	options: ModelOption[],
+	model: string | null,
+): ModelOption[] {
+	if (
+		!model ||
+		options.length === 0 ||
+		options.some((option) => option.value === model)
+	)
+		return options;
+	return [...options, { value: model, label: `${model} (saved selection)` }];
+}
+
 // Recognized model identifiers for privacy-safe analytics. This list is not
 // authority to enable managed models; availability comes only from API Edge.
 export const BUNDLED_MANAGED_MODELS: ManagedModel[] = [
@@ -145,8 +159,17 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
 // This is intentionally shared between Settings pickers and History filters so
 // they always list the same models.
 export const STT_MODELS: Record<string, ModelOption[]> = {
-	aquavoice: [{ value: "avalon-v1-en", label: "Avalon v1" }],
+	aquavoice: [
+		{ value: "avalon-v1.5", label: "Avalon v1.5" },
+		{ value: "avalon-v1-en", label: "Avalon v1 (legacy)" },
+	],
 	assemblyai: [
+		{
+			value: "universal-3-6-pro",
+			label: "Universal 3.6 Pro (Realtime · 32 languages)",
+		},
+		{ value: "universal-3-5-pro", label: "Universal 3.5 Pro (18 languages)" },
+		{ value: "universal-2", label: "Universal 2 (99 languages)" },
 		{
 			value: "universal-streaming-english",
 			label: "Universal Streaming English (Realtime)",
@@ -155,9 +178,7 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 			value: "universal-streaming-multilingual",
 			label: "Universal Streaming Multilingual (Realtime)",
 		},
-		{ value: "universal", label: "Universal" },
-		{ value: "slam-1", label: "Slam-1" },
-		{ value: "best", label: "Best (Legacy)" },
+		{ value: "universal", label: "Universal (server default · legacy alias)" },
 	],
 	elevenlabs: [
 		{ value: "scribe_v2", label: "Scribe v2" },
@@ -167,17 +188,9 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 		{ value: "whisper-large-v3-turbo", label: "Whisper Large V3 Turbo" },
 		{ value: "whisper-large-v3", label: "Whisper Large V3" },
 	],
-	fireworks: [
-		{ value: "fireworks-asr-v2", label: "ASR v2 (Realtime)" },
-		{ value: "fireworks-asr-large", label: "ASR Large (Realtime)" },
-		{ value: "whisper-v3", label: "Whisper v3" },
-		{ value: "whisper-v3-turbo", label: "Whisper v3 Turbo" },
-	],
 	openai: [
-		// { value: "gpt-audio", label: "GPT Audio" },
-		// { value: "gpt-audio-mini", label: "GPT Audio Mini" },
-		// { value: "gpt-4o-audio-preview", label: "GPT-4o Audio Preview" },
-		// { value: "gpt-4o-mini-audio-preview", label: "GPT-4o Mini Audio Preview" },
+		{ value: "gpt-transcribe", label: "GPT Transcribe" },
+		{ value: "gpt-live-transcribe", label: "GPT Live Transcribe (Realtime)" },
 		{
 			value: "gpt-4o-realtime-transcribe",
 			label: "GPT-4o Realtime Transcribe",
@@ -217,42 +230,23 @@ export const STT_MODELS: Record<string, ModelOption[]> = {
 export const LLM_MODELS: Record<string, ModelOption[]> = {
 	managed: [],
 	cerebras: [
-		{ value: "llama-3.3-70b", label: "Llama 3.3 70B" },
-		{ value: "llama3.1-8b", label: "Llama 3.1 8B" },
+		{ value: "qwen-3.8-27b", label: "Qwen 3.8 27B" },
 		{ value: "gpt-oss-120b", label: "GPT-OSS 120B" },
-		{ value: "qwen-3-32b", label: "Qwen 3 32B" },
-		{
-			value: "qwen-3-235b-a22b-instruct-2507",
-			label: "Qwen 3 235B Instruct (Preview)",
-		},
-		{ value: "zai-glm-4.7", label: "GLM 4.7 (Preview)" },
-		{ value: "zai-glm-4.6", label: "GLM 4.6 (Preview)" },
 	],
 	groq: [
-		{ value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
-		{ value: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
 		{ value: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
 		{ value: "openai/gpt-oss-20b", label: "GPT-OSS 20B" },
-
-		// Preview models (Groq docs: https://console.groq.com/docs/models)
-		{
-			value: "meta-llama/llama-4-scout-17b-16e-instruct",
-			label: "Llama 4 Scout 17B 16E Instruct (Preview)",
-		},
-		{
-			value: "meta-llama/llama-4-maverick-17b-128e-instruct",
-			label: "Llama 4 Maverick 17B 128E Instruct (Preview)",
-		},
-		{
-			value: "qwen/qwen3-32b",
-			label: "Qwen3 32B Instruct (Preview)",
-		},
-		{
-			value: "moonshotai/kimi-k2-instruct-0905",
-			label: "Kimi K2 Instruct 0905 (Preview)",
-		},
+		{ value: "qwen/qwen3.8-27b", label: "Qwen 3.8 27B (Preview)" },
+		{ value: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Enterprise)" },
+		{ value: "llama-3.1-8b-instant", label: "Llama 3.1 8B (Enterprise)" },
 	],
 	fireworks: [
+		{
+			value: "accounts/fireworks/models/deepseek-v4p1-flash",
+			label: "DeepSeek V4.1 Flash",
+		},
+		{ value: "accounts/fireworks/models/glm-5p3", label: "GLM 5.3" },
+		{ value: "accounts/fireworks/models/kimi-k3", label: "Kimi K3" },
 		{
 			value: "accounts/fireworks/models/llama-v3p1-8b-instruct",
 			label: "Llama 3.1 8B Instruct",
@@ -263,6 +257,9 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
 		},
 	],
 	openai: [
+		{ value: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
+		{ value: "gpt-6-astra", label: "GPT-6 Astra" },
+		{ value: "gpt-6-luna", label: "GPT-6 Luna" },
 		{ value: "gpt-5.2", label: "GPT-5.2" },
 		{ value: "gpt-5.1", label: "GPT-5.1" },
 		{ value: "gpt-5", label: "GPT-5" },
@@ -271,13 +268,14 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
 		{ value: "gpt-4.1", label: "GPT-4.1" },
 		{ value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
 		{ value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-		// { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-		// { value: "gpt-4o", label: "GPT-4o" },
-		// { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+		{ value: "gpt-4o-mini", label: "GPT-4o Mini" },
 	],
 	gemini: [
-		// Gemini 3 (preview) - requested as explicit `models/...` IDs.
-		{ value: "models/gemini-3-pro-preview", label: "Gemini 3 Pro (Preview)" },
+		{ value: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
+		{ value: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
+		{ value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+		{ value: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
+		{ value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro (Preview)" },
 		{
 			value: "models/gemini-3-flash-preview",
 			label: "Gemini 3 Flash (Preview)",
@@ -285,20 +283,20 @@ export const LLM_MODELS: Record<string, ModelOption[]> = {
 
 		// Gemini 2.5 (stable)
 		{ value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-		// Dovie requested "2.5 Flash Pro" and "2.5 Flash Mini"; closest stable IDs:
-		// - Flash (thinking-capable) and Flash-Lite (smallest)
 		{ value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
 		{ value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
 	],
 	anthropic: [
+		{ value: "claude-fable-5-1", label: "Claude Fable 5.1" },
+		{ value: "claude-opus-5-5", label: "Claude Opus 5.5" },
+		{ value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+		{ value: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
 		{ value: "claude-sonnet-4-5", label: "Claude Sonnet 4.5" },
 		{ value: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
 		{ value: "claude-opus-4-5", label: "Claude Opus 4.5" },
-		{ value: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku" },
-		{ value: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" },
-		{ value: "claude-3-opus-latest", label: "Claude 3 Opus" },
 	],
 	cohere: [
+		{ value: "command-a-plus-05-2026", label: "Command A+" },
 		{ value: "command-a-03-2025", label: "Command A" },
 		{ value: "command-r-plus-08-2024", label: "Command R+ (08/2024)" },
 		{ value: "command-r-08-2024", label: "Command R (08/2024)" },
@@ -341,6 +339,7 @@ export function isRealtimeSttModel(
 }
 
 const REALTIME_STT_MODELS = new Set([
+	"assemblyai::universal-3-6-pro",
 	"assemblyai::universal-streaming-english",
 	"assemblyai::universal-streaming-multilingual",
 	"deepgram::nova-3",
@@ -353,6 +352,7 @@ const REALTIME_STT_MODELS = new Set([
 	"fireworks::fireworks-asr-v2",
 	"openai::gpt-4o-realtime-transcribe",
 	"openai::gpt-4o-mini-realtime-transcribe",
+	"openai::gpt-live-transcribe",
 	"speechmatics::enhanced",
 	"speechmatics::standard",
 ]);

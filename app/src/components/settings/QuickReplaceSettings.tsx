@@ -270,7 +270,7 @@ export function QuickReplaceSettings({
 								<Select
 									data={[
 										{ value: "off", label: "Off" },
-										{ value: "auto", label: "Auto" },
+									{ value: "auto", label: "Always" },
 										{ value: "manual", label: "Manual" },
 									]}
 									value={localProfileQuickReplaceActiveWindowOcrMode}
@@ -417,7 +417,7 @@ export function QuickReplaceSettings({
 									setLocalProfileQuickReplaceModel(value);
 									saveProfileMetadata({ quick_replace_model: value });
 								}}
-								placeholder="Select model"
+								placeholder="Provider default"
 								withCheckIcon={false}
 								styles={{
 									input: {

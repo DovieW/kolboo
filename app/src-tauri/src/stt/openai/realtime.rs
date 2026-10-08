@@ -183,7 +183,7 @@ fn parse_server_event(value: &JsonValue) -> RealtimeServerEvent {
 }
 
 pub(super) fn supports_realtime_streaming(provider: &OpenAiSttProvider) -> bool {
-    provider.model.contains("realtime")
+    provider.model == "gpt-live-transcribe" || provider.model.contains("realtime")
 }
 
 pub(super) fn realtime_transcription_model(provider: &OpenAiSttProvider) -> String {
@@ -226,12 +226,11 @@ pub(super) async fn start_streaming_session(
             .parse()
             .map_err(|e| SttError::Config(format!("Invalid OpenAI API key header: {}", e)))?,
     );
-    request.headers_mut().insert(
-        "OpenAI-Beta",
-        "realtime=v1"
-            .parse()
-            .map_err(|e| SttError::Config(format!("Invalid header: {}", e)))?,
-    );
+    if provider.model != "gpt-live-transcribe" {
+        request
+            .headers_mut()
+            .insert("OpenAI-Beta", "realtime=v1".parse().expect("static header"));
+    }
 
     let (ws_write, ws_read) = connect_ws_split_with_timeout(
         request,
@@ -290,6 +289,51 @@ pub(super) async fn start_streaming_session(
     Ok(StreamingSttSession::new(audio_tx, partial_rx, task))
 }
 
+fn transcription_session_update(
+    model: &str,
+    language: Option<&str>,
+    prompt: Option<&str>,
+) -> JsonValue {
+    let mut transcription = json!({ "model": model });
+    if let Some(prompt) = prompt {
+        transcription["prompt"] = json!(prompt);
+    }
+    if model == "gpt-live-transcribe" {
+        if let Some(language) = language {
+            transcription["languages"] = json!([language]);
+        }
+        // The live model does not support server VAD. Our recording lifecycle
+        // supplies one final commit when the user stops, with deltas during capture.
+        json!({
+            "type": "session.update",
+            "session": {
+                "type": "transcription",
+                "audio": { "input": {
+                    "format": { "type": "audio/pcm", "rate": REALTIME_SAMPLE_RATE },
+                    "transcription": transcription,
+                    "turn_detection": null,
+                }}
+            }
+        })
+    } else {
+        if let Some(language) = language {
+            transcription["language"] = json!(language);
+        }
+        json!({
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "pcm16",
+                "input_audio_transcription": transcription,
+                "turn_detection": {
+                    "type": "server_vad", "threshold": 0.5,
+                    "prefix_padding_ms": 300, "silence_duration_ms": 300
+                },
+                "input_audio_noise_reduction": { "type": "near_field" }
+            }
+        })
+    }
+}
+
 async fn run_streaming_task(
     mut ws_write: WsWrite,
     mut ws_read: crate::stt::streaming::WsRead,
@@ -305,32 +349,8 @@ async fn run_streaming_task(
         request_log_store,
     } = config;
 
-    let mut transcription_config = json!({
-        "model": model
-    });
-    if let Some(lang) = &language {
-        transcription_config["language"] = serde_json::Value::String(lang.clone());
-    }
-    if let Some(p) = &prompt {
-        transcription_config["prompt"] = serde_json::Value::String(p.clone());
-    }
-
-    let session_update = json!({
-        "type": "transcription_session.update",
-        "session": {
-            "input_audio_format": "pcm16",
-            "input_audio_transcription": transcription_config,
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 300
-            },
-            "input_audio_noise_reduction": {
-                "type": "near_field"
-            }
-        }
-    });
+    let session_update =
+        transcription_session_update(&model, language.as_deref(), prompt.as_deref());
 
     if ws_send_json_text_with_closed_handling(
         &mut ws_write,
@@ -606,6 +626,41 @@ async fn run_streaming_task(
 mod tests {
     use super::super::OpenAiSttProvider;
     use super::*;
+
+    #[test]
+    fn session_configuration_preserves_legacy_and_ga_optional_fields() {
+        for model in ["gpt-live-transcribe", "gpt-4o-transcribe"] {
+            for (language, prompt) in [(None, None), (Some("he"), Some("terms"))] {
+                let value = transcription_session_update(model, language, prompt);
+                let transcription = if model == "gpt-live-transcribe" {
+                    assert_eq!(value["type"], "session.update");
+                    &value["session"]["audio"]["input"]["transcription"]
+                } else {
+                    assert_eq!(value["type"], "transcription_session.update");
+                    assert_eq!(value["session"]["turn_detection"]["type"], "server_vad");
+                    &value["session"]["input_audio_transcription"]
+                };
+                assert_eq!(transcription["model"], model);
+                assert_eq!(
+                    transcription.get("prompt"),
+                    prompt.map(|v| json!(v)).as_ref()
+                );
+                if model == "gpt-live-transcribe" {
+                    assert_eq!(
+                        transcription.get("languages"),
+                        language.map(|v| json!([v])).as_ref()
+                    );
+                    assert!(transcription.get("language").is_none());
+                } else {
+                    assert_eq!(
+                        transcription.get("language"),
+                        language.map(|v| json!(v)).as_ref()
+                    );
+                    assert!(transcription.get("languages").is_none());
+                }
+            }
+        }
+    }
 
     #[test]
     fn parse_server_event_classifies_known_openai_events() {

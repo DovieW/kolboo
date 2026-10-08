@@ -449,7 +449,7 @@ export function QuickAskPanel({
 							<Select
 								data={[
 									{ value: "off", label: "Off" },
-									{ value: "auto", label: "Auto" },
+									{ value: "auto", label: "Always" },
 									{ value: "manual", label: "Manual" },
 								]}
 								value={localProfileQuickAskActiveWindowOcrMode}
@@ -688,7 +688,7 @@ export function QuickAskPanel({
 								setLocalProfileQuickAskModel(value);
 								saveProfileMetadata({ quick_ask_model: value });
 							}}
-							placeholder="Select model"
+							placeholder="Provider default"
 							withCheckIcon={false}
 							styles={{
 								input: {

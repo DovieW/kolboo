@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	isManagedModelSelection,
+	isRealtimeSttModel,
+	LLM_MODELS,
 	managedChatModelOptions,
 	managedModelByokTarget,
-	publishedManagedModels,
 	managedTranscriptionModelOptions,
+	publishedManagedModels,
+	retainSavedModelOption,
+	STT_MODELS,
 } from "./modelOptions";
 import type { ManagedModel } from "./tauri";
 
@@ -25,14 +29,64 @@ const models: ManagedModel[] = [
 	},
 ];
 
+it("keeps saved model IDs visible without changing current options", () => {
+	const options = [{ value: "current", label: "Current" }];
+	expect(retainSavedModelOption(options, null)).toBe(options);
+	expect(retainSavedModelOption(options, "current")).toBe(options);
+	expect(retainSavedModelOption(options, "old-model")).toEqual([
+		...options,
+		{ value: "old-model", label: "old-model (saved selection)" },
+	]);
+	expect(retainSavedModelOption([], "custom-model")).toEqual([]);
+	expect(options).toHaveLength(1);
+});
+
+it("offers refreshed provider families without deprecated audio or duplicate IDs", () => {
+	expect(STT_MODELS.fireworks).toBeUndefined();
+	for (const [provider, model] of [
+		["openai", "gpt-6.1-sol"],
+		["gemini", "gemini-3.8-flash"],
+		["anthropic", "claude-haiku-5-5"],
+		["cohere", "command-a-plus-05-2026"],
+		["cerebras", "qwen-3.8-27b"],
+		["groq", "qwen/qwen3.8-27b"],
+		["fireworks", "accounts/fireworks/models/deepseek-v4p1-flash"],
+	] as const)
+		expect(LLM_MODELS[provider]?.some((option) => option.value === model)).toBe(
+			true,
+		);
+	for (const options of [
+		...Object.values(STT_MODELS),
+		...Object.values(LLM_MODELS),
+	]) {
+		expect(new Set(options.map((option) => option.value)).size).toBe(
+			options.length,
+		);
+	}
+});
+
+it("offers current AssemblyAI models with realtime distinct from file transcription", () => {
+	expect(STT_MODELS.assemblyai?.map((model) => model.value)).toEqual([
+		"universal-3-6-pro",
+		"universal-3-5-pro",
+		"universal-2",
+		"universal-streaming-english",
+		"universal-streaming-multilingual",
+		"universal",
+	]);
+	expect(isRealtimeSttModel("assemblyai", "universal-3-6-pro")).toBe(true);
+	expect(isRealtimeSttModel("assemblyai", "universal-3-5-pro")).toBe(false);
+	expect(isRealtimeSttModel("assemblyai", "universal-2")).toBe(false);
+});
+
 describe("managed model options", () => {
 	it("respects an empty published catalog", () => {
 		expect(publishedManagedModels([])).toEqual([]);
 	});
 	it("does not offer managed models before successful live discovery", () => {
-        expect(publishedManagedModels(undefined)).toEqual([]);
-        expect(publishedManagedModels(null)).toEqual([]);
-        expect(publishedManagedModels(models)).toBe(models);
+		expect(publishedManagedModels(undefined)).toEqual([]);
+		expect(publishedManagedModels(null)).toEqual([]);
+		expect(publishedManagedModels(models)).toBe(models);
 	});
 
 	it("keeps transcription and chat capabilities separate", () => {

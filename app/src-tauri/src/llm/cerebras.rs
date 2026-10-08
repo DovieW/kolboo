@@ -19,7 +19,7 @@ use std::time::Duration;
 const CEREBRAS_API_URL: &str = "https://api.cerebras.ai/v1/chat/completions";
 
 // Keep this aligned with `llm/defaults.rs`.
-const DEFAULT_MODEL: &str = "llama-3.3-70b";
+const DEFAULT_MODEL: &str = "gpt-oss-120b";
 
 /// Cerebras LLM provider using the OpenAI-compatible Chat Completions API.
 pub struct CerebrasLlmProvider {

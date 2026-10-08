@@ -29,6 +29,11 @@ const HOTKEY_TYPE_OPTIONS: Array<{
 	description: string;
 }> = [
 	{
+		value: "show_window",
+		label: "Open Kolboo",
+		description: "Show and focus the main window",
+	},
+	{
 		value: "toggle",
 		label: "Toggle Recording",
 		description: "Press once to start recording, press again to stop",

@@ -229,15 +229,6 @@
 		"sha256": "1447d466ced5a687a8b8dcb8d8737f00249041309da061042b1ea41a89aff47d"
 	},
 	{
-		"filePath": "app/src-tauri/src/shortcuts/mod.rs",
-		"reason": "Window-manager hide callback; tested may_hide predicate prevents active recording from disappearing.",
-		"evidence": ["app/src-tauri/src/overlay/mod.rs"],
-		"lines": [497, 498, 499],
-		"functions": [],
-		"instantiations": [],
-		"sha256": "3a8df3d94cd1ab316b43dbd4fd1590a66dacfc0d489ee2ce305761834f916266"
-	},
-	{
 		"filePath": "app/src-tauri/src/shortcuts/paste_last.rs",
 		"reason": "Re-reviewed and approved 2026-09-30: native shortcut callback starts asynchronous app-owned output, requiring Wry/history stores. Release debounce, profile resolution, portal reuse and keyboard chords are deterministically tested.",
 		"evidence": [

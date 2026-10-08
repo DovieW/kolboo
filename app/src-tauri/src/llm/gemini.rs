@@ -10,7 +10,7 @@ use serde_json::json;
 use std::time::Duration;
 
 const GEMINI_API_ROOT: &str = "https://generativelanguage.googleapis.com/v1beta";
-const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+const DEFAULT_MODEL: &str = "gemini-3.5-flash-lite";
 
 /// Gemini LLM provider using the `models.generateContent` REST API.
 pub struct GeminiLlmProvider {
@@ -137,13 +137,17 @@ impl GeminiLlmProvider {
                     return None;
                 }
 
-                // Docs (2025-12):
-                // - Gemini 3 Pro supports: low, high
-                // - Gemini 3 Flash supports: minimal, low, medium, high
-                let is_pro = self.model.contains("gemini-3-pro");
-                let is_flash = self.model.contains("gemini-3-flash");
+                // Model-specific Gemini 3 thinking levels (docs 2026-10).
+                // Newer Flash/Pro variants do not all accept `minimal`.
+                let is_pro = self.model.contains("-pro");
+                let is_flash = self.model.contains("-flash");
 
-                let allowed = if is_pro {
+                let allowed = if self.model.contains("gemini-3.8-flash")
+                    || self.model.contains("gemini-3.7-flash")
+                    || self.model.contains("gemini-3.1-pro")
+                {
+                    matches!(level.as_str(), "low" | "medium" | "high")
+                } else if is_pro {
                     matches!(level.as_str(), "low" | "high")
                 } else if is_flash {
                     matches!(level.as_str(), "minimal" | "low" | "medium" | "high")
