@@ -46,13 +46,14 @@ import {
 	isInheritedSettingValue,
 } from "../../lib/tauri/settingsViews";
 import { PasteShortcutSetting } from "./PasteShortcutSetting";
-import { StartAtLoginSetting } from "./StartAtLoginSetting";
-import { StartupWindowSetting } from "./StartupWindowSetting";
 import {
 	SettingsIconButton,
 	SettingsRow,
 	SettingsTooltipIcon,
 } from "./SettingsRow";
+import { StartAtLoginSetting } from "./StartAtLoginSetting";
+import { StartupWindowSetting } from "./StartupWindowSetting";
+import { UpdatesSetting } from "./UpdatesSetting";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
@@ -1040,6 +1041,7 @@ export function UiSettings({
 
 			<StartAtLoginSetting profileScope={isProfileScope} />
 			<StartupWindowSetting profileScope={isProfileScope} />
+			<UpdatesSetting />
 
 			<SettingsRow
 				label="Close button"

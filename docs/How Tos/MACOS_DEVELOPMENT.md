@@ -17,8 +17,12 @@ is a supported Mac release until native acceptance is complete.
    retained for bundle inspection and troubleshooting.
 
 Both development and release-channel Mac artifacts use ad-hoc signing. They are
-not Apple Developer ID signed or notarized, and do not enable signed updater
-delivery. The release-channel download is labeled experimental. macOS may
+not Apple Developer ID signed or notarized. Ordinary development builds disable
+updater delivery; versioned releases also package a signed universal updater
+archive. Updates require the app to be in a writable Applications folder, not
+the DMG, and close Kolboo after installation. Reopen it to use the new version.
+Settings → UI → Updates allows checking and installing manually. The
+release-channel download is labeled experimental. macOS may
 require the tester to approve the application from **System Settings → Privacy
 & Security** after the first download.
 

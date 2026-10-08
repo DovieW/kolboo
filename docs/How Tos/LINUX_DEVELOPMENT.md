@@ -2,7 +2,7 @@
 
 **Status:** public x86_64 Community/BYOK beta; provisional support
 
-**Last reviewed:** 2026-09-30
+**Last reviewed:** 2026-10-07
 
 Kolboo's public Linux Community beta began with [`v0.2.5-beta.1`](https://github.com/DovieW/kolboo/releases/tag/v0.2.5-beta.1). The channel is limited to x86_64 Ubuntu/Kubuntu and account-free Community/BYOK use. It is not a managed-service launch, a stable-platform declaration, or a promise of native Wayland feature parity.
 
@@ -62,7 +62,7 @@ performs the interactive sudo installation. These debug-profile packages embed
 the frontend but are not release candidates; public artifacts must continue
 through the release workflow below.
 
-The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for this beta channel.
+The `Linux Build` GitHub workflow builds on Ubuntu 22.04 for a conservative glibc baseline. It retains the `.deb`, AppImage, SHA-256 checksums, dependency report, package contents, and commit/run evidence for 14 days. The updater is intentionally disabled for the separate beta channel and ordinary builds. The versioned Release workflow requests updater signing and enables background checks for both formats. Settings → UI → Updates provides manual checks and installation. AppImage must be writable; deb installation uses a single polkit administrator approval prompt. Installation never collects a sudo password in the app. Successful installation closes Kolboo; reopen it to run the update. Missing polkit or permissions requires a manual download/install. Exact-package acceptance remains required.
 
 DEB/RPM packages use a hidden portal-identity alias to avoid duplicate menu
 entries. AppImage uses a visible variant of that identity: linuxdeploy can choose

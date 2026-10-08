@@ -89,6 +89,7 @@ pub use event_payloads::{
 
 pub use audio_capture::AudioCaptureDiagnostics;
 pub use audio_capture::AudioLevelStats;
+pub use automatic_updates::UpdateStatus;
 pub use commands::audio::MicTestAudioLevelPayload;
 pub use commands::config::AvailableProvidersResponse;
 pub use commands::config::DefaultSectionsResponse;
@@ -1124,6 +1125,9 @@ pub fn run() {
         .manage(MicTestMeterState::default())
         .manage(commands::whisper::WhisperDownloadManager::default())
         .invoke_handler(tauri::generate_handler![
+            automatic_updates::get_update_status,
+            automatic_updates::check_for_updates,
+            automatic_updates::install_update,
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
             commands::audio::list_audio_input_devices_v2,

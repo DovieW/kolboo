@@ -137,7 +137,7 @@ async fn enabled_setup_starts_checks_without_creating_a_window() {
     let server = MockServer::start().await;
     let app = test_app(&server);
     release(&server, "99.0.0", PAYLOAD).await;
-    setup(app.handle(), true);
+    start(app.handle(), true, InstallTarget::Tauri);
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while app
         .state::<PendingUpdate>()
@@ -168,6 +168,190 @@ async fn enabled_setup_starts_checks_without_creating_a_window() {
     );
 }
 
+#[tokio::test]
+async fn status_and_checks_share_exclusive_ownership_and_fail_closed() {
+    let server = MockServer::start().await;
+    let app = test_app(&server);
+    setup(app.handle(), true); // Raw test executables must not self-replace.
+    assert!(!status(app.handle()).enabled);
+    assert_eq!(request_check(app.handle()).unwrap_err(), DISABLED);
+    app.state::<PendingUpdate>().status.lock().unwrap().enabled = true;
+    release(&server, "99.0.0", PAYLOAD).await;
+    stage(app.handle()).await.unwrap();
+    assert!(
+        !status(app.handle()).can_install,
+        "no pipeline means no installation"
+    );
+    app.manage(crate::pipeline::SharedPipeline::default());
+    assert!(status(app.handle()).can_install);
+    let lease = InstallLease::acquire(
+        app.state::<crate::pipeline::SharedPipeline>()
+            .inner()
+            .clone(),
+    )
+    .unwrap();
+    assert!(!status(app.handle()).can_install);
+    assert!(InstallLease::acquire(
+        app.state::<crate::pipeline::SharedPipeline>()
+            .inner()
+            .clone()
+    )
+    .is_err());
+    drop(lease);
+    let permit = OperationPermit::acquire(&app.state::<PendingUpdate>()).unwrap();
+    assert!(!status(app.handle()).can_install);
+    assert_eq!(
+        request_check(app.handle()).unwrap().phase,
+        UpdatePhase::Ready
+    );
+    check_once(app.handle()).await;
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    drop(permit);
+    server.reset().await;
+    let result = request_check(app.handle()).unwrap();
+    assert_eq!(result.phase, UpdatePhase::Checking);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while app
+        .state::<PendingUpdate>()
+        .operation
+        .load(Ordering::SeqCst)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        tokio::task::yield_now().await;
+    }
+    let result = status(app.handle());
+    assert_eq!(result.error.as_deref(), Some(CHECK_FAILED));
+    assert!(
+        result.can_install,
+        "a failed check preserves a previously verified update"
+    );
+    server.reset().await;
+    app.state::<PendingUpdate>().shutdown.cancel();
+    request_check(app.handle()).unwrap();
+    while app
+        .state::<PendingUpdate>()
+        .operation
+        .load(Ordering::SeqCst)
+    {
+        assert!(std::time::Instant::now() < deadline);
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(status(app.handle()).phase, UpdatePhase::Ready);
+    assert!(status(app.handle()).can_install);
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "shutdown cancels a manual check without discarding verified bytes"
+    );
+}
+
+#[cfg(target_os = "linux")]
+fn native_invoke(app: &tauri::AppHandle, command: &str) -> tauri::ipc::InvokeResponse {
+    let window = app.get_webview_window("updater-command-test").unwrap();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let webview: &tauri::Webview = window.as_ref();
+    webview.clone().on_message(
+        tauri::webview::InvokeRequest {
+            cmd: command.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().unwrap(),
+            body: tauri::ipc::InvokeBody::Json(serde_json::json!({})),
+            headers: Default::default(),
+            invoke_key: app.invoke_key().into(),
+        },
+        Box::new(move |_, _, response, _, _| {
+            tx.send(response).unwrap();
+        }),
+    );
+    rx.recv_timeout(Duration::from_secs(5)).unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn assert_ipc_error(app: &tauri::AppHandle, command: &str, expected: &str) {
+    match native_invoke(app, command) {
+        tauri::ipc::InvokeResponse::Err(error) => {
+            assert!(error.0.to_string().contains(expected), "{error:?}")
+        }
+        _ => panic!("Unsafe updater IPC unexpectedly succeeded"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn native_manual(
+    app: &tauri::AppHandle,
+    updater_app: &tauri::App<MockRuntime>,
+    executable: &std::path::Path,
+) {
+    let pending = app.state::<PendingUpdate>();
+    tauri::WebviewWindowBuilder::new(app, "updater-command-test", Default::default())
+        .visible(false)
+        .build()
+        .unwrap();
+    assert!(matches!(
+        native_invoke(app, "get_update_status"),
+        tauri::ipc::InvokeResponse::Ok(_)
+    ));
+    pending.status.lock().unwrap().enabled = false;
+    assert_ipc_error(app, "check_for_updates", DISABLED);
+    assert_ipc_error(app, "install_update", DISABLED);
+    pending.status.lock().unwrap().enabled = true;
+    assert_ipc_error(app, "install_update", "Recording status is unavailable");
+    let pipeline = crate::pipeline::SharedPipeline::default();
+    app.manage(pipeline.clone());
+    assert_ipc_error(app, "install_update", "No verified update");
+    let permit = OperationPermit::acquire(&pending).unwrap();
+    assert_ipc_error(app, "install_update", "already in progress");
+    drop(permit);
+    pipeline.begin_recovery().unwrap();
+    assert_ipc_error(app, "install_update", "Finish recording");
+    pipeline.end_recovery();
+    assert!(matches!(
+        native_invoke(app, "check_for_updates"),
+        tauri::ipc::InvokeResponse::Ok(_)
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while pending.operation.load(Ordering::SeqCst) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    // Discard an update aimed at the test runner. Repeated failing native
+    // attempts below use only signed synthetic bytes and private targets.
+    pending.download.lock().unwrap().take();
+    for target in [
+        InstallTarget::Unsupported,
+        InstallTarget::Deb,
+        InstallTarget::MacBundle(executable.into()),
+        InstallTarget::Tauri,
+    ] {
+        let updater = updater_app
+            .updater_builder()
+            .executable_path(executable.with_file_name("missing.AppImage"))
+            .build()
+            .unwrap();
+        tauri::async_runtime::block_on(stage_update(updater, &pending)).unwrap();
+        *pending.target.lock().unwrap() = target;
+        assert!(matches!(
+            native_invoke(app, "install_update"),
+            tauri::ipc::InvokeResponse::Ok(_)
+        ));
+        while pending.operation.load(Ordering::SeqCst) {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        let result = status(app);
+        assert_eq!(result.phase, UpdatePhase::Ready);
+        assert_eq!(result.error.as_deref(), Some(INSTALL_FAILED));
+        assert!(result.can_install);
+        assert!(!pipeline.is_recovering());
+        assert_eq!(
+            pending.download.lock().unwrap().as_ref().unwrap().1,
+            PAYLOAD
+        );
+        pending.download.lock().unwrap().take();
+    }
+    *pending.target.lock().unwrap() = InstallTarget::Tauri;
+}
+
 // Called from the isolated Wry fixture, where actual Quit events can be pumped
 // and intercepted. Installation targets only this test's temporary fake app.
 #[cfg(target_os = "linux")]
@@ -183,7 +367,7 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
     on_event(app.handle(), &RunEvent::Ready);
     assert!(!app.state::<PendingUpdate>().shutdown.is_cancelled());
     tauri::async_runtime::block_on(release(server, "99.0.0", PAYLOAD));
-    setup(app.handle(), true);
+    start(app.handle(), true, InstallTarget::Tauri);
     let deadline = Instant::now() + Duration::from_secs(5);
     while app
         .state::<PendingUpdate>()
@@ -201,9 +385,7 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
     // The live producer's Update points at the fixture process. Discard it;
     // installation tests below use an explicitly private executable path.
     app.state::<PendingUpdate>().download.lock().unwrap().take();
-    app.state::<PendingUpdate>()
-        .installing
-        .store(true, Ordering::SeqCst);
+    *app.state::<PendingUpdate>().installing.lock().unwrap() = Some(false);
     app.handle().exit(0);
     let duplicate_seen = std::sync::Arc::new(AtomicBool::new(false));
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -223,13 +405,12 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
             }
         });
     }
-    assert!(app
-        .state::<PendingUpdate>()
-        .installing
-        .load(Ordering::SeqCst));
-    app.state::<PendingUpdate>()
-        .installing
-        .store(false, Ordering::SeqCst);
+    assert_eq!(
+        *app.state::<PendingUpdate>().installing.lock().unwrap(),
+        Some(true)
+    );
+    *app.state::<PendingUpdate>().installing.lock().unwrap() = None;
+    native_manual(app.handle(), &updater_app, &executable);
     tauri::async_runtime::block_on(release(server, "99.0.0", PAYLOAD));
     let updater = updater_app
         .updater_builder()
@@ -237,14 +418,17 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
         .build()
         .unwrap();
     tauri::async_runtime::block_on(stage_update(updater, &app.state::<PendingUpdate>())).unwrap();
-    app.handle().exit(0);
+    assert!(matches!(
+        native_invoke(app.handle(), "install_update"),
+        tauri::ipc::InvokeResponse::Ok(_)
+    ));
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     };
     let quit_events = Arc::new(AtomicUsize::new(0));
     let deadline = Instant::now() + Duration::from_secs(5);
-    while quit_events.load(Ordering::SeqCst) < 2 {
+    while quit_events.load(Ordering::SeqCst) < 1 {
         assert!(
             Instant::now() < deadline,
             "installer must complete the deferred Quit"
@@ -274,7 +458,7 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
         .unwrap();
     tauri::async_runtime::block_on(stage_update(updater, &app.state::<PendingUpdate>())).unwrap();
     app.handle().exit(0);
-    while quit_events.load(Ordering::SeqCst) < 4 {
+    while quit_events.load(Ordering::SeqCst) < 3 {
         assert!(
             Instant::now() < deadline,
             "failed installer must also complete Quit"

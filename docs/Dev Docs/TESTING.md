@@ -247,6 +247,14 @@ startup process runs in a network namespace without external connectivity; no
 developer environment files, account, recordings or API calls are used. Its
 profiles are merged into the same Rust LCOV report, without new coverage waivers.
 Normal `cargo:test` stays headless; Windows/macOS still require native acceptance.
+The isolated Wry fixture also executes the generated update-status, check and
+install IPC handlers. Signed synthetic downloads target private fake AppImages,
+never the test runner or an installed app. It exercises busy-pipeline refusal,
+failed-install retry, duplicate Quit and completion of deferred Quit. Filesystem
+tests cover same-filesystem Mac replacement/rollback and retention of a blocked
+rollback backup; a private authorization executable verifies Debian installer
+arguments and cancellation without invoking root or changing system packages.
+These do not constitute real macOS, Windows or polkit package acceptance.
 The window-storage failure injection selects the exact registered window Store
 by identity, never the first Store in unordered resource iteration. It also
 asserts that the separate settings Store remains accessible. Native polling

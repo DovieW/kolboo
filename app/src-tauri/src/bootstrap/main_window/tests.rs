@@ -59,6 +59,9 @@ fn native_window_manager_integration() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(crate::automatic_updates::init())
         .invoke_handler(tauri::generate_handler![
+            crate::automatic_updates::get_update_status,
+            crate::automatic_updates::check_for_updates,
+            crate::automatic_updates::install_update,
             crate::commands::licensing::email_code::license_request_email_code,
             crate::commands::licensing::email_code::license_verify_email_code,
             crate::commands::licensing::license_cancel_login,

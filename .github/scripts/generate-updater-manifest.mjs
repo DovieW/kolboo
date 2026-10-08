@@ -20,12 +20,18 @@ export async function generateManifest({ bundlesDir, notesPath, outputPath, tag,
 		throw new Error("Exactly one signed NSIS and one signed MSI artifact are required; refusing to publish latest.json.");
 	}
 	const platforms = {};
-	for (const [installer, signaturePath] of [["nsis", nsisSignatures[0]], ["msi", msiSignatures[0]]]) {
+	const artifacts = [["windows-x86_64-nsis", nsisSignatures[0]], ["windows-x86_64-msi", msiSignatures[0]]];
+	for (const [target, suffix] of [["linux-x86_64-appimage", ".AppImage.sig"], ["linux-x86_64-deb", ".deb.sig"], ["darwin-aarch64", "Kolboo-universal.app.tar.gz.sig"]]) {
+		const signatures = files.filter((file) => file.endsWith(suffix));
+		if (signatures.length !== 1) throw new Error(`Exactly one signed ${target} artifact is required.`);
+		artifacts.push([target, signatures[0]]);
+	}
+	for (const [target, signaturePath] of artifacts) {
 		const artifactPath = signaturePath.slice(0, -4);
 		await readFile(artifactPath); // Refuse a dangling signature, not just a missing signature.
 		const signature = (await readFile(signaturePath, "utf8")).trim();
 		if (!signature) throw new Error("The updater signature is empty.");
-		platforms[`windows-x86_64-${installer}`] = {
+		platforms[target] = {
 			signature,
 			url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(path.basename(artifactPath))}`,
 		};
@@ -33,6 +39,8 @@ export async function generateManifest({ bundlesDir, notesPath, outputPath, tag,
 	// Raw executable/legacy clients have no embedded installer type. Packaged
 	// MSI clients must get MSI, not a migration to the NSIS uninstall wizard.
 	platforms["windows-x86_64"] = platforms["windows-x86_64-nsis"];
+	platforms["linux-x86_64"] = platforms["linux-x86_64-appimage"];
+	platforms["darwin-x86_64"] = platforms["darwin-aarch64"];
 
 	const version = tag.replace(/^v/, "");
 	if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {

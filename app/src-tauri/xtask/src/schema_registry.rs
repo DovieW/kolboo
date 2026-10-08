@@ -30,6 +30,10 @@ fn gen_export_audio_capture_diagnostics_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AudioCaptureDiagnostics)
 }
 
+fn gen_export_update_status_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::UpdateStatus)
+}
+
 fn gen_export_audio_level_stats_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AudioLevelStats)
 }
@@ -285,6 +289,7 @@ fn gen_export_windows_internet_proxy_settings_schema() -> RootSchema {
 }
 
 pub(crate) const SCHEMAS: &[SchemaSpec] = &[
+    schema_spec!("update-status.schema.json", "UpdateStatus", gen_export_update_status_schema),
     SchemaSpec::new("license-state.schema.json", "LicenseState", || schemars::schema_for!(kolboo_lib::LicenseState)),
     schema_spec!(
         "audio-capture-diagnostics.schema.json",

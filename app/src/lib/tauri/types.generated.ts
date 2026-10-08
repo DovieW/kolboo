@@ -1212,6 +1212,19 @@ export interface TestRewriteWithPromptResponse {
   provider_used: string;
 }
 
+// From: update-status.schema.json
+export type UpdatePhase = "idle" | "checking" | "downloading" | "ready" | "installing" | "error";
+
+export interface UpdateStatus {
+  can_install: boolean;
+  checked: boolean;
+  enabled: boolean;
+  error?: string | null;
+  hint: string;
+  phase: UpdatePhase;
+  version?: string | null;
+}
+
 // From: whisper-model-download-progress.schema.json
 export type WhisperModelDownloadStatus = "queued" | "downloading" | "verifying" | "completed" | "cancelled" | "error";
 

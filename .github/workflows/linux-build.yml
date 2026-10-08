@@ -11,8 +11,21 @@ on:
       - ".github/scripts/validate-desktop-cloud-config*"
       - ".github/workflows/linux-build.yml"
   workflow_dispatch:
+    inputs:
+      release_signing:
+        description: "Build signed automatic-update packages"
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      release_signing:
+        type: boolean
+        default: false
     secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        required: false
       SENTRY_AUTH_TOKEN:
         required: false
       TAURI_SENTRY_DSN:
@@ -133,16 +146,27 @@ jobs:
         working-directory: app
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          VITE_SIGNED_UPDATER_ENABLED: "false"
+          VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_signing && 'true' || 'false' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         shell: bash
         run: |
           set -euo pipefail
           export RUSTC_WRAPPER=sccache
-          pnpm tauri build --no-sign --bundles deb,appimage --verbose
+          sign_args=(--no-sign)
+          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            test -n "$TAURI_SIGNING_PRIVATE_KEY"
+            test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            sign_args=()
+          fi
+          pnpm tauri build "${sign_args[@]}" --bundles deb,appimage --verbose
           node ../.github/scripts/upload-desktop-symbols.mjs src-tauri/target/release/kolboo
 
       - name: Verify and package Linux artifacts
         id: bundles
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_signing && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -177,6 +201,13 @@ jobs:
           mkdir -p artifacts
           cp "$deb_path" artifacts/
           cp "$appimage_path" artifacts/
+          if [[ "${{ inputs.release_signing }}" == "true" ]]; then
+            # Tauri bundles AppImage updater signatures; deb needs explicit signing.
+            pnpm -C app tauri signer sign "$GITHUB_WORKSPACE/$deb_path"
+            test -s "$deb_path.sig"
+            test -s "$appimage_path.sig"
+            cp "$deb_path.sig" "$appimage_path.sig" artifacts/
+          fi
           cp linux-binary-dependencies.txt linux-deb-contents.txt artifacts/
           (
             cd artifacts
@@ -190,10 +221,10 @@ jobs:
           sentry_runtime_enabled=${{ steps.build-meta.outputs.reporting_enabled }}
           sentry_sourcemaps_required=${{ steps.build-meta.outputs.sourcemaps_required }}
           sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
-          channel=linux-community-beta
+          channel=${{ inputs.release_signing && 'versioned-community' || 'linux-community-beta' }}
           architecture=x86_64
           build_runner=ubuntu-22.04
-          updater_enabled=false
+          updater_enabled=${{ inputs.release_signing && 'true' || 'false' }}
           git_ref=${GITHUB_REF}
           git_sha=${GITHUB_SHA}
           run_id=${GITHUB_RUN_ID}
