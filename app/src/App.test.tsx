@@ -89,12 +89,6 @@ vi.mock("./lib/tauri", () => ({
 vi.mock("./lib/tauri/events", () => ({
 	listenTyped: vi.fn(async () => vi.fn()),
 }));
-vi.mock("./lib/updates", () => ({
-	checkSignedUpdateVersion: vi.fn(),
-	compareSemver: vi.fn(() => 0),
-	installSignedUpdate: vi.fn(),
-	signedUpdaterEnabled: false,
-}));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -117,6 +111,7 @@ beforeEach(async () => {
 	);
 });
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await act(async () => root.unmount());
 	client.clear();
 	host.remove();
@@ -130,6 +125,15 @@ async function navigate(label: string) {
 }
 
 describe("Desktop navigation", () => {
+	it("describes the packaged update policy without a disruptive install button", async () => {
+		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
+			.toBe("View releases and download an update.");
+		vi.stubEnv("VITE_SIGNED_UPDATER_ENABLED", "true");
+		await navigate("Settings");
+		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
+			.toBe("Updates download automatically and install when you quit Kolboo.");
+		expect(host.querySelector("footer a")?.getAttribute("target")).toBe("_blank");
+	});
 	it("routes the linked analytics choice to an enabled disclosure resolution", async () => {
 		await act(async () =>
 			[...host.querySelectorAll("button")]

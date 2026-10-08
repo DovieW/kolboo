@@ -416,6 +416,12 @@
 		}
 	},
 	"bundle": {
+		"windows": {
+			"nsis": {
+				"template": "windows/installer.nsi",
+				"installMode": "currentUser"
+			}
+		},
 		"active": true,
 		"createUpdaterArtifacts": true,
 		"targets": "all",

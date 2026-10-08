@@ -46,6 +46,7 @@ fn native_window_manager_integration() {
     );
     crate::text::selection_probe::tests::native_selection_probe_copy_transaction();
     let history_directory = tempfile::tempdir().unwrap();
+    let (native_context, updater_server) = crate::automatic_updates::tests::native_context();
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
@@ -55,12 +56,14 @@ fn native_window_manager_integration() {
         .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(crate::automatic_updates::init())
         .invoke_handler(tauri::generate_handler![
             crate::commands::licensing::email_code::license_request_email_code,
             crate::commands::licensing::email_code::license_verify_email_code,
             crate::commands::licensing::license_cancel_login,
         ])
-        .build(mock_context(noop_assets()))
+        .build(native_context)
         .unwrap();
     {
         use tauri_plugin_autostart::ManagerExt;
@@ -82,6 +85,7 @@ fn native_window_manager_integration() {
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
+    crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
     // A real GTK screen with controlled fractional DPI, not a fake Window.
     gdk::Screen::default().unwrap().set_resolution(168.0);
     let window = WebviewWindowBuilder::new(&app, "main", Default::default())

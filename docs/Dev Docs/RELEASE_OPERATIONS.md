@@ -99,7 +99,34 @@ signup configuration, service rollout validation or the remaining release gates.
 
 ## Signed updates
 
-Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.
+Windows release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Rust checks
+at startup and every six hours, including while the main webview is closed to
+the tray. It downloads and verifies newer releases in the background; a failed
+check/download does not block Community/BYOK use. Checks/downloads are bounded
+by a two-minute network timeout and cancelled on shutdown. No update can
+interrupt recording, transcription or other work on an idle timer: installation
+is deferred until explicit **Quit** (tray Quit or an exit-program close action).
+Closing to tray does not install, and OS shutdown is not delayed. The standard
+Windows updater handoff restarts the updated application. Staged downloads are
+memory-only; if the process is killed or the machine shuts down before Quit,
+the next launch checks/downloads again.
+
+Tauri creates updater signatures with the private updater key, while the
+application contains only `app/src-tauri/updater.pubkey`. The release workflow
+requires exactly one signed NSIS artifact and one signed MSI artifact, verifies
+their files exist, and publishes installer-specific manifest entries so MSI
+installations receive MSI upgrades. The legacy generic Windows entry still
+points to NSIS. The NSIS setup also skips the uninstall page for newer NSIS
+versions run manually; app data and start-at-login registration are retained.
+First installation, same-version repair and explicit installer-format migration
+remain separate cases. See `app/src-tauri/windows/README.md` for template
+provenance and Windows acceptance cases. Administrator/UAC approval for
+machine-wide installs is not bypassed.
+
+Existing 0.3.2 clients do not acquire this automatic-check behavior remotely:
+users need one upgrade to the first release containing it, either through that
+client's signed updater link or by running the new installer. Do not publish
+an unverified installer as proof of upgrade acceptance.
 
 Updater checks stay disabled in ordinary builds and in the manual-update Linux beta channel. Enable them only for a release channel that has completed signed update and rollback acceptance. Never rotate or lose the updater private key without a migration plan: installed clients trust its committed public counterpart.
 

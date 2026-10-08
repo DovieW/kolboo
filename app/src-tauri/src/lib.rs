@@ -21,6 +21,7 @@ mod audio_capture;
 mod audio_import;
 mod audio_mute;
 mod audio_normalization;
+mod automatic_updates;
 mod bootstrap;
 mod cli;
 mod clipboard_context;
@@ -1116,6 +1117,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(automatic_updates::init())
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
         .manage(TrayKeepAlive::default())
@@ -1638,6 +1640,11 @@ pub fn run() {
 
             // Setup system tray
             bootstrap::setup_tray(app.handle())?;
+
+            automatic_updates::setup(
+                app.handle(),
+                option_env!("VITE_SIGNED_UPDATER_ENABLED") == Some("true"),
+            );
 
             Ok(())
         })
