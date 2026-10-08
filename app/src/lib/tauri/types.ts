@@ -966,6 +966,8 @@ export interface AppSettings {
 
 	/** What the window close button does for the main/settings window. */
 	main_window_close_behavior: MainWindowCloseBehavior;
+	/** Show the main window on manual launch and at login, rather than tray-only. */
+	main_window_show_on_launch: boolean;
 
 	// Hallucination protection (quiet-audio gate)
 	quiet_audio_gate_enabled: boolean;

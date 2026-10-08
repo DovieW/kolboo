@@ -21,6 +21,10 @@ use super::{default_definitions, default_values, migrations};
 pub(crate) fn ensure_default_settings(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let store = app.store("settings.json")?;
 
+    // Check before seeding: only a new installation gets the enabled login
+    // default. Existing OS registrations (including opt-outs) are preserved.
+    crate::bootstrap::startup::initialize_start_at_login(app, store.is_empty());
+
     let mut dirty = super::managed_defaults::initialize(&store);
     dirty |= migrations::run_settings_migrations(&store)?;
 

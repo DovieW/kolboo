@@ -160,6 +160,12 @@ export function useUpdateMainWindowCloseBehavior() {
 	);
 }
 
+export function useUpdateMainWindowShowOnLaunch() {
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+		tauriAPI.updateMainWindowShowOnLaunch(enabled),
+	);
+}
+
 export function useUpdateRewriteLlmEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateRewriteLlmEnabled(enabled),

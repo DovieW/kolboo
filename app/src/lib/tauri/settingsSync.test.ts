@@ -114,6 +114,7 @@ describe("settings runtime sync policy", () => {
 
 	it.each([
 		"github_backup_gist_id",
+		"main_window_show_on_launch",
 		"max_saved_recordings",
 		"request_logs_retention_mode",
 		"request_logs_privacy_mode",

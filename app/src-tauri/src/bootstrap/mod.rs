@@ -25,6 +25,7 @@ const TRAY_HISTORY_EMPTY_ID: &str = "tray-history-empty";
 const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
 pub(crate) mod main_window;
+pub(crate) mod startup;
 
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();

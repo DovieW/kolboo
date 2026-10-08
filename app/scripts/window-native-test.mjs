@@ -127,7 +127,8 @@ try {
 		writeFileSync(
 			path.join(data, "settings.json"),
 			JSON.stringify({
-				settings_guide_state: "pending",
+				settings_guide_state: "completed",
+				main_window_show_on_launch: true,
 				main_window_close_behavior: "exit_program",
 			}),
 		);

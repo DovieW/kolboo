@@ -1403,8 +1403,8 @@ pub fn run() {
             bootstrap::main_window::setup(app.handle());
 
             // Startup window visibility:
-            // - Show the main window only on first-run (when the setup guide is pending).
-            // - Otherwise, keep it hidden; the tray icon is the explicit entrypoint.
+            // First-run remains visible. Later manual/login launches follow
+            // the global UI preference (tray-only by default).
             #[cfg(desktop)]
             {
                 let guide_state: String = get_setting_from_store(
@@ -1413,10 +1413,15 @@ pub fn run() {
                     "pending".to_string(),
                 );
 
+                let show_on_launch: bool = get_setting_from_store(
+                    app.handle(),
+                    "main_window_show_on_launch",
+                    false,
+                );
                 if let Some(main) = app.get_webview_window("main") {
-                    if guide_state == "pending" {
+                    if bootstrap::startup::should_show_window(&guide_state, show_on_launch) {
                         log::info!(
-                            "Startup: settings guide is pending -> showing main window"
+                            "Startup: first-run or show-on-launch preference -> showing main window"
                         );
                         let _ = main.show();
                         let _ = main.unminimize();

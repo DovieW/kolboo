@@ -23,6 +23,48 @@ credentials, paid requests, production changes or release publication.
   Initial formats are WAV, MP3, FLAC and ADTS AAC. M4A, Ogg and AIFF remain
   unsupported pending decoder/container hardening; no custom media parser was added.
 
+## Startup preferences — 2026-10-07
+
+Settings → UI now has independent global controls for **Start at login** and
+**Show window on launch**. The latter defaults off: after onboarding, manual and
+login launches remain tray-only unless enabled. The first-run setup window stays
+visible regardless of that preference; launching an already-running instance
+still brings its window forward. This does not change close-button behavior.
+
+Login startup is enabled on fresh installations via the existing cross-platform
+autostart plugin. Before settings are seeded, the empty-store check distinguishes
+new installations from upgrades. Existing OS startup registrations and opt-outs
+are preserved and are never reenabled at every launch. CLI invocations never
+register login startup. Registration failure does not prevent opening Kolboo;
+the UI continues to read and verify actual OS state and permits retrying there.
+The OS registration remains machine-local and is not synced or backed up.
+
+The window visibility preference is a non-secret global setting in
+`settings.json`, with normal settings normalization, patch persistence and query
+invalidation. It applies on the next launch, not by unexpectedly showing/hiding
+the current window or refreshing overlays/pipeline configuration. It follows
+other general UI preferences through explicit settings backup/sync, not profiles.
+The isolated Linux native fixture verifies real enable/disable registration,
+upgrade opt-out preservation, and production window startup with onboarding
+already completed and show-on-launch enabled. Windows/macOS use the same plugin
+and policy but still require native acceptance; Linux results do not certify them.
+
+Validation: the full local `check:ci` checkpoint passed (933 frontend tests and
+980 Rust tests, with the documented skips), as did the focused settings-sync
+test and the isolated native fixture/production startup. Changed executable code
+has 100% patch coverage without new exceptions. The optional native-test tools
+were extracted into a temporary directory on the development host; no system
+installation or namespace security setting was changed.
+
+IdeaPad acceptance: installed the service-enabled development Debian package
+through the existing user-local executable, preserving data and a rollback copy.
+Verified the running executable against the extracted package, healthy frontend
+readiness, and both rendered UI controls through AT-SPI. Enabled Show window on
+launch in the actual UI, confirmed persistence, restarted the process and
+verified the main window was showing. Restored that preference to off afterward;
+the existing enabled login registration was unchanged. No actual logout/reboot
+or Windows/macOS desktop acceptance was performed.
+
 ## 0.3.1 release preparation — 2026-10-01
 
 Package, Cargo and Tauri versions are aligned at 0.3.1, with user-facing notes in
@@ -140,9 +182,11 @@ policies are unit-tested; native acceptance there remains deferred, not certifie
 ## Start at login — 2026-09-29
 
 Settings → UI now includes **Start at login**, a machine-global switch in the
-Default profile. It is off until explicitly enabled, independent of the Close
-button setting, and does not record or upload anything at startup. Existing
-completed-setup startup behavior (running in the tray) is unchanged.
+Default profile, independent of the Close button setting, and does not record
+or upload anything at startup. Initially opt-in, it now defaults on for fresh
+installations (see the October 7 startup preferences above); upgrades preserve
+the existing OS choice. Completed-setup launches still default to the tray,
+with the new Show window on launch preference available to change that.
 
 The official Tauri autostart plugin manages the current executable through XDG
 autostart on Linux, the Windows login registry, or a macOS LaunchAgent. Only the

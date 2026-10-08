@@ -834,6 +834,11 @@ export const tauriSettingsAPI = {
 			main_window_close_behavior: normalizeMainWindowCloseBehavior(
 				await store.get("main_window_close_behavior"),
 			),
+			main_window_show_on_launch: await readSettingValue(
+				"main_window_show_on_launch",
+				DEFAULT_SETTINGS_VALUES.main_window_show_on_launch,
+				normalizeBooleanSetting,
+			),
 
 			quiet_audio_gate_enabled:
 				(await store.get<boolean>("quiet_audio_gate_enabled")) ??
@@ -1069,6 +1074,10 @@ export const tauriSettingsAPI = {
 		} else {
 			await applySettingsPatch({ patch: { accent_color: normalized } });
 		}
+	},
+
+	async updateMainWindowShowOnLaunch(enabled: boolean): Promise<void> {
+		await applySettingsPatch({ patch: { main_window_show_on_launch: enabled } });
 	},
 
 	async updateMainWindowCloseBehavior(

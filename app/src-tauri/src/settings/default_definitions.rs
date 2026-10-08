@@ -282,6 +282,7 @@ pub(crate) fn seedable_settings(
             "main_window_close_behavior",
             json!(default_values::DEFAULT_MAIN_WINDOW_CLOSE_BEHAVIOR),
         ),
+        SettingDefaultDefinition::missing_or_null("main_window_show_on_launch", json!(false)),
         SettingDefaultDefinition::missing_or_null(
             "output_mode",
             json!(default_values::DEFAULT_OUTPUT_MODE),
@@ -461,6 +462,14 @@ mod tests {
                 definition.key
             );
         }
+    }
+
+    #[test]
+    fn window_startup_defaults_to_tray_without_replacing_an_existing_choice() {
+        let definitions = seedable_settings(&PipelineConfig::default()).expect("defaults");
+        let setting = definition_for(&definitions, "main_window_show_on_launch");
+        assert_eq!(setting.value, json!(false));
+        assert_eq!(setting.seed_rule, SeedRule::MissingOrNull);
     }
 
     #[test]

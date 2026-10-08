@@ -99,6 +99,7 @@ export const DEFAULT_SETTINGS_VALUES = {
 	output_clipboard_privacy_mode: false,
 	output_smart_paste_protection: false,
 	main_window_close_behavior: "minimize_to_tray",
+	main_window_show_on_launch: false,
 	quiet_audio_gate_enabled: true,
 	quiet_audio_min_duration_secs: 0.15,
 	quiet_audio_rms_dbfs_threshold: -60,

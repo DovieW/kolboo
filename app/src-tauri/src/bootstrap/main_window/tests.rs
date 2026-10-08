@@ -54,6 +54,7 @@ fn native_window_manager_integration() {
         ))
         .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             crate::commands::licensing::email_code::license_request_email_code,
             crate::commands::licensing::email_code::license_verify_email_code,
@@ -61,6 +62,23 @@ fn native_window_manager_integration() {
         ])
         .build(mock_context(noop_assets()))
         .unwrap();
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        // All OS registration writes target this fixture's private XDG config.
+        let launch = app.autolaunch();
+        launch.disable().unwrap();
+        crate::bootstrap::startup::initialize_start_at_login(app.handle(), true);
+        assert!(
+            launch.is_enabled().unwrap(),
+            "new installs default to login startup"
+        );
+        launch.disable().unwrap();
+        crate::bootstrap::startup::initialize_start_at_login(app.handle(), false);
+        assert!(
+            !launch.is_enabled().unwrap(),
+            "an upgrade must preserve an opt-out"
+        );
+    }
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
