@@ -46,11 +46,19 @@ history-only recordings do not start this live dictation path.
 - **`StreamingSttSession`** ([stt/streaming.rs](../../app/src-tauri/src/stt/streaming.rs)) — holds `audio_tx` (send chunks) and `partial_rx` (receive transcripts). Call `finalize()` when recording stops to get the final text.
 - **`Pipeline`** ([pipeline.rs](../../app/src-tauri/src/pipeline.rs)) — orchestrates everything. During recording, it routes live audio to the session's `audio_tx` and reads `partial_rx` to drive live output. On stop, it calls `finalize()`. A failed stream may fall back to batch only if the model supports batch and no live insertion has started. Otherwise it preserves the recording and reports a recoverable error; it never automatically replaces text already inserted.
 
-The provider task is abort-on-drop: discarding a session or cancelling its
-finalization future cannot detach the provider protocol. `finalize()` (including
+The provider task and registered preview/live-insertion consumer are abort-on-drop:
+discarding a session or cancelling its finalization future cannot detach either.
+The pipeline attaches a deferred consumer before publishing the session, and
+activates it under its state lock only after accepting the connection. A stopped
+or cancelled recording cannot start preview/insertion work during rejected handoff.
+Finalization
+drains it before returning a successful transcript. A consumer panic fails the
+stream with a content-free error, rather than accepting unfinished output.
+`finalize()` (including
 the pipeline and CLI) uses a 60-second tail limit; direct callers can set a
-different deadline with `finalize_with_timeout()`. That tail starts after audio input closes, not
-at recording start. A timeout is a failed stream, not a successful partial result.
+different deadline with `finalize_with_timeout()`. The provider and consumer share
+one deadline. That tail starts after audio input closes, not at recording start.
+A timeout is a failed stream, not a successful partial result.
 This does not cancel provider-side processing or assert a vendor billing refund.
 
 Capture uses a nonblocking `StreamingAudioSender`. A full or closed provider
@@ -246,7 +254,7 @@ pipeline owns the active session and cancellation token. Connection/finalization
 are cancellation-aware, and the session now owns an abort-on-drop provider task
 with bounded finalization and fail-closed, buffered audio delivery. Batch fallback
 is blocked once live insertion has started. Late connection handoff after stop,
-preview/insertion task ownership, target changes and pinning the original model/payment source for fallback
+target changes and pinning the original model/payment source for fallback
 still need the broader lifecycle work, with tests for cancellation while connecting,
 sending, draining and live-pasting. Do not introduce a second streaming state machine
 in the UI.

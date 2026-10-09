@@ -61,6 +61,8 @@ pub(crate) mod stt_provider;
 mod stt_provider_resolver;
 #[cfg(test)]
 mod tests;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_streaming_consumer;
 mod transcription_flow;
 mod types;
 mod utils;
@@ -1245,29 +1247,9 @@ impl SharedPipeline {
             }
         };
 
-        // 3. Wire up the audio channel and store the session (brief lock).
-        let audio_tx = session.audio_tx.clone();
+        // 3. Take the receiver and prepare the consumer before publishing.
         let partial_rx = session.take_partial_rx();
-        {
-            let mut inner = match self.inner.lock() {
-                Ok(inner) => inner,
-                Err(e) => {
-                    log::warn!("Concurrent streaming: lock failed (post-connect): {}", e);
-                    return;
-                }
-            };
-
-            if cancel.is_cancelled() || inner.state != PipelineState::Recording {
-                log::info!(
-                    "Concurrent streaming: recording stopped before session ready, aborting"
-                );
-                return;
-            }
-
-            inner.audio_capture.set_live_audio_tx(Some(audio_tx));
-            inner.active_streaming_session = Some(session);
-            log::info!("Concurrent streaming: session active, audio channel wired");
-        }
+        let session_cancel = cancel.clone();
 
         // 4. Spawn a task to forward partial transcripts as Tauri events
         //    and optionally paste committed chunks live.
@@ -1291,9 +1273,6 @@ impl SharedPipeline {
                     inner.live_output_active.clone(),
                 )
             };
-
-            // Reset the flag at the start of a new session.
-            live_output_flag.store(false, std::sync::atomic::Ordering::SeqCst);
 
             // Read output settings once (won't change mid-recording).
             let stt_live_output = configured_live_output
@@ -1322,7 +1301,7 @@ impl SharedPipeline {
                 self.peek_session_profile_override().as_deref(),
             );
 
-            tokio::spawn(async move {
+            session.defer_partial_consumer(async move {
                 let mut is_first_chunk = true;
                 loop {
                     let partial = tokio::select! {
@@ -1378,6 +1357,36 @@ impl SharedPipeline {
                 log::debug!("Partial transcript consumer: channel closed");
             });
         }
+
+        self.install_concurrent_streaming_session(&session_cancel, session);
+    }
+
+    /// Publish only after the session owns its consumer. Stop/finalize must
+    /// never race a detached task registration or finish before live output.
+    fn install_concurrent_streaming_session(
+        &self,
+        cancel: &CancellationToken,
+        mut session: StreamingSttSession,
+    ) {
+        let mut inner = match self.inner.lock() {
+            Ok(inner) => inner,
+            Err(e) => {
+                log::warn!("Concurrent streaming: lock failed (post-connect): {}", e);
+                return;
+            }
+        };
+        if cancel.is_cancelled() || inner.state != PipelineState::Recording {
+            log::info!("Concurrent streaming: recording stopped before session ready, aborting");
+            return;
+        }
+        inner
+            .audio_capture
+            .set_live_audio_tx(Some(session.audio_tx.clone()));
+        // Stop/cancel cannot acquire this lock until the accepted session is
+        // published. Rejected sessions never activate their consumer.
+        session.activate_partial_consumer();
+        inner.active_streaming_session = Some(session);
+        log::info!("Concurrent streaming: session active, audio channel wired");
     }
 
     /// Stop recording and return the raw WAV audio

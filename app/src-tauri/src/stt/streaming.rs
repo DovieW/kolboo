@@ -241,14 +241,19 @@ pub struct StreamingSttSession {
 
     /// Background task that runs the provider protocol.
     /// Resolves to the final committed transcript.
-    task: OwnedStreamingTask,
+    task: OwnedStreamingTask<Result<String, SttError>>,
+
+    /// The preview/live-insertion consumer belongs to the same session. On
+    /// success it must drain before final output; on failure/drop it is aborted.
+    partial_consumer: Option<OwnedStreamingTask<()>>,
+    partial_consumer_start: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 /// A JoinHandle detaches on drop by default. This guard travels with the
 /// finalization future too, so cancelling that future cannot orphan a provider.
-struct OwnedStreamingTask(tokio::task::JoinHandle<Result<String, SttError>>);
+struct OwnedStreamingTask<T>(tokio::task::JoinHandle<T>);
 
-impl Drop for OwnedStreamingTask {
+impl<T> Drop for OwnedStreamingTask<T> {
     fn drop(&mut self) {
         self.0.abort();
     }
@@ -269,6 +274,8 @@ impl StreamingSttSession {
             },
             partial_rx: Some(partial_rx),
             task: OwnedStreamingTask(task),
+            partial_consumer: None,
+            partial_consumer_start: None,
         }
     }
 
@@ -279,6 +286,33 @@ impl StreamingSttSession {
     /// elsewhere for later finalization.
     pub fn take_partial_rx(&mut self) -> Option<mpsc::Receiver<PartialTranscript>> {
         self.partial_rx.take()
+    }
+
+    /// Replacing a consumer aborts the previous task and retires its permit.
+    fn set_partial_consumer(&mut self, task: tokio::task::JoinHandle<()>) {
+        self.partial_consumer = Some(OwnedStreamingTask(task));
+        self.partial_consumer_start.take();
+    }
+
+    /// Prepare user-visible work without running it. The pipeline releases
+    /// this barrier under its state lock only after accepting this connection.
+    pub(crate) fn defer_partial_consumer(
+        &mut self,
+        consumer: impl std::future::Future<Output = ()> + Send + 'static,
+    ) {
+        let (start, ready) = tokio::sync::oneshot::channel();
+        self.set_partial_consumer(tokio::spawn(async move {
+            if ready.await.is_ok() {
+                consumer.await;
+            }
+        }));
+        self.partial_consumer_start = Some(start);
+    }
+
+    pub(crate) fn activate_partial_consumer(&mut self) {
+        if let Some(start) = self.partial_consumer_start.take() {
+            let _ = start.send(());
+        }
     }
 
     /// Finalize the session: drop the audio sender, then await the final transcript.
@@ -296,16 +330,27 @@ impl StreamingSttSession {
         // Drop audio_tx to signal end-of-audio.
         drop(self.audio_tx);
         let mut task = self.task;
-        let result = timeout(deadline, &mut task.0)
-            .await
-            .map_err(|_| SttError::Timeout)?;
+        let mut partial_consumer = self.partial_consumer;
+        let result = timeout(deadline, async {
+            // Join errors can contain a panic's payload. Do not expose it.
+            let text = (&mut task.0)
+                .await
+                .map_err(|_| SttError::NetworkMessage("Streaming provider task failed".into()))??;
+            if let Some(consumer) = partial_consumer.as_mut() {
+                (&mut consumer.0).await.map_err(|_| {
+                    SttError::NetworkMessage("Streaming partial consumer task failed".into())
+                })?;
+            }
+            Ok(text)
+        })
+        .await
+        .map_err(|_| SttError::Timeout)?;
         if input_failed.load(Ordering::SeqCst) {
             return Err(SttError::Audio(
                 "Streaming audio could not be delivered completely. The recording is available for recovery.".into(),
             ));
         }
-        // Join errors can contain a provider panic's payload. Do not expose it.
-        result.map_err(|_| SttError::NetworkMessage("Streaming provider task failed".into()))?
+        result
     }
 }
 
@@ -341,9 +386,198 @@ mod tests {
         assert!(sender.is_closed());
     }
 
+    async fn pending_consumer() -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (stop, wait) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            started.send(()).unwrap();
+            let _ = wait.await;
+        });
+        ready.await.unwrap();
+        (task, stop)
+    }
+
+    #[tokio::test]
+    async fn replacing_or_dropping_a_consumer_aborts_it_with_the_session() {
+        let (mut session, mut provider_stop) = pending_session().await;
+        let (task, mut first_stop) = pending_consumer().await;
+        session.set_partial_consumer(task);
+        let (task, mut second_stop) = pending_consumer().await;
+        session.set_partial_consumer(task);
+        first_stop.closed().await;
+        assert!(!second_stop.is_closed());
+        drop(session);
+        second_stop.closed().await;
+        provider_stop.closed().await;
+        assert!(second_stop.is_closed());
+    }
+
+    #[tokio::test]
+    async fn a_deferred_consumer_cannot_run_before_acceptance_or_after_rejection() {
+        for accepted in [true, false] {
+            let (mut session, provider_stop) = pending_session().await;
+            let (started, mut notified) = tokio::sync::oneshot::channel();
+            session.defer_partial_consumer(notify_consumer_started(started));
+            assert!(matches!(
+                notified.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
+            if accepted {
+                session.activate_partial_consumer();
+                notified.await.unwrap();
+                // Releasing twice is harmless and cannot repeat insertion.
+                session.activate_partial_consumer();
+            } else {
+                // A rejected permit cannot execute the supplied future.
+                session.partial_consumer_start.take();
+                assert!(notified.await.is_err());
+            }
+            provider_stop.send(()).unwrap();
+            assert_eq!(
+                session.finalize().await.unwrap(),
+                "synthetic completed transcript"
+            );
+        }
+    }
+
+    fn notify_consumer_started(
+        started: tokio::sync::oneshot::Sender<()>,
+    ) -> impl std::future::Future<Output = ()> {
+        async move {
+            started.send(()).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn dropping_an_unaccepted_session_drops_user_visible_work_without_running_it() {
+        let (mut session, mut provider_stop) = pending_session().await;
+        let (started, notified) = tokio::sync::oneshot::channel();
+        session.defer_partial_consumer(notify_consumer_started(started));
+        drop(session);
+        assert!(notified.await.is_err());
+        provider_stop.closed().await;
+    }
+
+    #[tokio::test]
+    async fn finalization_drains_the_partial_consumer_before_returning_text() {
+        let (mut session, provider_stop) = pending_session().await;
+        let mut partials = session.take_partial_rx().unwrap();
+        // The synthetic provider drops its partial sender immediately. Model
+        // slow insertion after receipt without relying on scheduler sleeps.
+        let (draining, drain_started) = tokio::sync::oneshot::channel();
+        let (insert, insert_ready) = tokio::sync::oneshot::channel::<()>();
+        let inserted = Arc::new(AtomicBool::new(false));
+        let flag = inserted.clone();
+        session.set_partial_consumer(tokio::spawn(async move {
+            assert!(partials.recv().await.is_none());
+            draining.send(()).unwrap();
+            insert_ready.await.unwrap();
+            flag.store(true, Ordering::SeqCst);
+        }));
+        provider_stop.send(()).unwrap();
+        let finalized = tokio::spawn(session.finalize());
+        drain_started.await.unwrap();
+        assert!(!finalized.is_finished());
+        assert!(!inserted.load(Ordering::SeqCst));
+        insert.send(()).unwrap();
+        assert_eq!(
+            finalized.await.unwrap().unwrap(),
+            "synthetic completed transcript"
+        );
+        assert!(inserted.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn cancelling_finalization_after_provider_completion_aborts_the_consumer() {
+        use std::{
+            future::Future,
+            task::{Context, Poll, Waker},
+        };
+        let (audio_tx, _audio_rx) = mpsc::channel(1);
+        let (_partial_tx, partial_rx) = mpsc::channel(1);
+        let (completed, completion) = tokio::sync::oneshot::channel();
+        let provider = tokio::spawn(async move {
+            completed.send(()).unwrap();
+            Ok("completed provider".into())
+        });
+        completion.await.unwrap();
+        let mut session = StreamingSttSession::new(audio_tx, partial_rx, provider);
+        let (task, mut consumer_stop) = pending_consumer().await;
+        session.set_partial_consumer(task);
+        // Awaiting the provider's JoinHandle in the finalize future is now
+        // ready; the owned consumer remains pending.
+        let mut finalized = Box::pin(session.finalize());
+        assert!(matches!(
+            finalized
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        ));
+        drop(finalized);
+        consumer_stop.closed().await;
+        assert!(consumer_stop.is_closed());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn provider_and_consumer_share_one_finalization_deadline() {
+        let (audio_tx, _audio_rx) = mpsc::channel(1);
+        let (_partial_tx, partial_rx) = mpsc::channel(1);
+        let provider = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            Ok("finished provider".into())
+        });
+        let mut session = StreamingSttSession::new(audio_tx, partial_rx, provider);
+        let (task, mut stop) = pending_consumer().await;
+        session.set_partial_consumer(task);
+        let start = tokio::time::Instant::now();
+        assert!(matches!(
+            session.finalize_with_timeout(Duration::from_secs(3)).await,
+            Err(SttError::Timeout)
+        ));
+        assert_eq!(start.elapsed(), Duration::from_secs(3));
+        stop.closed().await;
+    }
+
+    #[tokio::test]
+    async fn provider_failure_aborts_the_consumer_and_consumer_panics_are_private() {
+        for fail_provider in [true, false] {
+            let (audio_tx, _audio_rx) = mpsc::channel(1);
+            let (_partial_tx, partial_rx) = mpsc::channel(1);
+            let provider = tokio::spawn(async move {
+                if fail_provider {
+                    Err(SttError::Api("synthetic provider failure".into()))
+                } else {
+                    Ok("must not accept unfinished output".into())
+                }
+            });
+            let mut session = StreamingSttSession::new(audio_tx, partial_rx, provider);
+            if fail_provider {
+                let (task, mut stop) = pending_consumer().await;
+                session.set_partial_consumer(task);
+                assert!(
+                    matches!(session.finalize().await, Err(SttError::Api(message)) if message == "synthetic provider failure")
+                );
+                stop.closed().await;
+            } else {
+                session.set_partial_consumer(tokio::spawn(async {
+                    panic!("synthetic private consumer payload")
+                }));
+                assert!(
+                    matches!(session.finalize().await, Err(SttError::NetworkMessage(message)) if message == "Streaming partial consumer task failed")
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_provider_finishing_before_finalization_keeps_its_result() {
-        let (session, stop) = pending_session().await;
+        let (mut session, stop) = pending_session().await;
+        let (consumer, consumer_stop) = pending_consumer().await;
+        session.set_partial_consumer(consumer);
+        consumer_stop.send(()).unwrap();
         stop.send(()).unwrap();
         assert_eq!(
             session.finalize().await.unwrap(),

@@ -677,6 +677,140 @@ async fn failed_stream_with_a_poisoned_state_lock_cannot_upload_again() {
 }
 
 #[tokio::test]
+async fn streaming_handoff_owns_or_aborts_both_tasks() {
+    for outcome in ["recording", "stopped", "cancelled", "poisoned"] {
+        let p = SharedPipeline::new_for_tests(
+            test_config_for_transcription(),
+            Box::new(FakeAudioCapture::new()),
+        );
+        p.start_recording().unwrap();
+        let cancel = p.get_cancel_token().unwrap();
+        let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(1);
+        let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
+        let (provider_alive, mut provider_dropped) = tokio::sync::oneshot::channel::<()>();
+        let (consumer_alive, mut consumer_dropped) = tokio::sync::oneshot::channel::<()>();
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _alive = provider_alive;
+            ready.send(()).unwrap();
+            while audio_rx.recv().await.is_some() {}
+            Ok("owned result".into())
+        });
+        started.await.unwrap();
+        let mut session = StreamingSttSession::new(audio_tx, partial_rx, task);
+        let (ready, started) = tokio::sync::oneshot::channel();
+        session.defer_partial_consumer(async move {
+            let _alive = consumer_alive;
+            ready.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        match outcome {
+            "stopped" => p.inner.lock().unwrap().state = PipelineState::Transcribing,
+            "cancelled" => cancel.cancel(),
+            "poisoned" => {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _guard = p.inner.lock().unwrap();
+                    panic!("synthetic lock poison");
+                }));
+            }
+            _ => {}
+        }
+        p.install_concurrent_streaming_session(&cancel, session);
+        if outcome == "recording" {
+            started.await.unwrap();
+            assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
+            assert!(matches!(
+                provider_dropped.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
+            assert!(matches!(
+                consumer_dropped.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            ));
+            p.cancel();
+        } else {
+            assert!(
+                started.await.is_err(),
+                "rejected handoff must never begin consumer work"
+            );
+            if outcome != "poisoned" {
+                assert!(p.inner.lock().unwrap().active_streaming_session.is_none());
+            }
+        }
+        assert!(provider_dropped.await.is_err());
+        assert!(consumer_dropped.await.is_err());
+    }
+}
+
+/// Exercise the concrete event-forwarding path with real Wry, but synthetic
+/// provider/capture tasks. No recording device, external service or insertion.
+#[cfg(target_os = "linux")]
+pub(crate) fn native_streaming_consumer(app: &tauri::AppHandle) {
+    use tauri::Listener;
+    struct StreamingProvider;
+    #[async_trait]
+    impl SttProvider for StreamingProvider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn supports_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe(
+            &self,
+            _: &[u8],
+            _: &AudioFormat,
+        ) -> Result<String, crate::stt::SttError> {
+            panic!("native streaming fixture must never use batch")
+        }
+        async fn start_streaming(
+            &self,
+            _: u32,
+        ) -> Result<StreamingSttSession, crate::stt::SttError> {
+            let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(1);
+            let (partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
+            let task = tokio::spawn(async move {
+                while audio_rx.recv().await.is_some() {}
+                partial_tx
+                    .send(crate::stt::streaming::PartialTranscript {
+                        text: "א גוטן טאָג".into(),
+                        committed_text: None,
+                    })
+                    .await
+                    .unwrap();
+                Ok("א גוטן טאָג".into())
+            });
+            Ok(StreamingSttSession::new(audio_tx, partial_rx, task))
+        }
+    }
+    let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let listener = app.listen(crate::events::EVENT_STT_PARTIAL_TRANSCRIPT, move |event| {
+        events.send(event.payload().to_string()).unwrap();
+    });
+    tauri::async_runtime::block_on(async {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(StreamingProvider));
+        p.start_recording().unwrap();
+        p.try_start_concurrent_streaming(app).await;
+        assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
+        let result = p.stop_and_transcribe_detailed().await.unwrap();
+        assert_eq!(result.final_text, "א גוטן טאָג");
+        // Finalization guarantees all queued preview events have been emitted.
+        let event = received.try_recv().unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+            serde_json::json!({"text": "א גוטן טאָג"})
+        );
+        assert!(received.try_recv().is_err());
+        assert!(!result.live_output_completed);
+        assert_eq!(p.state(), PipelineState::Idle);
+    });
+    app.unlisten(listener);
+}
+
+#[tokio::test]
 async fn cancelling_streaming_connection_or_finalize_leaves_the_new_session_owned() {
     use std::{
         future::Future,

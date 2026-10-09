@@ -86,6 +86,7 @@ fn native_window_manager_integration() {
         );
     }
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
+    crate::pipeline::native_streaming_consumer(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
     crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
