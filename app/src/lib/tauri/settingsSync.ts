@@ -49,6 +49,7 @@ const PIPELINE_SETTING_KEYS = new Set([
 	"rewrite_program_prompt_profiles",
 	"stt_provider",
 	"stt_model",
+	"stt_use_managed_inference",
 	"stt_language",
 	"stt_transcription_prompt",
 	"stt_live_output",

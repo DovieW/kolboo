@@ -189,6 +189,41 @@ describe("tauri settings side effects", () => {
 		});
 	});
 
+	it.each([true, false])(
+		"persists Managed preference %s before synchronizing the recording pipeline",
+		async (enabled) => {
+			vi.resetModules();
+			const { tauriSettingsAPI } = await import("./settings");
+			await tauriSettingsAPI.updateSTTUseManagedInference(enabled);
+
+			expect(invokeMock.mock.calls).toEqual([
+				[
+					"settings_apply_patch",
+					{ patch: { stt_use_managed_inference: enabled }, deleteKeys: [] },
+				],
+				["sync_pipeline_config"],
+			]);
+			// The backend patch already notifies every window.
+			expect(emitMock).not.toHaveBeenCalled();
+		},
+	);
+
+	it("does not change the runtime route when saving the Managed preference fails", async () => {
+		vi.resetModules();
+		const { tauriSettingsAPI } = await import("./settings");
+		invokeMock.mockRejectedValueOnce(new Error("Settings could not be saved"));
+
+		await expect(
+			tauriSettingsAPI.updateSTTUseManagedInference(false),
+		).rejects.toThrow("Settings could not be saved");
+		expect(invokeMock).toHaveBeenCalledTimes(1);
+		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
+			patch: { stt_use_managed_inference: false },
+			deleteKeys: [],
+		});
+		expect(emitMock).not.toHaveBeenCalled();
+	});
+
 	it("updateTranscriptionRetention keeps legacy days in sync", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");
