@@ -614,6 +614,7 @@ interface ProviderInfo {
 	label: string;
 	is_local: boolean;
 	models?: string[] | null;
+	model_names?: Record<string, string> | null;
 }
 
 interface OcrProviderStatus {

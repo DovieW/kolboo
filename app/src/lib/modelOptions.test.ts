@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	configuredProviderModelOptions,
 	isManagedModelSelection,
 	isRealtimeSttModel,
 	LLM_MODELS,
@@ -28,6 +29,25 @@ const models: ManagedModel[] = [
 		default_for_provider: false,
 	},
 ];
+
+it("uses optional display names without changing wire IDs or trusting inherited object keys", () => {
+	expect(configuredProviderModelOptions(undefined)).toBeUndefined();
+	expect(configuredProviderModelOptions({ models: null })).toBeUndefined();
+	expect(configuredProviderModelOptions({ models: [] })).toEqual([]);
+	expect(configuredProviderModelOptions({ models: ["raw"] })).toEqual([
+		{ value: "raw", label: "raw" },
+	]);
+	expect(
+		configuredProviderModelOptions({
+			models: ["raw", "empty", "toString"],
+			model_names: { raw: " Friendly ", empty: " " },
+		}),
+	).toEqual([
+		{ value: "raw", label: "Friendly" },
+		{ value: "empty", label: "empty" },
+		{ value: "toString", label: "toString" },
+	]);
+});
 
 it("keeps saved model IDs visible without changing current options", () => {
 	const options = [{ value: "current", label: "Current" }];

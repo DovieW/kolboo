@@ -79,6 +79,68 @@ it("offers configured custom capabilities and model IDs for BYOK", () => {
 	expect(result.quickReplaceModelOptions).toEqual(result.llmModelOptions);
 });
 
+it("displays custom speech names while retaining the raw ID", () => {
+	const result = usePromptProviderOptions({
+		...options,
+		availableProviders: {
+			...options.availableProviders,
+			stt: [
+				{
+					...options.availableProviders.stt[0],
+					value: "custom_audio",
+					label: "Audio server",
+					is_local: false,
+					models: ["own-transcriber"],
+					model_names: { "own-transcriber": "Speech model" },
+				},
+			],
+		},
+	});
+	expect(result.sttModelOptions).toEqual([
+		{ value: "own-transcriber", label: "Speech model" },
+	]);
+	const missing = usePromptProviderOptions({
+		...options,
+		availableProviders: undefined,
+	});
+	expect(missing.sttModelOptions).toEqual([]);
+	const discovery = usePromptProviderOptions({
+		...options,
+		managedAccessEnabled: true,
+		showAllProvidersAndModels: true,
+		availableProviders: undefined,
+		settings: { ...options.settings, stt_provider: "groq", stt_model: null },
+	});
+	expect(discovery.effectiveSttProvider).toBe("groq");
+	expect(discovery.sttModelOptions.map((model) => model.value)).toContain(
+		"whisper-large-v3-turbo",
+	);
+	const unconfigured = usePromptProviderOptions({
+		...options,
+		managedAccessEnabled: true,
+		showAllProvidersAndModels: true,
+		settings: { ...options.settings, stt_provider: "groq", stt_model: null },
+	});
+	expect(unconfigured.sttModelOptions).toEqual(discovery.sttModelOptions);
+	const noModels = usePromptProviderOptions({
+		...options,
+		availableProviders: {
+			...options.availableProviders,
+			stt: [
+				{
+					value: "custom_audio",
+					label: "Audio server",
+					is_local: false,
+					models: null,
+				},
+			],
+		},
+	});
+	expect(noModels.effectiveSttProvider).toBe("custom_audio");
+	expect(noModels.sttModelOptions).toEqual([]);
+	expect(noModels.selectedSttModelForUi).toBeNull();
+});
+
 it("does not present the first catalog entry as an implicitly selected default", () => {
 	const result = usePromptProviderOptions({
 		...options,

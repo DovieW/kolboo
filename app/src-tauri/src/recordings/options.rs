@@ -31,13 +31,7 @@ pub struct RecordingPreferences {
 impl RecordingPreferences {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(selection) = &self.meeting_model {
-            if selection.provider.trim().is_empty()
-                || selection.model.trim().is_empty()
-                || selection.provider.len() > 100
-                || selection.model.len() > 256
-            {
-                return Err("Select a valid meeting provider and model".into());
-            }
+            crate::ModelSelection::from(selection).validate()?;
         }
         Ok(())
     }

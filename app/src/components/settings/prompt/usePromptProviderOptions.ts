@@ -1,5 +1,6 @@
 import { API_KEYS } from "../../../lib/apiKeys";
 import {
+	configuredProviderModelOptions,
 	managedChatModelOptions,
 	managedTranscriptionModelOptions,
 	retainSavedModelOption,
@@ -26,6 +27,7 @@ type ProviderOption = {
 	label: string;
 	is_local: boolean;
 	models?: string[] | null;
+	model_names?: Record<string, string> | null;
 };
 
 type AvailableProviders = {
@@ -360,9 +362,9 @@ export function usePromptProviderOptions({
 	const currentSttModelOptions = effectiveSttProvider
 		? managedAccessEnabled && managedCatalogReady && !showAllProvidersAndModels
 			? managedTranscriptionModelOptions(managedModels, effectiveSttProvider)
-			: (availableProviders?.stt
-					.find((p) => p.value === effectiveSttProvider)
-					?.models?.map((value) => ({ value, label: value })) ??
+			: (configuredProviderModelOptions(
+					availableProviders?.stt.find((p) => p.value === effectiveSttProvider),
+				) ??
 				STT_MODELS[effectiveSttProvider] ??
 				[])
 		: [];

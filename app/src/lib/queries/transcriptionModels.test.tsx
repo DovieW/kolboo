@@ -43,6 +43,7 @@ it("offers only batch models and downloaded local models, deduplicating shared e
 					value: "custom_host",
 					label: "Local server",
 					models: ["speech"],
+					model_names: { speech: "My speech model" },
 					is_local: true,
 				},
 				{
@@ -62,13 +63,14 @@ it("offers only batch models and downloaded local models, deduplicating shared e
 	};
 	const result = read();
 	expect([...result.options.keys()]).toEqual([
-		"local-whisper::base::byok",
-		"custom_host::speech::byok",
-		"openai::whisper-1::byok",
+		JSON.stringify(["byok", "local-whisper", "base"]),
+		JSON.stringify(["byok", "custom_host", "speech"]),
+		JSON.stringify(["byok", "openai", "whisper-1"]),
 	]);
-	expect(result.options.get("custom_host::speech::byok")?.label).toBe(
-		"speech · Local server",
-	);
+	expect(
+		result.options.get(JSON.stringify(["byok", "custom_host", "speech"]))
+			?.label,
+	).toBe("My speech model · Local server");
 	expect(result.loading).toBeFalsy();
 });
 it("does not use failed or absent managed catalogs as permission to enable bundled models", () => {
@@ -100,7 +102,9 @@ it("does not use failed or absent managed catalogs as permission to enable bundl
 			},
 		],
 	};
-	expect([...read().options.keys()]).toEqual(["openai::speech::managed"]);
+	expect([...read().options.keys()]).toEqual([
+		JSON.stringify(["managed", "openai", "speech"]),
+	]);
 	queries.catalog = {
 		isError: true,
 		data: [

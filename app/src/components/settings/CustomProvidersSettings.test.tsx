@@ -10,6 +10,8 @@ import {
 	isLocalProviderHost,
 } from "./CustomProvidersSettings";
 
+Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+
 vi.mock("../../lib/tauri/commands", () => ({
 	configAPI: {
 		getCustomProviders: vi.fn(),
@@ -33,6 +35,7 @@ it("shows secure key editor and confirms removal without silently changing selec
 			base_url: "http://localhost:8000/v1",
 			llm_models: ["model"],
 			stt_models: [],
+			llm_model_names: { model: "My model" },
 		},
 	]);
 	vi.mocked(configAPI.deleteCustomProvider).mockResolvedValue();
@@ -64,6 +67,13 @@ it("shows secure key editor and confirms removal without silently changing selec
 		});
 		expect(host.textContent).toContain("custom_test_api_key");
 		await act(async () => button("Edit My endpoint").click());
+		expect(
+			(
+				document.querySelector(
+					'[aria-label="Text display name 1"]',
+				) as HTMLInputElement
+			).value,
+		).toBe("My model");
 		await act(async () => button("Save provider").click());
 		expect(configAPI.saveCustomProvider).toHaveBeenCalledWith({
 			id: "custom_test",
@@ -71,6 +81,8 @@ it("shows secure key editor and confirms removal without silently changing selec
 			base_url: "http://localhost:8000/v1",
 			llm_models: ["model"],
 			stt_models: [],
+			llm_model_names: { model: "My model" },
+			stt_model_names: {},
 		});
 		await act(async () => button("Remove My endpoint").click());
 		expect(configAPI.deleteCustomProvider).not.toHaveBeenCalled();
@@ -106,3 +118,70 @@ it("restricts insecure HTTP hosts to local addresses", () => {
 	])
 		expect(isLocalProviderHost(host)).toBe(false);
 });
+
+it.each([
+	{ name: "", message: "Add a name and at least one model." },
+	{ llm_models: [], message: "Add a name and at least one model." },
+	{
+		llm_models: ["duplicate", "duplicate"],
+		message: "Each model ID must be unique",
+	},
+	{ name: "x".repeat(101), message: "Use a provider name up to 100" },
+	{
+		base_url: `https://example.test/${"x".repeat(2048)}`,
+		message: "Use a provider name up to 100",
+	},
+])(
+	"rejects invalid model or provider metadata before persistence: $message",
+	async ({ message, ...invalid }) => {
+		vi.mocked(configAPI.getCustomProviders).mockResolvedValue([
+			{
+				id: "custom_invalid",
+				name: "Invalid",
+				base_url: "https://example.test",
+				llm_models: ["raw"],
+				stt_models: [],
+				...invalid,
+			},
+		]);
+		vi.mocked(configAPI.saveCustomProvider).mockClear();
+		const host = document.createElement("div");
+		document.body.append(host);
+		const root = createRoot(host);
+		const client = new QueryClient({
+			defaultOptions: { queries: { retry: false } },
+		});
+		vi.useFakeTimers();
+		try {
+			await act(async () =>
+				root.render(
+					<MantineProvider env="test">
+						<QueryClientProvider client={client}>
+							<CustomProvidersSettings />
+						</QueryClientProvider>
+					</MantineProvider>,
+				),
+			);
+			await act(async () => vi.advanceTimersByTimeAsync(1));
+			await act(async () =>
+				document
+					.querySelector<HTMLButtonElement>(
+						`[aria-label="Edit ${invalid.name ?? "Invalid"}"]`,
+					)
+					?.click(),
+			);
+			await act(async () =>
+				[...document.querySelectorAll("button")]
+					.find((button) => button.textContent === "Save provider")
+					?.click(),
+			);
+			expect(document.body.textContent).toContain(message);
+			expect(configAPI.saveCustomProvider).not.toHaveBeenCalled();
+		} finally {
+			await act(async () => root.unmount());
+			host.remove();
+			client.clear();
+			vi.useRealTimers();
+		}
+	},
+);

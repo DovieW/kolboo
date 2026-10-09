@@ -1,4 +1,5 @@
 import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
+export type { ModelSelection } from "./types.generated";
 
 /**
  * Connection state for UI display (maps from pipeline state)

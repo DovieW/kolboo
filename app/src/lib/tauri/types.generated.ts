@@ -50,6 +50,9 @@ export interface AvailableProvidersResponse {
 export interface ProviderInfo {
   is_local: boolean;
   label: string;
+  model_names?: {
+    [k: string]: string | undefined;
+  } | null;
   models?: string[] | null;
   value: string;
 }
@@ -105,8 +108,14 @@ export interface CostSummaryResponse {
 export interface CustomProvider {
   base_url: string;
   id: string;
+  llm_model_names?: {
+    [k: string]: string | undefined;
+  };
   llm_models: string[];
   name: string;
+  stt_model_names?: {
+    [k: string]: string | undefined;
+  };
   stt_models: string[];
 }
 
@@ -517,6 +526,15 @@ export interface SttModelPricing {
   min_billed_secs?: number | null;
   usd_micros_per_hour?: number | null;
   usd_micros_per_minute?: number | null;
+}
+
+// From: model-selection.schema.json
+export type ModelSource = "managed" | "byok";
+
+export interface ModelSelection {
+  model_id: string;
+  provider_id: string;
+  source: ModelSource;
 }
 
 // From: open-window-info.schema.json

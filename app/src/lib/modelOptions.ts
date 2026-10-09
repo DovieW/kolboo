@@ -13,6 +13,24 @@ export type ModelOption = {
 
 export type ManagedModelByokTarget = { provider: string; model: string };
 
+/** Display metadata never replaces the raw identifier sent to providers. */
+export function configuredProviderModelOptions(
+	provider:
+		| {
+				models?: string[] | null;
+				model_names?: Record<string, string> | null;
+		  }
+		| undefined,
+): ModelOption[] | undefined {
+	return provider?.models?.map((value) => ({
+		value,
+		label:
+			provider.model_names && Object.hasOwn(provider.model_names, value)
+				? provider.model_names[value]?.trim() || value
+				: value,
+	}));
+}
+
 /** Keep an explicitly saved ID visible when discovery or the bundled list changes. */
 export function retainSavedModelOption(
 	options: ModelOption[],

@@ -730,6 +730,8 @@ mod tests {
                 base_url,
                 stt_models: vec![],
                 llm_models: vec!["my-model".into()],
+                stt_model_names: Default::default(),
+                llm_model_names: Default::default(),
             }],
             ..Default::default()
         }

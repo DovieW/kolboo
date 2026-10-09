@@ -231,6 +231,8 @@ pub struct ProviderInfo {
     pub is_local: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_names: Option<std::collections::BTreeMap<String, String>>,
 }
 
 /// OCR provider availability status
@@ -387,6 +389,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 label: label.to_string(),
                 is_local: *is_local,
                 models: None,
+                model_names: None,
             });
         }
     }
@@ -407,6 +410,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 label: label.to_string(),
                 is_local: *is_local,
                 models: None,
+                model_names: None,
             });
         }
     }
@@ -421,6 +425,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 label: provider.name.clone(),
                 is_local: false,
                 models: Some(provider.stt_models),
+                model_names: Some(provider.stt_model_names),
             });
         }
         if !provider.llm_models.is_empty() {
@@ -429,6 +434,7 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
                 label: provider.name,
                 is_local: false,
                 models: Some(provider.llm_models),
+                model_names: Some(provider.llm_model_names),
             });
         }
     }

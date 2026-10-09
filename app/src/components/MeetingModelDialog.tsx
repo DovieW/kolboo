@@ -4,13 +4,19 @@ import {
 	Group,
 	Loader,
 	Modal,
-	Select,
 	Stack,
 	Text,
 } from "@mantine/core";
 import { useState } from "react";
+import {
+	modelSelectionKey,
+	recordingModelChoices,
+	recordingModelFromSelection,
+	recordingModelSelection,
+} from "../lib/modelSelection";
 import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
 import type { RecordingPreferences } from "../lib/tauri/types";
+import { ModelPicker } from "./ModelPicker";
 
 export function MeetingModelDialog({
 	preferences,
@@ -27,11 +33,15 @@ export function MeetingModelDialog({
 }) {
 	const { options, loading, failedSources } = useTranscriptionModels();
 	const [selection, setSelection] = useState(
-		preferences.meeting_model
-			? `${preferences.meeting_model.provider}::${preferences.meeting_model.model}::${preferences.meeting_model.use_managed ? "managed" : "byok"}`
-			: null,
+		recordingModelSelection(preferences.meeting_model),
 	);
-	const chosen = selection ? options.get(selection) : undefined;
+	const choices = recordingModelChoices(options.values());
+	const chosen = selection
+		? choices.find(
+				(choice) =>
+					modelSelectionKey(choice.selection) === modelSelectionKey(selection),
+			)
+		: undefined;
 	return (
 		<Modal
 			opened
@@ -78,16 +88,10 @@ export function MeetingModelDialog({
 						</Button>
 					</Alert>
 				)}
-				<Select
+				<ModelPicker
 					label="Model"
-					placeholder={
-						loading && !options.size ? "Loading models…" : "Choose a model"
-					}
-					nothingFoundMessage={
-						loading ? "Loading models…" : "No matching models"
-					}
-					searchable
-					data={[...options.values()]}
+					loading={loading}
+					choices={choices}
 					value={selection}
 					onChange={setSelection}
 					disabled={saving}
@@ -125,11 +129,7 @@ export function MeetingModelDialog({
 							if (chosen)
 								onSave({
 									...preferences,
-									meeting_model: {
-										provider: chosen.provider,
-										model: chosen.model,
-										use_managed: chosen.use_managed,
-									},
+									meeting_model: recordingModelFromSelection(chosen.selection),
 								});
 						}}
 					>

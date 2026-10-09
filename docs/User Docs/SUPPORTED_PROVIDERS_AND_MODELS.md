@@ -34,6 +34,17 @@ In **Settings → Providers → Custom providers**, add a name, API base URL
 provider's API key in its key field. Add transcription models, language models,
 or both; model discovery is manual.
 
+Each model row has a required **Model ID** and an optional **Display name**. You
+can still bulk-add IDs, then name individual rows. Display names are plain text
+and affect picker labels only: requests, saved selections, and history keep the
+original model ID. Leave the display name blank to show the ID.
+
+Files and meetings use a searchable model popout with **Kolboo Managed** and
+**Your models** tabs. Changing tabs or viewing model details does not change the
+saved choice. Selecting a result saves its source, provider and raw model ID
+together. Missing choices stay visible rather than selecting another model.
+Details distinguish unknown pricing from a free model.
+
 Custom providers always use your key directly, never Kolboo Managed. They appear
 in normal/profile model choices and the Meeting model picker after a key is saved.
 For a Managed account, enable **Show all providers and models** to select them.

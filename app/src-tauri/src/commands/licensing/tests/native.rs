@@ -564,8 +564,36 @@ pub(crate) fn email_code_session_lifecycle(
         .unwrap()
         .models;
         // Custom BYOK keys have the same ownership protection as built-ins.
-        store.set("custom_providers", json!([{"id":"custom_fixture", "name":"Fixture", "base_url":"https://provider.example.test", "stt_models":["speech"], "llm_models":[]}]));
+        store.set("custom_providers", json!([{"id":"custom_fixture", "name":"Fixture", "base_url":"https://provider.example.test", "stt_models":["speech"], "llm_models":["text"], "stt_model_names":{"speech":"Speech name"}, "llm_model_names":{"text":"Text name"}}]));
         crate::secrets::set_api_key(app, "custom_fixture_api_key", "synthetic-custom-key").unwrap();
+        crate::secrets::set_api_key(app, "groq_api_key", "synthetic-groq-key").unwrap();
+        let providers = crate::commands::config::get_available_providers(app.clone());
+        let speech = providers
+            .stt
+            .iter()
+            .find(|p| p.value == "custom_fixture")
+            .unwrap();
+        assert_eq!(speech.models.as_ref().unwrap(), &["speech"]);
+        assert_eq!(
+            speech.model_names.as_ref().unwrap()["speech"],
+            "Speech name"
+        );
+        let text = providers
+            .llm
+            .iter()
+            .find(|p| p.value == "custom_fixture")
+            .unwrap();
+        assert_eq!(text.models.as_ref().unwrap(), &["text"]);
+        assert_eq!(text.model_names.as_ref().unwrap()["text"], "Text name");
+        assert!(providers
+            .stt
+            .iter()
+            .any(|p| p.value == "groq" && p.model_names.is_none()));
+        assert!(providers
+            .llm
+            .iter()
+            .any(|p| p.value == "groq" && p.model_names.is_none()));
+        crate::secrets::clear_api_key(app, "groq_api_key").unwrap();
         let previous = store.get("stt_model");
         try_apply_first_install_models(app, Some(&models)).unwrap();
         assert_eq!(store.get("stt_model"), previous);

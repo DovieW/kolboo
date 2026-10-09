@@ -113,13 +113,17 @@ it("lets meetings select another downloaded local model without changing dictati
 	await render();
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
 	const options = [...document.querySelectorAll('[role="option"]')];
-	expect(options.map((option) => option.textContent)).toEqual([
-		"Base · Local Whisper",
-		"Small · Local Whisper",
+	expect(
+		options.map((option) =>
+			JSON.parse(option.getAttribute("value") ?? "null"),
+		),
+	).toEqual([
+		["byok", "local-whisper", "base"],
+		["byok", "local-whisper", "small"],
 	]);
 	await act(async () => (options[1] as HTMLElement).click());
 	await act(async () =>
@@ -156,11 +160,12 @@ it("saves a custom meeting model as BYOK even with managed access", async () => 
 	await render();
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
 	const option = document.querySelector('[role="option"]') as HTMLElement;
-	expect(option.textContent).toContain("my-transcriber · My server");
+	expect(option.textContent).toContain("my-transcriber");
+	expect(option.textContent).toContain("My server");
 	await act(async () => option.click());
 	await act(async () =>
 		[...document.querySelectorAll("button")]
@@ -199,17 +204,20 @@ it("keeps BYOK models usable when the managed catalog fails, without falling bac
 	expect(document.body.textContent).toContain("Couldn't load managed models");
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
 	const options = [...document.querySelectorAll('[role="option"]')];
 	expect(
-		options.some((option) => option.textContent?.includes("· Managed")),
+		options.some(
+			(option) =>
+				JSON.parse(
+					option.getAttribute("value") ?? "null",
+				)?.[0] === "managed",
+		),
 	).toBe(false);
-	const byok = options.find(
-		(option) =>
-			option.textContent?.includes("speaker labels") &&
-			option.textContent?.includes("Your key"),
+	const byok = options.find((option) =>
+		option.textContent?.includes("speaker labels"),
 	);
 	expect(byok).toBeDefined();
 	await act(async () => (byok as HTMLElement).click());
@@ -270,15 +278,16 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	state.openai = true;
 	await render();
 	const select = document.querySelector(
-		'[placeholder="Choose a model"]',
+		'button[aria-label="Model"]',
 	) as HTMLElement;
 	await act(async () => select.click());
 	await act(async () =>
-		(
-			[...document.querySelectorAll('[role="option"]')].find((option) =>
-				option.textContent?.includes("· Managed"),
-			) as HTMLElement
-		).click(),
+		[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+			.find((el) => el.textContent === "Kolboo Managed")
+			?.click(),
+	);
+	await act(async () =>
+		(document.querySelector('[role="option"]') as HTMLElement).click(),
 	);
 	const submit = () =>
 		[...document.querySelectorAll("button")]
@@ -295,11 +304,14 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	});
 	await act(async () => select.click());
 	await act(async () =>
+		[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+			.find((el) => el.textContent === "Your models")
+			?.click(),
+	);
+	await act(async () =>
 		(
-			[...document.querySelectorAll('[role="option"]')].find(
-				(option) =>
-					option.textContent?.includes("speaker labels") &&
-					option.textContent?.includes("Your key"),
+			[...document.querySelectorAll('[role="option"]')].find((option) =>
+				option.textContent?.includes("speaker labels"),
 			) as HTMLElement
 		).click(),
 	);

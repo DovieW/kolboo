@@ -1,4 +1,9 @@
-import { isRealtimeSttModel, STT_MODELS } from "../modelOptions";
+import {
+	configuredProviderModelOptions,
+	isRealtimeSttModel,
+	STT_MODELS,
+} from "../modelOptions";
+import { modelSelectionKey } from "../modelSelection";
 import { hasManagedInferenceAccess } from "../tauri/managedInference";
 import { useLicenseAuthContext } from "./license";
 import {
@@ -38,42 +43,57 @@ export function useTranscriptionModels() {
 			provider: string;
 			model: string;
 			use_managed: boolean;
+			displayName?: string;
+			providerName?: string;
 		}
 	>();
 	if (managed)
 		for (const model of catalog.isSuccess ? (catalog.data ?? []) : []) {
 			if (!model.capabilities.includes("transcription")) continue;
-			const value = `${model.provider}::${model.id}::managed`;
+			const value = modelSelectionKey({
+				source: "managed",
+				provider_id: model.provider,
+				model_id: model.id,
+			});
 			options.set(value, {
 				value,
 				label: `${model.display_name} · ${model.provider} · Managed`,
 				provider: model.provider,
 				model: model.id,
 				use_managed: true,
+				displayName: model.display_name,
+				providerName: model.provider,
 			});
 		}
 	for (const provider of providers.data?.stt ?? []) {
 		if (provider.value === "whisper" || provider.value === "local-whisper") {
 			for (const model of localModels.data ?? []) {
 				if (!model.is_downloaded) continue;
-				const value = `local-whisper::${model.id}::byok`;
+				const value = modelSelectionKey({
+					source: "byok",
+					provider_id: "local-whisper",
+					model_id: model.id,
+				});
 				options.set(value, {
 					value,
 					label: `${model.name} · Local Whisper`,
 					provider: "local-whisper",
 					model: model.id,
 					use_managed: false,
+					displayName: model.name,
+					providerName: "Local Whisper",
 				});
 			}
 		}
-		for (const model of provider.models?.map((value) => ({
-			value,
-			label: value,
-		})) ??
+		for (const model of configuredProviderModelOptions(provider) ??
 			STT_MODELS[provider.value] ??
 			[]) {
 			if (isRealtimeSttModel(provider.value, model.value)) continue;
-			const value = `${provider.value}::${model.value}::byok`;
+			const value = modelSelectionKey({
+				source: "byok",
+				provider_id: provider.value,
+				model_id: model.value,
+			});
 			if (!options.has(value))
 				options.set(value, {
 					value,
@@ -81,6 +101,8 @@ export function useTranscriptionModels() {
 					provider: provider.value,
 					model: model.value,
 					use_managed: false,
+					displayName: model.label,
+					providerName: provider.label,
 				});
 		}
 	}
