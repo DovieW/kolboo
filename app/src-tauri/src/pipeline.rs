@@ -1522,6 +1522,7 @@ impl SharedPipeline {
                     active_preset: None,
                     forced_provider: None,
                     forced_model: None,
+                    forced_language: None,
                 },
             )?;
 
@@ -1716,6 +1717,7 @@ impl SharedPipeline {
                     active_preset: active_preset.as_ref(),
                     forced_provider: None,
                     forced_model: None,
+                    forced_language: None,
                 },
             )?;
 
@@ -2264,6 +2266,12 @@ impl SharedPipeline {
                     },
                     forced_provider: forced_stt_provider,
                     forced_model: forced_stt_model,
+                    forced_language: match mode {
+                        SavedAudioMode::Journal(_, options) if is_meeting => {
+                            Some(options.language_hint.as_deref().unwrap_or("auto"))
+                        }
+                        _ => None,
+                    },
                 },
             );
             inner.config.managed_stt_preferred = dictation_managed_preference;

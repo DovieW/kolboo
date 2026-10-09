@@ -28,6 +28,8 @@ pub(super) struct SttProviderResolutionRequest<'a> {
     pub forced_provider: Option<&'a str>,
     /// Per-run model override, used by CLI/diagnostic paths.
     pub forced_model: Option<&'a str>,
+    /// Snapshot language, including explicit auto; None retains profile inheritance.
+    pub forced_language: Option<&'a str>,
 }
 
 /// Fully-resolved STT provider details for a transcription attempt.
@@ -55,6 +57,9 @@ pub(super) fn resolve_stt_provider_for_transcription(
         request.forced_provider,
         request.forced_model,
     );
+    if let Some(language) = request.forced_language {
+        effective.language = super::normalize_stt_language_setting(Some(language.to_string()));
+    }
 
     let mut provider_id_used = if request.forced_provider.is_some() {
         effective.provider_id.clone()
@@ -716,6 +721,7 @@ mod tests {
                 active_preset: Some(&preset),
                 forced_provider: None,
                 forced_model: None,
+                forced_language: None,
             },
         )
         .expect("preset provider should resolve from cache");
@@ -724,6 +730,39 @@ mod tests {
         assert_eq!(resolved.model.as_deref(), Some("preset-model"));
         assert_eq!(resolved.language.as_deref(), Some("es"));
         assert_eq!(resolved.timeout, Duration::from_secs(7));
+    }
+
+    #[test]
+    fn recording_language_snapshot_overrides_inherited_hints_and_cache_identity() {
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "groq".into(),
+            stt_language: Some("en".into()),
+            ..Default::default()
+        });
+        let profile = profile_with_stt(None, None, Some("fr"), None);
+        let preset = preset_with_stt(None, None, Some("es"), None);
+        for (hint, expected) in [("auto", None), ("yi", Some("yi")), ("he", Some("he"))] {
+            insert_cached_fake_provider(
+                &mut inner,
+                "groq",
+                Some("snapshot-model".into()),
+                expected.map(String::from),
+            );
+            let resolved = resolve_stt_provider_for_transcription(
+                &mut inner,
+                SttProviderResolutionRequest {
+                    active_profile: Some(&profile),
+                    active_preset: Some(&preset),
+                    forced_provider: Some("groq"),
+                    forced_model: Some("snapshot-model"),
+                    forced_language: Some(hint),
+                },
+            )
+            .unwrap();
+            assert_eq!(resolved.language.as_deref(), expected);
+            assert_eq!(resolved.model.as_deref(), Some("snapshot-model"));
+            assert_eq!(inner.config.stt_language.as_deref(), Some("en"));
+        }
     }
 
     #[test]
@@ -750,6 +789,7 @@ mod tests {
                 active_preset: Some(&preset),
                 forced_provider: Some(" OpenAI "),
                 forced_model: Some(" forced-model "),
+                forced_language: None,
             },
         )
         .expect("forced provider should resolve from cache");
@@ -780,6 +820,7 @@ mod tests {
                 active_preset: None,
                 forced_provider: None,
                 forced_model: None,
+                forced_language: None,
             },
         )
         .expect("global provider should resolve from cache");
@@ -817,6 +858,7 @@ mod tests {
                 active_preset: None,
                 forced_provider: None,
                 forced_model: None,
+                forced_language: None,
             },
         )
         .expect("managed fallback provider should resolve from cache");

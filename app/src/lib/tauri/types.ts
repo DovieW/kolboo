@@ -1,4 +1,9 @@
 import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
+import type {
+	RecordingPreferences as GeneratedRecordingPreferences,
+	MeetingModel,
+} from "./types.generated";
+
 export type { ModelSelection } from "./types.generated";
 
 /**
@@ -41,13 +46,10 @@ export interface SpeakerSegment {
 	end_seconds: number;
 	part: number;
 }
-export interface RecordingPreferences {
+export interface RecordingPreferences
+	extends Omit<GeneratedRecordingPreferences, "mode" | "meeting_model"> {
 	mode: "dictation" | "meeting";
-	meeting_model: {
-		provider: string;
-		model: string;
-		use_managed?: boolean;
-	} | null;
+	meeting_model: MeetingModel | null;
 }
 
 export interface FileImportResult {

@@ -26,10 +26,23 @@ pub struct RecordingPreferences {
     pub mode: RecordingMode,
     #[serde(default)]
     pub meeting_model: Option<MeetingModel>,
+    /// Immutable file/meeting hint. Missing/null means auto, never later globals.
+    #[serde(default)]
+    pub language_hint: Option<String>,
 }
 
 impl RecordingPreferences {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(hint) = &self.language_hint {
+            if hint.is_empty()
+                || hint.len() > 16
+                || !hint
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+            {
+                return Err("Select a valid recording language hint".into());
+            }
+        }
         if let Some(selection) = &self.meeting_model {
             crate::ModelSelection::from(selection).validate()?;
         }
@@ -104,6 +117,7 @@ mod tests {
                 model: "gpt-4o-transcribe-diarize".into(),
                 use_managed: false,
             }),
+            language_hint: Some("yi".into()),
         };
         options.save_journal(&path).unwrap();
         assert_eq!(
@@ -112,7 +126,36 @@ mod tests {
                 .meeting_model,
             options.meeting_model
         );
+        assert_eq!(
+            RecordingPreferences::load_journal(&path)
+                .unwrap()
+                .language_hint
+                .as_deref(),
+            Some("yi")
+        );
         std::fs::write(path.with_extension("options.json"), b"broken").unwrap();
         assert!(RecordingPreferences::load_journal(&path).is_err());
+    }
+
+    #[test]
+    fn legacy_hints_default_to_auto_and_invalid_hints_fail_closed() {
+        let legacy: RecordingPreferences = serde_json::from_str(r#"{"mode":"meeting"}"#).unwrap();
+        assert!(legacy.language_hint.is_none());
+        assert!(legacy.validate().is_ok());
+        for hint in ["", "English", "en\n", "x".repeat(17).as_str(), "key=secret"] {
+            let invalid = RecordingPreferences {
+                language_hint: Some(hint.into()),
+                ..Default::default()
+            };
+            assert!(invalid.validate().is_err());
+        }
+        for hint in ["auto", "yi", "he", "en", "zh-cn"] {
+            assert!(RecordingPreferences {
+                language_hint: Some(hint.into()),
+                ..Default::default()
+            }
+            .validate()
+            .is_ok());
+        }
     }
 }

@@ -104,6 +104,19 @@ async function drop(paths: string[]) {
 	await act(async () => onDrop?.(paths));
 	await settle();
 }
+async function language(label: string) {
+	const input = host.querySelector<HTMLInputElement>(
+		'[aria-label="File language hint"]',
+	);
+	await act(async () => input?.click());
+	const option = [
+		...document.querySelectorAll<HTMLElement>('[role="option"]'),
+	].find((element) => element.textContent === label);
+	expect(option).toBeDefined();
+	await act(async () => option?.click());
+	await settle();
+	expect(input?.value).toBe(label);
+}
 beforeEach(async () => {
 	vi.useFakeTimers();
 	vi.clearAllMocks();
@@ -144,6 +157,73 @@ afterEach(async () => {
 	vi.useRealTimers();
 });
 describe("File transcription", () => {
+	it("saves a language with the file, preserves it across model changes and freezes it on recovery", async () => {
+		expect(
+			host.querySelector<HTMLInputElement>('[aria-label="File language hint"]')
+				?.value,
+		).toBe("Auto-detect");
+		await language("Hebrew");
+		await click("Select speaker model");
+		await drop(["/meeting.wav"]);
+		vi.mocked(recordingControlsAPI.importFile).mockResolvedValue({
+			transcription_complete: false,
+			recovery_id: "saved-language",
+			message: "Connection failed",
+		});
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledExactlyOnceWith(
+			"/meeting.wav",
+			{
+				mode: "meeting",
+				meeting_model: {
+					provider: "openai",
+					model: "speaker-model",
+					use_managed: false,
+				},
+				language_hint: "he",
+			},
+		);
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], {
+				...prefs,
+				language_hint: "yi",
+			}),
+		);
+		await settle();
+		const input = host.querySelector<HTMLInputElement>(
+			'[aria-label="File language hint"]',
+		);
+		expect(input?.value).toBe("Hebrew");
+		expect(input?.disabled).toBe(true);
+		await click("Retry saved audio");
+		expect(recordingControlsAPI.recover).toHaveBeenCalledExactlyOnceWith(
+			"saved-language",
+		);
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledOnce();
+		expect(input?.disabled).toBe(true);
+	});
+	it("lets a language be selected before a file model is configured", async () => {
+		await act(async () =>
+			client.setQueryData(["recording-preferences"], {
+				mode: "meeting",
+				meeting_model: null,
+				language_hint: "en",
+			}),
+		);
+		await settle();
+		expect(
+			host.querySelector<HTMLInputElement>('[aria-label="File language hint"]')
+				?.value,
+		).toBe("English");
+		await language("Yiddish");
+		await click("Select speaker model");
+		await drop(["/meeting.wav"]);
+		await click("Transcribe");
+		expect(recordingControlsAPI.importFile).toHaveBeenCalledWith(
+			"/meeting.wav",
+			expect.objectContaining({ language_hint: "yi" }),
+		);
+	});
 	it("shows drag feedback only while the recorder can accept a file", async () => {
 		const hover = vi.mocked(audioFilesAPI.listenForDrop).mock.calls.at(-1)?.[1];
 		expect(hover).toBeDefined();

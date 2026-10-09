@@ -6,7 +6,7 @@
   Stop & transcribe, Stop & save for later, and elapsed captured time. Active ordinary
   dictation and transcription still offer Cancel. Its options popover holds
   a remembered Dictation/Meeting selector. Meeting options include a separate model
-  picker and Computer audio. Record has an accessible label but no tooltip. Detailed
+  picker, a language hint (initially Auto-detect), and Computer audio. Record has an accessible label but no tooltip. Detailed
   errors and saved recordings open a separate dialog; the popover has no scrollbar.
 - Home recordings save transcripts to History, never type or paste into another
   application. That output mode belongs to the Rust session and also applies
@@ -19,11 +19,12 @@
   context and automatic OCR regardless of profile/preset settings. Nothing is
   transcribed while Home capture is running. There are no live captions.
 - Recording preferences use the non-secret `recording_preferences` settings key.
-  The mode, explicit meeting provider/model, and managed/BYOK route are snapshotted in an owner-only
+  The mode, explicit meeting provider/model, managed/BYOK route, and language hint are snapshotted in an owner-only
   `.options.json` file before capture and copied alongside the complete saved WAV.
   Recovery and reruns use this snapshot, not the current popup selection. Missing
   legacy metadata means Dictation; unreadable metadata fails closed. Length never
-  determines recording mode.
+  determines recording mode. Missing/null meeting language hints mean Auto-detect,
+  not the current dictation language; explicit hints remain unchanged on retry.
 - Meeting's model picker lists enabled managed models and configured user-key/local
   options separately. Its route does not depend on or change Dictation's route.
   An unavailable managed choice fails with audio retained, never silently uses a key.
@@ -92,6 +93,10 @@ upload, microphone start, clipboard insertion or provider switching is introduce
 Complete imports share the recovery/History persistence and retention behavior
 documented below. File-manager context menus, a separate drop overlay, video and
 multiple-file queues remain separate features.
+
+Files offer an immediate language hint alongside the model picker. Selecting a
+model preserves the hint. Once an upload starts, its durable audio/options snapshot
+owns retries: model and language controls are disabled until another file is selected.
 
 ## Computer audio capabilities
 

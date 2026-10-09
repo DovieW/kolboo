@@ -4,6 +4,7 @@ import {
 	Group,
 	Loader,
 	Modal,
+	Select,
 	Stack,
 	Text,
 } from "@mantine/core";
@@ -15,6 +16,10 @@ import {
 	recordingModelSelection,
 } from "../lib/modelSelection";
 import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
+import {
+	normalizeSttLanguage,
+	STT_LANGUAGE_OPTIONS,
+} from "../lib/sttLanguages";
 import type { RecordingPreferences } from "../lib/tauri/types";
 import { ModelPicker } from "./ModelPicker";
 
@@ -35,6 +40,7 @@ export function MeetingModelDialog({
 	const [selection, setSelection] = useState(
 		recordingModelSelection(preferences.meeting_model),
 	);
+	const [language, setLanguage] = useState(preferences.language_hint ?? "auto");
 	const choices = recordingModelChoices(options.values());
 	const chosen = selection
 		? choices.find(
@@ -96,6 +102,16 @@ export function MeetingModelDialog({
 					onChange={setSelection}
 					disabled={saving}
 				/>
+				<Select
+					label="Language hint"
+					aria-label="Meeting language hint"
+					description="Auto-detect unless you choose a hint. Saved with the recording for retries."
+					data={STT_LANGUAGE_OPTIONS}
+					value={language}
+					allowDeselect={false}
+					disabled={saving}
+					onChange={(value) => setLanguage(normalizeSttLanguage(value))}
+				/>
 				<Text size="xs" c="dimmed">
 					For speaker labels, select GPT-4o Transcribe · speaker labels. Managed
 					models must be enabled by Kolboo; other cloud models require your key
@@ -129,6 +145,7 @@ export function MeetingModelDialog({
 							if (chosen)
 								onSave({
 									...preferences,
+									language_hint: language,
 									meeting_model: recordingModelFromSelection(chosen.selection),
 								});
 						}}

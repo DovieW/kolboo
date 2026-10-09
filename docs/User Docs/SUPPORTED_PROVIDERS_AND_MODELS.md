@@ -43,6 +43,13 @@ Files and meetings use a searchable model popout with **Kolboo Managed** and
 **Your models** tabs. Changing tabs or viewing model details does not change the
 saved choice. Selecting a result saves its source, provider and raw model ID
 together. Missing choices stay visible rather than selecting another model.
+
+New or missing dictation language settings default to **Auto-detect**. Existing
+explicit hints (including English) are preserved; profiles and presets can still
+inherit a hint or explicitly select Auto-detect. Files and meeting setup also
+offer a language hint, initially Auto-detect. That choice is saved with the audio
+so retries do not pick up later settings changes. Hints guide supported models;
+they do not add languages that a model does not support.
 Details distinguish unknown pricing from a free model.
 
 Custom providers always use your key directly, never Kolboo Managed. They appear
@@ -104,7 +111,8 @@ minimum for non-empty audio. It does not invent an unpublished rounding incremen
 `slam-1` and `best` are no longer offered to new selections; saved IDs are not
 rewritten. Sync, Dictation and Universal 3.5 realtime are separate integration work,
 not enabled by adding a file-transcription model ID. Existing language hints are
-preserved; no additional language picker was added.
+preserved. Select a suitable model for the languages you need; a hint cannot
+extend its language support.
 
 ### `speechmatics` (Speechmatics)
 

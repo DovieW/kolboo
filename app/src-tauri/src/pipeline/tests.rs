@@ -965,6 +965,7 @@ fn cancelling_home_capture_preserves_audio_and_mode_without_submitting() {
                 model: "gpt-4o-transcribe-diarize".into(),
                 use_managed: false,
             }),
+            language_hint: None,
         };
         preferences.save_journal(&path).unwrap();
         let capture = FakeAudioCapture::new();
@@ -1614,6 +1615,7 @@ async fn meeting_managed_choice_never_falls_back_to_a_user_key_when_access_is_un
             model: "gpt-4o-transcribe-diarize".into(),
             use_managed: true,
         }),
+        language_hint: None,
     };
     p.begin_recovery().unwrap();
     let error = p
@@ -1626,6 +1628,67 @@ async fn meeting_managed_choice_never_falls_back_to_a_user_key_when_access_is_un
     assert!(!p.config().managed_stt_preferred);
     assert!(p.is_recovering());
     p.end_recovery();
+}
+
+#[tokio::test]
+async fn settings_audio_test_keeps_the_explicit_dictation_language() {
+    let mut config = test_config_for_transcription();
+    config.stt_language = Some("en".into());
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    p.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        Some("en"),
+        Arc::new(MockSttProvider::new("English settings test")),
+    );
+    p.start_recording().unwrap();
+    p.stop_recording().unwrap();
+    assert_eq!(
+        p.transcribe_last_audio_for_profile(None).await.unwrap(),
+        "English settings test"
+    );
+    assert_eq!(p.config().stt_language.as_deref(), Some("en"));
+    assert_eq!(p.state(), PipelineState::Idle);
+}
+
+#[tokio::test]
+async fn saved_meeting_language_never_follows_later_dictation_settings() {
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+    for hint in [None, Some("auto"), Some("yi"), Some("he")] {
+        let mut config = test_config_for_transcription();
+        config.stt_language = Some("en".into());
+        let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        let expected = hint.filter(|value| *value != "auto");
+        p.inject_stt_provider_for_tests(
+            MOCK_PROVIDER,
+            Some("snapshot-model"),
+            expected,
+            Arc::new(MockSttProvider::new("Snapshot language")),
+        );
+        let options = RecordingPreferences {
+            mode: RecordingMode::Meeting,
+            meeting_model: Some(MeetingModel {
+                provider: MOCK_PROVIDER.into(),
+                model: "snapshot-model".into(),
+                use_managed: false,
+            }),
+            language_hint: hint.map(String::from),
+        };
+        let mut audio = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+        audio.append(&vec![0.25; 16000]);
+        for later_hint in ["es", "fr"] {
+            p.inner.lock().unwrap().config.stt_language = Some(later_hint.into());
+            p.begin_recovery().unwrap();
+            let result = p
+                .transcribe_journal_wav(audio.to_wav_bytes().unwrap(), None, None, &options)
+                .await
+                .unwrap();
+            assert_eq!(result.stt_text, "Snapshot language");
+            assert_eq!(p.config().stt_language.as_deref(), Some(later_hint));
+            assert_eq!(options.language_hint.as_deref(), hint);
+            p.end_recovery();
+        }
+    }
 }
 
 #[tokio::test]
@@ -1655,6 +1718,7 @@ async fn meeting_mode_never_rewrites_even_when_dictation_rewriting_is_enabled() 
             model: "meeting-model".into(),
             use_managed: false,
         }),
+        language_hint: None,
     };
     p.inner.lock().unwrap().config.managed_stt_preferred = true;
     p.begin_recovery().unwrap();

@@ -434,6 +434,7 @@ mod tests {
         let options = RecordingPreferences {
             mode: RecordingMode::Meeting,
             meeting_model: None,
+            language_hint: None,
         };
         store.save_options("blocked", &options).unwrap();
         // A directory at the exact file path deterministically makes remove_file

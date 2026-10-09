@@ -12,6 +12,8 @@ export const STT_LANGUAGE_VALUES = [
 	"hi",
 	"ar",
 	"ru",
+	"yi",
+	"he",
 ] as const;
 
 export type SttLanguageValue = (typeof STT_LANGUAGE_VALUES)[number];
@@ -33,9 +35,11 @@ export const STT_LANGUAGE_OPTIONS: Array<{
 	{ value: "hi", label: "Hindi" },
 	{ value: "ar", label: "Arabic" },
 	{ value: "ru", label: "Russian" },
+	{ value: "yi", label: "Yiddish" },
+	{ value: "he", label: "Hebrew" },
 ];
 
-export const DEFAULT_STT_LANGUAGE: SttLanguageValue = "en";
+export const DEFAULT_STT_LANGUAGE: SttLanguageValue = "auto";
 
 export function normalizeSttLanguage(
 	value: unknown,

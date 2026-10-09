@@ -352,7 +352,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert_eq!(config.max_duration_secs, 300.0);
         assert_eq!(config.stt_provider, "groq");
-        assert_eq!(config.stt_language.as_deref(), Some("en"));
+        assert_eq!(config.stt_language.as_deref(), Some("auto"));
         assert_eq!(
             config.transcription_timeout,
             default_transcription_timeout()

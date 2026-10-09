@@ -116,11 +116,11 @@ it("lets meetings select another downloaded local model without changing dictati
 			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
-	const options = [...document.querySelectorAll('[role="option"]')];
+	const options = [...document.querySelectorAll('[role="option"]')].filter(
+		(option) => option.getAttribute("value")?.startsWith("["),
+	);
 	expect(
-		options.map((option) =>
-			JSON.parse(option.getAttribute("value") ?? "null"),
-		),
+		options.map((option) => JSON.parse(option.getAttribute("value") ?? "null")),
 	).toEqual([
 		["byok", "local-whisper", "base"],
 		["byok", "local-whisper", "small"],
@@ -133,6 +133,7 @@ it("lets meetings select another downloaded local model without changing dictati
 	);
 	expect(save).toHaveBeenCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "local-whisper",
 			model: "small",
@@ -152,6 +153,52 @@ it("shows loading instead of claiming that an unfinished provider list is empty"
 		)?.disabled,
 	).toBe(true);
 	expect(save).not.toHaveBeenCalled();
+});
+
+it("starts at auto and saves a selected language together with the model", async () => {
+	await render({
+		mode: "meeting",
+		meeting_model: {
+			provider: "local-whisper",
+			model: "base",
+			use_managed: false,
+		},
+	});
+	const input = document.querySelector<HTMLInputElement>(
+		'[aria-label="Meeting language hint"]',
+	);
+	expect(input?.value).toBe("Auto-detect");
+	await act(async () => input?.click());
+	const option = [
+		...document.querySelectorAll<HTMLElement>('[role="option"]'),
+	].find((element) => element.textContent === "Yiddish");
+	expect(option).toBeDefined();
+	await act(async () => option?.click());
+	expect(input?.value).toBe("Yiddish");
+	expect(save).not.toHaveBeenCalled();
+	await act(async () =>
+		[...document.querySelectorAll("button")]
+			.find((b) => b.textContent === "Save")
+			?.click(),
+	);
+	expect(save).toHaveBeenCalledWith({
+		mode: "meeting",
+		meeting_model: {
+			provider: "local-whisper",
+			model: "base",
+			use_managed: false,
+		},
+		language_hint: "yi",
+	});
+});
+
+it("retains an existing explicit meeting hint", async () => {
+	await render({ mode: "meeting", meeting_model: null, language_hint: "he" });
+	expect(
+		document.querySelector<HTMLInputElement>(
+			'[aria-label="Meeting language hint"]',
+		)?.value,
+	).toBe("Hebrew");
 });
 
 it("saves a custom meeting model as BYOK even with managed access", async () => {
@@ -174,6 +221,7 @@ it("saves a custom meeting model as BYOK even with managed access", async () => 
 	);
 	expect(save).toHaveBeenCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "custom_test",
 			model: "my-transcriber",
@@ -207,13 +255,13 @@ it("keeps BYOK models usable when the managed catalog fails, without falling bac
 			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
-	const options = [...document.querySelectorAll('[role="option"]')];
+	const options = [...document.querySelectorAll('[role="option"]')].filter(
+		(option) => option.getAttribute("value")?.startsWith("["),
+	);
 	expect(
 		options.some(
 			(option) =>
-				JSON.parse(
-					option.getAttribute("value") ?? "null",
-				)?.[0] === "managed",
+				JSON.parse(option.getAttribute("value") ?? "null")?.[0] === "managed",
 		),
 	).toBe(false);
 	const byok = options.find((option) =>
@@ -296,6 +344,7 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	await act(async () => submit());
 	expect(save).toHaveBeenLastCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "openai",
 			model: "gpt-4o-transcribe-diarize",
@@ -318,6 +367,7 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	await act(async () => submit());
 	expect(save).toHaveBeenLastCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "openai",
 			model: "gpt-4o-transcribe-diarize",

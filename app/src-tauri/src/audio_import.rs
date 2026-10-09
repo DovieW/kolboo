@@ -403,6 +403,7 @@ mod tests {
                 model: "test".into(),
                 use_managed: false,
             }),
+            language_hint: Some("he".into()),
         };
         let id = import_file(&source, &destination, &options, || false).unwrap();
         let path = destination.join(format!("{id}.pcm"));
@@ -411,6 +412,13 @@ mod tests {
         assert_eq!(
             RecordingPreferences::load_journal(&path).unwrap().mode,
             crate::RecordingMode::Meeting
+        );
+        assert_eq!(
+            RecordingPreferences::load_journal(&path)
+                .unwrap()
+                .language_hint
+                .as_deref(),
+            Some("he")
         );
         assert!(!path.with_extension("importing").exists());
         let (_, _, samples) =

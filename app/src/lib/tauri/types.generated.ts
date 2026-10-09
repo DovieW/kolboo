@@ -659,6 +659,10 @@ export interface QuickAskStartedPayload {
 
 // From: recording-preferences.schema.json
 export interface RecordingPreferences {
+  /**
+   * Immutable file/meeting hint. Missing/null means auto, never later globals.
+   */
+  language_hint?: string | null;
   meeting_model?: MeetingModel | null;
   mode?: RecordingMode & string;
 }

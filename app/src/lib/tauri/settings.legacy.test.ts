@@ -70,6 +70,21 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 
 describe("legacy settings fixtures", () => {
 	itWithImportTimeout(
+		"preserves explicit stored language hints through migration",
+		async () => {
+			for (const hint of ["en", "yi", "he", "auto"]) {
+				vi.resetModules();
+				currentStore = new FakeStore({
+					...legacySettingsFixture,
+					stt_language: hint,
+				});
+				const { tauriAPI } = await import("../tauri");
+				expect((await tauriAPI.getSettings()).stt_language).toBe(hint);
+				expect(currentStore.data.get("stt_language")).toBe(hint);
+			}
+		},
+	);
+	itWithImportTimeout(
 		"reloads a persisted paste shortcut and defaults invalid legacy values",
 		async () => {
 			for (const [stored, expected] of [
@@ -137,7 +152,7 @@ describe("legacy settings fixtures", () => {
 		expect(settings.rewrite_active_window_ocr_mode).toBe("off");
 		expect(settings.quick_replace_active_window_ocr_mode).toBe("off");
 		expect(settings.quick_ask_active_window_ocr_mode).toBe("off");
-		expect(settings.stt_language).toBe("en");
+		expect(settings.stt_language).toBe("auto");
 
 		expect(settings.rewrite_program_prompt_profiles).toHaveLength(1);
 		const profile = settings.rewrite_program_prompt_profiles[0];
@@ -221,7 +236,7 @@ describe("legacy settings fixtures", () => {
 			const settings = await tauriAPI.getSettings();
 
 			expect(settings.settings_version).toBe(2);
-			expect(settings.stt_language).toBe("en");
+			expect(settings.stt_language).toBe("auto");
 			expect(settings.overlay_monitor_target).toBe("active_window");
 			expect(settings.output_mode).toBe("paste");
 			expect(settings.quick_ask_system_prompt).toBeNull();
