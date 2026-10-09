@@ -381,6 +381,7 @@ struct MockSttProvider {
     text: String,
     behavior: MockBehavior,
     realtime_only: bool,
+    batch_calls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl MockSttProvider {
@@ -389,6 +390,7 @@ impl MockSttProvider {
             text: text.into(),
             behavior: MockBehavior::default(),
             realtime_only: false,
+            batch_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -409,6 +411,8 @@ impl SttProvider for MockSttProvider {
         _audio: &[u8],
         _format: &AudioFormat,
     ) -> Result<String, crate::stt::SttError> {
+        self.batch_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if let Some(delay) = self.behavior.delay {
             tokio::time::sleep(delay).await;
         }
@@ -576,14 +580,27 @@ fn test_shared_pipeline_creation() {
 
 #[tokio::test]
 async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
-    for (success, realtime) in [(true, false), (false, false), (false, true)] {
+    for (success, realtime, live_started) in [
+        (true, false, false),
+        (true, false, true),
+        (false, false, false),
+        (false, true, false),
+        (false, false, true),
+    ] {
         let mut config = test_config_for_transcription();
         config.llm_config.enabled = false;
         let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
         let mut provider = MockSttProvider::new("batch fallback");
         provider.realtime_only = realtime;
+        let batch_calls = provider.batch_calls.clone();
         pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
         pipeline.start_recording().unwrap();
+        pipeline
+            .inner
+            .lock()
+            .unwrap()
+            .live_output_active
+            .store(live_started, std::sync::atomic::Ordering::SeqCst);
         let (audio_tx, _audio_rx) = tokio::sync::mpsc::channel(1);
         let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
         let task = tokio::spawn(async move {
@@ -597,12 +614,15 @@ async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
             crate::stt::streaming::StreamingSttSession::new(audio_tx, partial_rx, task),
         );
         let result = pipeline.stop_and_transcribe_detailed().await;
-        if !success && realtime {
+        if !success && (realtime || live_started) {
             assert!(matches!(result, Err(PipelineError::Stt(_))));
             assert_eq!(pipeline.state(), PipelineState::Error);
+            assert!(pipeline.inner.lock().unwrap().last_wav_bytes.is_some());
         } else {
+            let result = result.unwrap();
+            assert_eq!(result.live_output_completed, live_started);
             assert_eq!(
-                result.unwrap().final_text,
+                result.final_text,
                 if success {
                     // Dictation trims the leading boundary, preserving the
                     // provider's trailing whitespace for insertion.
@@ -613,6 +633,10 @@ async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
             );
             assert_eq!(pipeline.state(), PipelineState::Idle);
         }
+        assert_eq!(
+            batch_calls.load(std::sync::atomic::Ordering::SeqCst),
+            usize::from(!success && !realtime && !live_started)
+        );
         assert!(pipeline
             .inner
             .lock()
@@ -620,6 +644,36 @@ async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
             .active_streaming_session
             .is_none());
     }
+}
+
+#[tokio::test]
+async fn failed_stream_with_a_poisoned_state_lock_cannot_upload_again() {
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let provider = MockSttProvider::new("must not upload again");
+    let batch_calls = provider.batch_calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+    pipeline.start_recording().unwrap();
+    let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(1);
+    let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
+    let inner = pipeline.inner.clone();
+    let task = tokio::spawn(async move {
+        while audio_rx.recv().await.is_some() {}
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = inner.lock().unwrap();
+            panic!("synthetic state-lock failure");
+        }));
+        Err(crate::stt::SttError::Api("synthetic stream failure".into()))
+    });
+    pipeline.inner.lock().unwrap().active_streaming_session = Some(
+        crate::stt::streaming::StreamingSttSession::new(audio_tx, partial_rx, task),
+    );
+    assert!(matches!(
+        pipeline.stop_and_transcribe_detailed().await,
+        Err(PipelineError::Lock(_))
+    ));
+    assert_eq!(batch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

@@ -44,7 +44,7 @@ history-only recordings do not start this live dictation path.
 
 - **`SttProvider` trait** ([stt/mod.rs](../../app/src-tauri/src/stt/mod.rs)) — every provider implements `transcribe()` (batch). Providers that support streaming also override `supports_streaming()` → `true` and implement `start_streaming()`.
 - **`StreamingSttSession`** ([stt/streaming.rs](../../app/src-tauri/src/stt/streaming.rs)) — holds `audio_tx` (send chunks) and `partial_rx` (receive transcripts). Call `finalize()` when recording stops to get the final text.
-- **`Pipeline`** ([pipeline.rs](../../app/src-tauri/src/pipeline.rs)) — orchestrates everything. During recording, it routes live audio to the session's `audio_tx` and reads `partial_rx` to drive live output. On stop, it calls `finalize()` and falls back to batch if streaming failed (unless `requires_streaming()` is true).
+- **`Pipeline`** ([pipeline.rs](../../app/src-tauri/src/pipeline.rs)) — orchestrates everything. During recording, it routes live audio to the session's `audio_tx` and reads `partial_rx` to drive live output. On stop, it calls `finalize()`. A failed stream may fall back to batch only if the model supports batch and no live insertion has started. Otherwise it preserves the recording and reports a recoverable error; it never automatically replaces text already inserted.
 
 The provider task is abort-on-drop: discarding a session or cancelling its
 finalization future cannot detach the provider protocol. `finalize()` (including

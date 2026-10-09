@@ -1821,11 +1821,18 @@ impl SharedPipeline {
                     (normalized, duration_ms, None)
                 }
                 Err(e) => {
-                    // If the provider requires streaming (realtime-only model),
-                    // don't fall back to batch — propagate the error directly.
-                    if stt_provider.requires_streaming() {
+                    // Never replay an upload after live insertion has started:
+                    // output may already be present even if native paste failed
+                    // partway through. Preserve the recording for explicit recovery.
+                    let live_started = self
+                        .inner
+                        .lock()
+                        .map_err(|err| PipelineError::Lock(err.to_string()))?
+                        .live_output_active
+                        .load(std::sync::atomic::Ordering::SeqCst);
+                    if stt_provider.requires_streaming() || live_started {
                         log::error!(
-                            "Pipeline: Realtime STT failed ({}) — no batch fallback for this model",
+                            "Pipeline: Streaming STT failed ({}) — batch fallback is unsafe",
                             e
                         );
                         let mut inner = self
