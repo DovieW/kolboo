@@ -53,6 +53,12 @@ different deadline with `finalize_with_timeout()`. That tail starts after audio 
 at recording start. A timeout is a failed stream, not a successful partial result.
 This does not cancel provider-side processing or assert a vendor billing refund.
 
+Capture uses a nonblocking `StreamingAudioSender`. A full or closed provider
+queue marks the entire stream incomplete, aborts its provider task, and rejects
+subsequent chunks. Finalization reports a recoverable failure instead of accepting
+a partial transcript as success. The captured recording is independent of this
+queue; safe batch fallback still requires that no live insertion has started.
+
 ### Pipeline flow (streaming enabled)
 
 1. User presses record hotkey
@@ -230,10 +236,12 @@ The recording entry point (`core/recording.rs`) starts concurrent input independ
 of `stt_live_output`; the model selector should explain that network timing. The
 pipeline owns the active session and cancellation token. Connection/finalization
 are cancellation-aware, and the session now owns an abort-on-drop provider task
-with bounded finalization. Connection buffering, preview/insertion task ownership,
-target changes and safe fallback still need the broader lifecycle work, with tests
-for cancellation while connecting, sending, draining and live-pasting. Do not
-introduce a second streaming state machine in the UI.
+with bounded finalization and fail-closed audio delivery. Batch fallback is blocked
+once live insertion has started. Connection buffering, preview/insertion task
+ownership, target changes and pinning the original model/payment source for fallback
+still need the broader lifecycle work, with tests for cancellation while connecting,
+sending, draining and live-pasting. Do not introduce a second streaming state machine
+in the UI.
 
 Before adding AssemblyAI Sync/Dictation/3.5 realtime, Deepgram Flux, or a dedicated
 Yiddish provider, verify the exact protocol and lifecycle with local contract tests

@@ -5,6 +5,7 @@
 //!
 //! Supports optional Voice Activity Detection (VAD) for auto-stop functionality.
 
+use crate::stt::streaming::StreamingAudioSender;
 use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -23,6 +24,9 @@ mod device_selection;
 pub mod journal;
 mod meters;
 mod preprocessing;
+#[cfg(test)]
+#[path = "audio_capture/tests/streaming.rs"]
+mod streaming_tests;
 
 pub use device_selection::{
     get_default_input_device_info, list_input_devices, list_input_devices_v2, AudioInputDeviceInfo,
@@ -748,7 +752,7 @@ pub trait AudioCaptureBackend: Send {
     fn is_vad_auto_stop_enabled(&self) -> bool;
 
     /// Set (or clear) the live audio sender for concurrent STT streaming.
-    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>);
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>);
 
     /// Current sample rate of the active capture session (or the default).
     fn capture_sample_rate(&self) -> u32;
@@ -824,7 +828,7 @@ pub struct AudioCapture {
     /// When set, the worker thread downmixes captured audio to mono and sends chunks
     /// through this sender. The pipeline sets this at recording start when the STT
     /// provider supports concurrent streaming, and clears it when recording stops.
-    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
+    live_audio_tx: Arc<StdMutex<Option<StreamingAudioSender>>>,
 }
 
 impl AudioCapture {
@@ -1026,7 +1030,7 @@ impl AudioCapture {
     /// While set, the capture worker thread will send mono f32 chunks through
     /// this sender for each audio callback during recording. Call with `None`
     /// to stop streaming (also done automatically on `stop_recording`).
-    pub fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+    pub fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
         if let Ok(mut slot) = self.live_audio_tx.lock() {
             *slot = tx;
         }
@@ -1574,7 +1578,7 @@ impl AudioCaptureBackend for AudioCapture {
         self.is_vad_auto_stop_enabled()
     }
 
-    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
         self.set_live_audio_tx(tx);
     }
 
@@ -1610,7 +1614,7 @@ struct CaptureThreadArgs {
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
-    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
+    live_audio_tx: Arc<StdMutex<Option<StreamingAudioSender>>>,
 }
 
 /// Run the audio capture in a dedicated thread
@@ -1766,8 +1770,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             let mono =
                                 downmix_interleaved_to_mono(chunk.samples.as_slice(), channels);
                             // Use try_send to avoid blocking the capture worker.
-                            // If the channel is full the chunk is silently dropped;
-                            // the STT server still gets enough audio from other chunks.
                             let _ = sender.try_send(mono);
                         }
                     }

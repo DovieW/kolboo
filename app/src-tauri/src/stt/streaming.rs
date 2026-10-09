@@ -9,6 +9,10 @@
 
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
@@ -173,6 +177,49 @@ pub struct PartialTranscript {
     pub committed_text: Option<String>,
 }
 
+/// Capture never waits for a provider queue. If a chunk cannot be delivered,
+/// mark this input incomplete and stop its provider rather than accepting a
+/// transcript with missing audio. All sender clones share that failure state.
+#[derive(Clone)]
+pub struct StreamingAudioSender {
+    sender: mpsc::Sender<Vec<f32>>,
+    failed: Arc<AtomicBool>,
+    provider: tokio::task::AbortHandle,
+}
+
+impl StreamingAudioSender {
+    fn fail_input(&self) {
+        self.failed.store(true, Ordering::SeqCst);
+        self.provider.abort();
+    }
+
+    pub fn try_send(&self, audio: Vec<f32>) -> Result<(), mpsc::error::TrySendError<Vec<f32>>> {
+        if self.failed.load(Ordering::SeqCst) {
+            return Err(mpsc::error::TrySendError::Closed(audio));
+        }
+        self.sender
+            .try_send(audio)
+            .inspect_err(|_| self.fail_input())
+    }
+
+    /// Offline callers (such as CLI file playback) can await capacity. A
+    /// closed provider still marks incomplete input, exactly like capture.
+    pub async fn send(&self, audio: Vec<f32>) -> Result<(), mpsc::error::SendError<Vec<f32>>> {
+        if self.failed.load(Ordering::SeqCst) {
+            return Err(mpsc::error::SendError(audio));
+        }
+        self.sender
+            .send(audio)
+            .await
+            .inspect_err(|_| self.fail_input())
+    }
+
+    #[cfg(test)]
+    fn is_closed(&self) -> bool {
+        self.sender.is_closed()
+    }
+}
+
 /// A handle to an active concurrent streaming STT session.
 ///
 /// Audio chunks (mono f32 samples at the capture sample rate) are sent via
@@ -185,7 +232,7 @@ pub struct PartialTranscript {
 pub struct StreamingSttSession {
     /// Send mono f32 audio samples (at capture sample rate).
     /// Dropping this signals end-of-audio.
-    pub audio_tx: mpsc::Sender<Vec<f32>>,
+    pub audio_tx: StreamingAudioSender,
 
     /// Receive partial transcript updates while recording.
     /// This is `Option` so it can be taken out for a consumer task while
@@ -215,7 +262,11 @@ impl StreamingSttSession {
         task: tokio::task::JoinHandle<Result<String, SttError>>,
     ) -> Self {
         Self {
-            audio_tx,
+            audio_tx: StreamingAudioSender {
+                sender: audio_tx,
+                failed: Arc::new(AtomicBool::new(false)),
+                provider: task.abort_handle(),
+            },
             partial_rx: Some(partial_rx),
             task: OwnedStreamingTask(task),
         }
@@ -241,14 +292,20 @@ impl StreamingSttSession {
     /// Bound the tail after recording stops, independently of the session's
     /// recording duration. Timeout/cancellation drops the owned task guard.
     pub async fn finalize_with_timeout(self, deadline: Duration) -> Result<String, SttError> {
+        let input_failed = self.audio_tx.failed.clone();
         // Drop audio_tx to signal end-of-audio.
         drop(self.audio_tx);
         let mut task = self.task;
-        timeout(deadline, &mut task.0)
+        let result = timeout(deadline, &mut task.0)
             .await
-            .map_err(|_| SttError::Timeout)?
-            // Join errors can contain a provider panic's payload. Do not expose it.
-            .map_err(|_| SttError::NetworkMessage("Streaming provider task failed".into()))?
+            .map_err(|_| SttError::Timeout)?;
+        if input_failed.load(Ordering::SeqCst) {
+            return Err(SttError::Audio(
+                "Streaming audio could not be delivered completely. The recording is available for recovery.".into(),
+            ));
+        }
+        // Join errors can contain a provider panic's payload. Do not expose it.
+        result.map_err(|_| SttError::NetworkMessage("Streaming provider task failed".into()))?
     }
 }
 
@@ -292,6 +349,53 @@ mod tests {
             session.finalize().await.unwrap(),
             "synthetic completed transcript"
         );
+    }
+
+    #[tokio::test]
+    async fn queue_overflow_is_nonblocking_and_invalidates_the_whole_stream() {
+        let (session, mut stop) = pending_session().await;
+        let sender = session.audio_tx.clone();
+        assert!(sender.try_send(vec![1.0]).is_ok());
+        assert!(matches!(
+            sender.try_send(vec![2.0]),
+            Err(mpsc::error::TrySendError::Full(audio)) if audio == vec![2.0]
+        ));
+        assert!(matches!(
+            sender.try_send(vec![3.0]),
+            Err(mpsc::error::TrySendError::Closed(audio)) if audio == vec![3.0]
+        ));
+        assert!(matches!(
+            sender.send(vec![4.0]).await,
+            Err(mpsc::error::SendError(audio)) if audio == vec![4.0]
+        ));
+        stop.closed().await;
+        assert!(sender.is_closed());
+        assert!(matches!(session.finalize().await,
+            Err(SttError::Audio(message)) if message.contains("recording is available for recovery")));
+    }
+
+    #[tokio::test]
+    async fn closed_input_cannot_turn_a_premature_provider_result_into_success() {
+        for nonblocking in [true, false] {
+            let (audio_tx, audio_rx) = mpsc::channel(1);
+            let (_partial_tx, partial_rx) = mpsc::channel(1);
+            drop(audio_rx);
+            let (done, ready) = tokio::sync::oneshot::channel();
+            let task = tokio::spawn(async {
+                done.send(()).unwrap();
+                Ok("incomplete transcript".into())
+            });
+            ready.await.unwrap();
+            let session = StreamingSttSession::new(audio_tx, partial_rx, task);
+            if nonblocking {
+                assert!(matches!(session.audio_tx.try_send(vec![1.0]),
+                    Err(mpsc::error::TrySendError::Closed(audio)) if audio == vec![1.0]));
+            } else {
+                assert!(matches!(session.audio_tx.send(vec![1.0]).await,
+                    Err(mpsc::error::SendError(audio)) if audio == vec![1.0]));
+            }
+            assert!(matches!(session.finalize().await, Err(SttError::Audio(_))));
+        }
     }
 
     #[tokio::test]

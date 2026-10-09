@@ -250,7 +250,7 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
         false
     }
 
-    fn set_live_audio_tx(&mut self, _tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+    fn set_live_audio_tx(&mut self, _tx: Option<crate::stt::streaming::StreamingAudioSender>) {
         // No-op for tests.
     }
 
@@ -357,7 +357,7 @@ impl AudioCaptureBackend for FakeAudioCapture {
         self.vad_enabled && self.vad_auto_stop
     }
 
-    fn set_live_audio_tx(&mut self, _tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+    fn set_live_audio_tx(&mut self, _tx: Option<crate::stt::streaming::StreamingAudioSender>) {
         // No-op for tests.
     }
 
