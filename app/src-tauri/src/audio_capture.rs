@@ -161,6 +161,9 @@ pub enum AudioCaptureError {
 /// Audio buffer that accumulates samples during recording
 #[derive(Debug, Clone)]
 pub struct AudioBuffer {
+    // Audio persistence and delivery share this buffer's mutex. Attaching a
+    // provider can replay its prefix without racing the next worker append.
+    live_audio_tx: Option<StreamingAudioSender>,
     recovery_path: Option<std::path::PathBuf>,
     journal: Option<Arc<StdMutex<journal::Journal>>>,
     journal_failed: bool,
@@ -209,6 +212,7 @@ impl AudioBuffer {
     pub fn new(sample_rate: u32, channels: u16, max_duration_secs: f32) -> Self {
         let capacity = Self::max_samples_for(sample_rate, channels, max_duration_secs);
         Self {
+            live_audio_tx: None,
             data: vec![0.0; capacity],
             recovery_path: None,
             journal: None,
@@ -227,6 +231,9 @@ impl AudioBuffer {
     /// This is primarily used by long-running streams (Hot Mic) when the underlying
     /// device is restarted.
     pub fn set_format(&mut self, sample_rate: u32, channels: u16) {
+        if sample_rate != self.sample_rate || channels.max(1) != self.channels {
+            self.fail_live_input();
+        }
         self.sample_rate = sample_rate;
         self.channels = channels.max(1);
 
@@ -269,6 +276,8 @@ impl AudioBuffer {
     ///
     /// Clears samples and sets the max duration (used for trimming during capture).
     pub fn reset_for_recording(&mut self, max_duration_secs: f32) {
+        self.fail_live_input();
+        self.live_audio_tx = None;
         self.captured_samples = 0;
         self.max_duration_secs = max_duration_secs.max(0.0);
 
@@ -285,6 +294,7 @@ impl AudioBuffer {
     /// Append samples to the buffer
     pub fn append(&mut self, new_samples: &[f32]) {
         if self.journal_failed {
+            self.fail_live_input();
             return;
         }
         if self.journal.is_none() {
@@ -293,6 +303,7 @@ impl AudioBuffer {
                     Ok(writer) => self.journal = Some(Arc::new(StdMutex::new(writer))),
                     Err(_) => {
                         self.journal_failed = true;
+                        self.fail_live_input();
                         return;
                     }
                 }
@@ -306,11 +317,13 @@ impl AudioBuffer {
                         .is_err()
                     {
                         self.journal_failed = true;
+                        self.fail_live_input();
                         return;
                     }
                 }
                 Err(_) => {
                     self.journal_failed = true;
+                    self.fail_live_input();
                     return;
                 }
             }
@@ -318,6 +331,7 @@ impl AudioBuffer {
         self.captured_samples = self
             .captured_samples
             .saturating_add(new_samples.len() as u64);
+        self.deliver_live_audio(new_samples);
         let cap = self.capacity();
         if cap == 0 || new_samples.is_empty() {
             return;
@@ -344,6 +358,38 @@ impl AudioBuffer {
         }
 
         self.filled = (self.filled + new_samples.len()).min(cap);
+    }
+
+    fn fail_live_input(&self) {
+        if let Some(sender) = &self.live_audio_tx {
+            sender.fail_input();
+        }
+    }
+
+    fn deliver_live_audio(&self, samples: &[f32]) {
+        if !samples.is_empty() {
+            if let Some(sender) = &self.live_audio_tx {
+                let mono = downmix_interleaved_to_mono(samples, self.channels as usize);
+                let _ = sender.try_send(mono);
+            }
+        }
+    }
+
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
+        if tx.is_some() {
+            self.fail_live_input();
+        }
+        self.live_audio_tx = tx;
+        if self.live_audio_tx.is_none() {
+            return;
+        }
+        if self.journal_failed || self.captured_samples > self.filled as u64 {
+            // The in-memory prefix has wrapped (or failed to persist). Never
+            // present a truncated recording as complete streaming input.
+            self.fail_live_input();
+        } else {
+            self.deliver_live_audio(&self.snapshot());
+        }
     }
 
     /// Clear all samples from the buffer
@@ -822,13 +868,6 @@ pub struct AudioCapture {
 
     // Most recent realtime waveform buckets (for true waveform rendering).
     waveform_meter: Arc<AudioWaveformMeter>,
-
-    /// Optional sender for live mono f32 audio chunks (used by concurrent STT streaming).
-    ///
-    /// When set, the worker thread downmixes captured audio to mono and sends chunks
-    /// through this sender. The pipeline sets this at recording start when the STT
-    /// provider supports concurrent streaming, and clears it when recording stops.
-    live_audio_tx: Arc<StdMutex<Option<StreamingAudioSender>>>,
 }
 
 impl AudioCapture {
@@ -852,7 +891,6 @@ impl AudioCapture {
             recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
-            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -876,7 +914,6 @@ impl AudioCapture {
             recording_active: Arc::new(AtomicBool::new(false)),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
-            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -1027,12 +1064,17 @@ impl AudioCapture {
 
     /// Set (or clear) the live audio sender for concurrent STT streaming.
     ///
-    /// While set, the capture worker thread will send mono f32 chunks through
-    /// this sender for each audio callback during recording. Call with `None`
-    /// to stop streaming (also done automatically on `stop_recording`).
+    /// Replays the saved prefix before any later worker append, then delivers
+    /// new mono chunks without waiting for provider capacity. Clear after the
+    /// worker has drained on stop so finalization can close input.
     pub fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
-        if let Ok(mut slot) = self.live_audio_tx.lock() {
-            *slot = tx;
+        match self.buffer.lock() {
+            Ok(mut buffer) => buffer.set_live_audio_tx(tx),
+            Err(_) => {
+                if let Some(sender) = tx {
+                    sender.fail_input();
+                }
+            }
         }
     }
 
@@ -1123,7 +1165,6 @@ impl AudioCapture {
         let pre_roll_ms = self.pre_roll_ms.clone();
         let auto_recover = self.mic_auto_recover_enabled.clone();
         let desired_device_name = self.desired_device_name.clone();
-        let live_audio_tx = self.live_audio_tx.clone();
 
         // Spawn capture thread
         let thread_handle = thread::spawn(move || {
@@ -1142,7 +1183,6 @@ impl AudioCapture {
                 vad_config,
                 auto_recover_enabled: auto_recover,
                 desired_device_name,
-                live_audio_tx,
             })
         });
 
@@ -1614,7 +1654,6 @@ struct CaptureThreadArgs {
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
-    live_audio_tx: Arc<StdMutex<Option<StreamingAudioSender>>>,
 }
 
 /// Run the audio capture in a dedicated thread
@@ -1636,7 +1675,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         vad_config,
         auto_recover_enabled,
         desired_device_name,
-        live_audio_tx,
     } = args;
     let sample_rate = config.sample_rate;
 
@@ -1711,7 +1749,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let vad_pool = vad_pool.clone();
         let channels = config.channels.max(1) as usize;
         let sample_rate = config.sample_rate;
-        let live_audio_tx = live_audio_tx.clone();
 
         thread::spawn(move || {
             let mut last_pre_roll_capacity: usize = 0;
@@ -1761,16 +1798,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                                     let _ = pool.push(mono);
                                 }
                             }
-                        }
-                    }
-
-                    // Live audio streaming: send mono f32 chunks for concurrent STT.
-                    if let Ok(guard) = live_audio_tx.lock() {
-                        if let Some(ref sender) = *guard {
-                            let mono =
-                                downmix_interleaved_to_mono(chunk.samples.as_slice(), channels);
-                            // Use try_send to avoid blocking the capture worker.
-                            let _ = sender.try_send(mono);
                         }
                     }
                 }

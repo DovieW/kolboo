@@ -59,6 +59,14 @@ subsequent chunks. Finalization reports a recoverable failure instead of accepti
 a partial transcript as success. The captured recording is independent of this
 queue; safe batch fallback still requires that no live insertion has started.
 
+The recording buffer owns live delivery under the same mutex as sample appends.
+Attaching after connection replays the saved prefix (including pre-roll) before
+later chunks; there is no second forwarding path to duplicate samples. Prefixes
+that have already wrapped or failed storage fail closed; capture format changes
+invalidate an active input.
+Clearing delivery after worker drain closes input without aborting normal
+finalization; resetting a recording aborts any old input.
+
 ### Pipeline flow (streaming enabled)
 
 1. User presses record hotkey
@@ -236,9 +244,9 @@ The recording entry point (`core/recording.rs`) starts concurrent input independ
 of `stt_live_output`; the model selector should explain that network timing. The
 pipeline owns the active session and cancellation token. Connection/finalization
 are cancellation-aware, and the session now owns an abort-on-drop provider task
-with bounded finalization and fail-closed audio delivery. Batch fallback is blocked
-once live insertion has started. Connection buffering, preview/insertion task
-ownership, target changes and pinning the original model/payment source for fallback
+with bounded finalization and fail-closed, buffered audio delivery. Batch fallback
+is blocked once live insertion has started. Late connection handoff after stop,
+preview/insertion task ownership, target changes and pinning the original model/payment source for fallback
 still need the broader lifecycle work, with tests for cancellation while connecting,
 sending, draining and live-pasting. Do not introduce a second streaming state machine
 in the UI.

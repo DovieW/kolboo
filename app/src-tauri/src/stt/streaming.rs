@@ -180,7 +180,7 @@ pub struct PartialTranscript {
 /// Capture never waits for a provider queue. If a chunk cannot be delivered,
 /// mark this input incomplete and stop its provider rather than accepting a
 /// transcript with missing audio. All sender clones share that failure state.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StreamingAudioSender {
     sender: mpsc::Sender<Vec<f32>>,
     failed: Arc<AtomicBool>,
@@ -188,7 +188,7 @@ pub struct StreamingAudioSender {
 }
 
 impl StreamingAudioSender {
-    fn fail_input(&self) {
+    pub(crate) fn fail_input(&self) {
         self.failed.store(true, Ordering::SeqCst);
         self.provider.abort();
     }
