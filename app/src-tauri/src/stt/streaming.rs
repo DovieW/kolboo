@@ -194,7 +194,17 @@ pub struct StreamingSttSession {
 
     /// Background task that runs the provider protocol.
     /// Resolves to the final committed transcript.
-    task: tokio::task::JoinHandle<Result<String, SttError>>,
+    task: OwnedStreamingTask,
+}
+
+/// A JoinHandle detaches on drop by default. This guard travels with the
+/// finalization future too, so cancelling that future cannot orphan a provider.
+struct OwnedStreamingTask(tokio::task::JoinHandle<Result<String, SttError>>);
+
+impl Drop for OwnedStreamingTask {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl StreamingSttSession {
@@ -207,7 +217,7 @@ impl StreamingSttSession {
         Self {
             audio_tx,
             partial_rx: Some(partial_rx),
-            task,
+            task: OwnedStreamingTask(task),
         }
     }
 
@@ -225,13 +235,20 @@ impl StreamingSttSession {
     /// This will cause the background task to see the channel close, send a commit
     /// to the server, and wait for the final committed transcript.
     pub async fn finalize(self) -> Result<String, SttError> {
+        self.finalize_with_timeout(Duration::from_secs(60)).await
+    }
+
+    /// Bound the tail after recording stops, independently of the session's
+    /// recording duration. Timeout/cancellation drops the owned task guard.
+    pub async fn finalize_with_timeout(self, deadline: Duration) -> Result<String, SttError> {
         // Drop audio_tx to signal end-of-audio.
         drop(self.audio_tx);
-
-        // Await the background task.
-        self.task
+        let mut task = self.task;
+        timeout(deadline, &mut task.0)
             .await
-            .map_err(|e| SttError::NetworkMessage(format!("Streaming task panicked: {}", e)))?
+            .map_err(|_| SttError::Timeout)?
+            // Join errors can contain a provider panic's payload. Do not expose it.
+            .map_err(|_| SttError::NetworkMessage("Streaming provider task failed".into()))?
     }
 }
 
@@ -239,6 +256,135 @@ impl StreamingSttSession {
 mod tests {
     use super::*;
     use crate::settings::ProxyMode;
+
+    /// The returned sender closes only when the spawned provider future drops.
+    /// A startup barrier removes scheduling/timing assumptions from abort tests.
+    async fn pending_session() -> (StreamingSttSession, tokio::sync::oneshot::Sender<()>) {
+        let (audio_tx, audio_rx) = mpsc::channel(1);
+        let (_partial_tx, partial_rx) = mpsc::channel(1);
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let (stop, wait) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let _audio_rx = audio_rx;
+            started.send(()).unwrap();
+            let _ = wait.await;
+            Ok("synthetic completed transcript".into())
+        });
+        ready.await.unwrap();
+        (StreamingSttSession::new(audio_tx, partial_rx, task), stop)
+    }
+
+    #[tokio::test]
+    async fn dropping_a_session_aborts_the_provider_even_with_a_sender_clone() {
+        let (session, mut stop) = pending_session().await;
+        let sender = session.audio_tx.clone();
+        assert!(!sender.is_closed());
+        drop(session);
+        stop.closed().await;
+        assert!(sender.is_closed());
+    }
+
+    #[tokio::test]
+    async fn a_provider_finishing_before_finalization_keeps_its_result() {
+        let (session, stop) = pending_session().await;
+        stop.send(()).unwrap();
+        assert_eq!(
+            session.finalize().await.unwrap(),
+            "synthetic completed transcript"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelling_finalization_aborts_the_provider_before_or_after_polling() {
+        use std::{
+            future::Future,
+            task::{Context, Poll, Waker},
+        };
+        for poll in [false, true] {
+            let (session, mut stop) = pending_session().await;
+            let mut finalize = Box::pin(session.finalize());
+            if poll {
+                assert!(matches!(
+                    finalize
+                        .as_mut()
+                        .poll(&mut Context::from_waker(Waker::noop())),
+                    Poll::Pending
+                ));
+            }
+            drop(finalize);
+            stop.closed().await;
+            assert!(stop.is_closed());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_finalization_deadline_aborts_a_provider_that_never_finishes() {
+        for deadline in [Some(Duration::from_secs(3)), None] {
+            let (session, mut stop) = pending_session().await;
+            let begin = tokio::time::Instant::now();
+            let result = match deadline {
+                Some(deadline) => session.finalize_with_timeout(deadline).await,
+                None => session.finalize().await,
+            };
+            assert!(matches!(result, Err(SttError::Timeout)));
+            stop.closed().await;
+            assert_eq!(begin.elapsed(), deadline.unwrap_or(Duration::from_secs(60)));
+        }
+    }
+
+    #[tokio::test]
+    async fn finalization_closes_input_and_preserves_order_and_provider_errors() {
+        let (audio_tx, mut audio_rx) = mpsc::channel(4);
+        let (partial_tx, partial_rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            let mut samples = Vec::new();
+            while let Some(chunk) = audio_rx.recv().await {
+                samples.extend(chunk);
+            }
+            assert_eq!(samples, vec![1.0, 2.0, 3.0]);
+            partial_tx
+                .send(PartialTranscript {
+                    text: "א גוטן טאָג".into(),
+                    committed_text: None,
+                })
+                .await
+                .unwrap();
+            Ok("א גוטן טאָג".into())
+        });
+        let mut session = StreamingSttSession::new(audio_tx, partial_rx, task);
+        let mut partials = session.take_partial_rx().unwrap();
+        assert!(session.take_partial_rx().is_none());
+        session.audio_tx.send(vec![1.0, 2.0]).await.unwrap();
+        session.audio_tx.send(vec![3.0]).await.unwrap();
+        assert_eq!(session.finalize().await.unwrap(), "א גוטן טאָג");
+        assert_eq!(partials.recv().await.unwrap().text, "א גוטן טאָג");
+        assert!(partials.recv().await.is_none());
+
+        let (audio_tx, _audio_rx) = mpsc::channel(1);
+        let (_partial_tx, partial_rx) = mpsc::channel(1);
+        let session = StreamingSttSession::new(
+            audio_tx,
+            partial_rx,
+            tokio::spawn(async { Err(SttError::Api("synthetic error".into())) }),
+        );
+        assert!(
+            matches!(session.finalize().await, Err(SttError::Api(message)) if message == "synthetic error")
+        );
+    }
+
+    #[tokio::test]
+    async fn join_errors_do_not_expose_provider_panic_payloads() {
+        let (audio_tx, _audio_rx) = mpsc::channel(1);
+        let (_partial_tx, partial_rx) = mpsc::channel(1);
+        let session = StreamingSttSession::new(
+            audio_tx,
+            partial_rx,
+            tokio::spawn(async { panic!("synthetic private payload") }),
+        );
+        assert!(
+            matches!(session.finalize().await, Err(SttError::NetworkMessage(message)) if message == "Streaming provider task failed")
+        );
+    }
 
     #[test]
     fn websocket_transport_gap_is_none_for_default_system_settings() {
