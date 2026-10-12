@@ -48,6 +48,9 @@ pub(super) fn resolve_stt_provider_for_transcription(
     inner: &mut PipelineInner,
     request: SttProviderResolutionRequest<'_>,
 ) -> Result<ResolvedSttProvider, PipelineError> {
+    if let Some(error) = &inner.config.model_selection_error {
+        return Err(PipelineError::Config(error.clone()));
+    }
     let mut effective =
         inner.resolve_effective_stt_settings(request.active_profile, request.active_preset);
 
@@ -57,11 +60,18 @@ pub(super) fn resolve_stt_provider_for_transcription(
         request.forced_provider,
         request.forced_model,
     );
+    if request.forced_provider.is_some() || request.forced_model.is_some() {
+        effective.selection = None;
+    }
+    if let Some(choice) = &effective.selection {
+        choice.validate().map_err(PipelineError::Config)?;
+    }
     if let Some(language) = request.forced_language {
         effective.language = super::normalize_stt_language_setting(Some(language.to_string()));
     }
 
-    let mut provider_id_used = if request.forced_provider.is_some() {
+    let mut provider_id_used = if request.forced_provider.is_some() || effective.selection.is_some()
+    {
         effective.provider_id.clone()
     } else {
         resolve_stt_provider_for_runtime(
@@ -144,12 +154,16 @@ pub(super) fn resolve_stt_provider_for_transcription(
         &provider_id_used,
         effective.model.clone(),
         effective.language.clone(),
+        effective.selection.as_ref().map(|choice| choice.source),
     ) {
         Ok(provider) => provider,
         Err(err) => {
             // Explicit per-recording/model selections must not silently use the
             // dictation provider if their credentials/model are unavailable.
-            if request.forced_provider.is_some() || provider_id_used.starts_with("custom_") {
+            if request.forced_provider.is_some()
+                || effective.selection.is_some()
+                || provider_id_used.starts_with("custom_")
+            {
                 inner.set_error("The selected transcription provider is unavailable");
                 return Err(err);
             }
@@ -295,7 +309,22 @@ pub(super) fn get_or_create_stt_provider(
 ) -> Result<Arc<dyn SttProvider>, PipelineError> {
     let provider_id =
         resolve_stt_provider_for_runtime(&inner.config, provider_id, model.as_deref());
-    get_or_create_resolved_stt_provider(inner, &provider_id, model, language)
+    get_or_create_resolved_stt_provider(inner, &provider_id, model, language, None)
+}
+
+pub(super) fn get_or_create_selected_stt_provider(
+    inner: &mut PipelineInner,
+    choice: &crate::model_selection::ModelSelection,
+    language: Option<String>,
+) -> Result<Arc<dyn SttProvider>, PipelineError> {
+    choice.validate().map_err(PipelineError::Config)?;
+    get_or_create_resolved_stt_provider(
+        inner,
+        &choice.provider_id,
+        Some(choice.model_id.clone()),
+        language,
+        Some(choice.source),
+    )
 }
 
 fn get_or_create_resolved_stt_provider(
@@ -303,14 +332,28 @@ fn get_or_create_resolved_stt_provider(
     provider_id: &str,
     model: Option<String>,
     language: Option<String>,
+    source: Option<crate::model_selection::ModelSource>,
 ) -> Result<Arc<dyn SttProvider>, PipelineError> {
+    if let Some(error) = &inner.config.model_selection_error {
+        return Err(PipelineError::Config(error.clone()));
+    }
     let provider_id = canonicalize_stt_provider_id(provider_id);
     let managed_ready =
         inner.config.managed_inference_enabled && managed_gateway_ready(&inner.config);
-    let managed_transport_active = managed_ready
+    let legacy_managed_transport = managed_ready
         && inner.config.managed_stt_preferred
         && managed_stt_model_supported(provider_id.as_str(), model.as_deref())
         && !local_provider::bypasses_managed_transport(provider_id.as_str());
+    let managed_transport_active = match source {
+        Some(crate::model_selection::ModelSource::Byok) => false,
+        Some(crate::model_selection::ModelSource::Managed) => {
+            if !managed_ready || !managed_stt_model_supported(&provider_id, model.as_deref()) {
+                return Err(PipelineError::Config("The selected Managed transcription model is unavailable. Sign in or refresh access; your model choice has not changed".into()));
+            }
+            true
+        }
+        None => legacy_managed_transport,
+    };
 
     if managed_transport_active {
         if let Some(store) = &inner.config.request_log_store {
@@ -320,8 +363,19 @@ fn get_or_create_resolved_stt_provider(
         }
     }
 
-    let cache_key =
-        stt_provider_cache_key(inner, provider_id.as_str(), model.clone(), language.clone());
+    let cache_key = match source {
+        Some(source) => serde_json::json!([
+            provider_id,
+            model,
+            language,
+            inner.config.stt_live_output,
+            source
+        ])
+        .to_string(),
+        None => {
+            stt_provider_cache_key(inner, provider_id.as_str(), model.clone(), language.clone())
+        }
+    };
 
     if let Some(provider) = inner.stt_provider_cache.get(&cache_key) {
         return Ok(provider.clone());
@@ -514,6 +568,7 @@ mod tests {
         timeout_seconds: Option<f64>,
     ) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: "profile".to_string(),
             name: "Profile".to_string(),
             program_paths: vec![],
@@ -578,6 +633,7 @@ mod tests {
         timeout_seconds: Option<f64>,
     ) -> ProgramPreset {
         ProgramPreset {
+            model_selections: Default::default(),
             id: "preset".to_string(),
             name: "Preset".to_string(),
             routing_hints: vec![],

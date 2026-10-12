@@ -35,6 +35,8 @@ import type {
 	LlmProviderInfo,
 	LocalWhisperBackendStatus,
 	ModelOption,
+	ModelAction,
+	ModelSelection,
 	ModelPricing,
 	ModelPricingKind,
 	OpenAiReasoningEffort,
@@ -485,6 +487,9 @@ export const llmAPI = {
 	complete: (params: {
 		provider: string;
 		model?: string | null;
+		action?: ModelAction;
+		modelSelection?: ModelSelection | null;
+		profileId?: string | null;
 		systemPrompt: string;
 		userPrompt: string;
 
@@ -497,6 +502,9 @@ export const llmAPI = {
 		invoke<LlmCompleteResponse>("llm_complete", {
 			// Rust signature: llm_complete(pipeline, args: LlmCompleteArgs)
 			args: {
+				...(params.action ? { action: params.action } : {}),
+				...(params.modelSelection ? { modelSelection: params.modelSelection } : {}),
+				...(params.profileId ? { profileId: params.profileId } : {}),
 				provider: params.provider,
 				model: params.model ?? null,
 
@@ -513,6 +521,7 @@ export const llmAPI = {
 
 	iterateRewritePrompt: (params: {
 		profileId?: string | null;
+		presetId?: string | null;
 		mode?: "fixed" | "new";
 		transcript: string;
 		problemOutput: string;
@@ -536,6 +545,7 @@ export const llmAPI = {
 					: null,
 			currentPrompt: params.currentPrompt,
 			profileId: params.profileId ?? null,
+			...(params.presetId ? {presetId: params.presetId} : {}),
 			mode: params.mode ?? null,
 
 			llmProvider: params.llmProvider ?? null,
@@ -556,6 +566,7 @@ export const llmAPI = {
 
 	testRewriteWithPrompt: (params: {
 		profileId?: string | null;
+		presetId?: string | null;
 		transcript: string;
 		prompt: string;
 	}) =>
@@ -563,6 +574,7 @@ export const llmAPI = {
 			transcript: params.transcript,
 			prompt: params.prompt,
 			profileId: params.profileId ?? null,
+			...(params.presetId ? {presetId: params.presetId} : {}),
 		}),
 
 	/**
@@ -610,6 +622,7 @@ export const audioSettingsTestAPI = {
 };
 
 interface ProviderInfo {
+	configured?: boolean;
 	value: string;
 	label: string;
 	is_local: boolean;
@@ -653,8 +666,8 @@ export const configAPI = {
 		invoke<DefaultSectionsResponse>("get_default_sections"),
 
 	// Available providers (from Tauri, based on configured API keys)
-	getAvailableProviders: () =>
-		invoke<AvailableProvidersResponse>("get_available_providers"),
+	getAvailableProviders: (includeUnconfigured = false) =>
+		includeUnconfigured ? invoke<AvailableProvidersResponse>("get_available_providers", {includeUnconfigured: true}) : invoke<AvailableProvidersResponse>("get_available_providers"),
 
 	// Sync pipeline config when settings change
 	syncPipelineConfig: () => invoke<void>("sync_pipeline_config"),

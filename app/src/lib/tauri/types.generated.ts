@@ -48,6 +48,7 @@ export interface AvailableProvidersResponse {
  * Information about a provider
  */
 export interface ProviderInfo {
+  configured?: boolean | null;
   is_local: boolean;
   label: string;
   model_names?: {
@@ -447,6 +448,30 @@ export interface UsagePeriod {
   period_start: string;
 }
 
+// From: llm-complete-args.schema.json
+export type ModelAction =
+  "transcription" | "rewrite" | "quick_ask" | "quick_replace" | "intent_router" | "history_analysis" | "prompt_tools";
+export type ModelSource = "managed" | "byok";
+
+export interface LlmCompleteArgs {
+  action?: ModelAction | null;
+  anthropic_thinking_budget?: number | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  model?: string | null;
+  model_selection?: ModelSelection | null;
+  openai_reasoning_effort?: string | null;
+  profile_id?: string | null;
+  provider: string;
+  system_prompt: string;
+  user_prompt: string;
+}
+export interface ModelSelection {
+  model_id: string;
+  provider_id: string;
+  source: ModelSource;
+}
+
 // From: llm-complete-response.schema.json
 export interface LlmCompleteResponse {
   model_used: string;
@@ -528,13 +553,141 @@ export interface SttModelPricing {
   usd_micros_per_minute?: number | null;
 }
 
-// From: model-selection.schema.json
-export type ModelSource = "managed" | "byok";
-
-export interface ModelSelection {
-  model_id: string;
-  provider_id: string;
-  source: ModelSource;
+// From: model-settings.schema.json
+export interface LoadedModelSettings {
+  error?: string | null;
+  model_selections: {
+    [k: string]: ModelSelection | undefined;
+  };
+  profiles: RewriteProgramPromptProfile[];
+}
+export interface RewriteProgramPromptProfile {
+  /**
+   * Persisted manual selection (if set, can be used as an override for routing).
+   */
+  active_preset_id?: string | null;
+  anthropic_thinking_budget?: number | null;
+  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
+  /**
+   * Context grabbing method for highlighted-text capture.
+   *
+   * Controls what shortcut Kolboo uses to copy the current selection when probing. Expected values: - "none" (disable selection capture) - "ctrl_c" (default) - "ctrl_shift_c" (common in terminals on Windows) - "ctrl_insert" (alternative terminal-friendly copy on Windows)
+   */
+  context_grab_method?: string | null;
+  /**
+   * Description for the implicit "Default" (no preset) routing target.
+   */
+  default_preset_description?: string | null;
+  /**
+   * Default preset used when routing is off/undecided.
+   */
+  default_preset_id?: string | null;
+  /**
+   * Per-profile gate for the rewrite step when routed to the implicit "Default" target (i.e., no preset selected).
+   *
+   * This is independent of per-preset rewrite gates. The global/per-profile rewrite gate remains a hard gate that can disable rewrite for *all* presets.
+   */
+  default_target_rewrite_llm_enabled?: boolean;
+  /**
+   * When true, this profile is temporarily disabled and never activated.
+   */
+  disabled?: boolean;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  id: string;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  /**
+   * Atomic per-action choices. An absent action retains legacy inheritance.
+   */
+  model_selections?: {
+    [k: string]: ModelSelection | undefined;
+  };
+  name: string;
+  openai_reasoning_effort?: string | null;
+  output_hit_enter?: boolean | null;
+  output_mode?: string | null;
+  output_paste_shortcut?: string | null;
+  overlay_mode?: string | null;
+  playing_audio_handling?: string | null;
+  presets?: RewritePreset[];
+  program_paths?: string[];
+  quick_ask_active_window_ocr_mode?: string | null;
+  quick_ask_anthropic_thinking_budget?: number | null;
+  quick_ask_dismiss_mode?: string | null;
+  quick_ask_gemini_thinking_budget?: number | null;
+  quick_ask_gemini_thinking_level?: string | null;
+  quick_ask_include_clipboard_context?: boolean | null;
+  quick_ask_model?: string | null;
+  quick_ask_openai_reasoning_effort?: string | null;
+  quick_ask_provider?: string | null;
+  quick_ask_system_prompt?: string | null;
+  quick_replace_active_window_ocr_mode?: string | null;
+  quick_replace_enabled?: boolean | null;
+  quick_replace_include_clipboard_context?: boolean | null;
+  quick_replace_model?: string | null;
+  quick_replace_provider?: string | null;
+  quick_replace_system_prompt?: string | null;
+  rewrite_active_window_ocr_mode?: string | null;
+  rewrite_include_clipboard_context?: boolean | null;
+  /**
+   * Optional per-profile gate for the rewrite step (falls back to global setting)
+   */
+  rewrite_llm_enabled?: boolean | null;
+  /**
+   * Optional intent router configuration.
+   */
+  router?: IntentRouterSettings | null;
+  sound_enabled?: boolean | null;
+  stt_language?: string | null;
+  stt_model?: string | null;
+  stt_provider?: string | null;
+  stt_timeout_seconds?: number | null;
+  widget_position?: string | null;
+}
+export interface CleanupPromptSectionsSetting {
+  /**
+   * System prompt override. When missing/None, inherit from base prompts.
+   */
+  system?: PromptSectionSetting | null;
+}
+export interface PromptSectionSetting {
+  content?: string | null;
+}
+export interface RewritePreset {
+  anthropic_thinking_budget?: number | null;
+  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
+  description?: string | null;
+  gemini_thinking_budget?: number | null;
+  gemini_thinking_level?: string | null;
+  id?: string;
+  llm_model?: string | null;
+  llm_provider?: string | null;
+  model_selections?: {
+    [k: string]: ModelSelection | undefined;
+  };
+  name?: string;
+  openai_reasoning_effort?: string | null;
+  output_hit_enter?: boolean | null;
+  output_mode?: string | null;
+  overlay_mode?: string | null;
+  playing_audio_handling?: string | null;
+  /**
+   * Explicit per-preset gate for the rewrite step.
+   *
+   * Semantics: - Missing/null in legacy settings => defaults to true (backward compatible) - Does NOT override the global or per-profile rewrite gate (those are hard gates)
+   */
+  rewrite_llm_enabled?: boolean;
+  /**
+   * Example utterances / short hints used by the intent router.
+   */
+  routing_hints?: string[];
+  sound_enabled?: boolean | null;
+  stt_language?: string | null;
+  stt_model?: string | null;
+  stt_provider?: string | null;
+  stt_timeout_seconds?: number | null;
+  widget_position?: string | null;
 }
 
 // From: open-window-info.schema.json
@@ -1065,129 +1218,6 @@ export interface RouterPresetScore {
   preset_name: string;
   score?: number | null;
   selected?: boolean;
-}
-
-// From: rewrite-preset.schema.json
-export interface RewritePreset {
-  anthropic_thinking_budget?: number | null;
-  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
-  description?: string | null;
-  gemini_thinking_budget?: number | null;
-  gemini_thinking_level?: string | null;
-  id?: string;
-  llm_model?: string | null;
-  llm_provider?: string | null;
-  name?: string;
-  openai_reasoning_effort?: string | null;
-  output_hit_enter?: boolean | null;
-  output_mode?: string | null;
-  overlay_mode?: string | null;
-  playing_audio_handling?: string | null;
-  /**
-   * Explicit per-preset gate for the rewrite step.
-   *
-   * Semantics: - Missing/null in legacy settings => defaults to true (backward compatible) - Does NOT override the global or per-profile rewrite gate (those are hard gates)
-   */
-  rewrite_llm_enabled?: boolean;
-  /**
-   * Example utterances / short hints used by the intent router.
-   */
-  routing_hints?: string[];
-  sound_enabled?: boolean | null;
-  stt_language?: string | null;
-  stt_model?: string | null;
-  stt_provider?: string | null;
-  stt_timeout_seconds?: number | null;
-  widget_position?: string | null;
-}
-export interface CleanupPromptSectionsSetting {
-  /**
-   * System prompt override. When missing/None, inherit from base prompts.
-   */
-  system?: PromptSectionSetting | null;
-}
-export interface PromptSectionSetting {
-  content?: string | null;
-}
-
-// From: rewrite-program-profile.schema.json
-export interface RewriteProgramPromptProfile {
-  /**
-   * Persisted manual selection (if set, can be used as an override for routing).
-   */
-  active_preset_id?: string | null;
-  anthropic_thinking_budget?: number | null;
-  cleanup_prompt_sections?: CleanupPromptSectionsSetting | null;
-  /**
-   * Context grabbing method for highlighted-text capture.
-   *
-   * Controls what shortcut Kolboo uses to copy the current selection when probing. Expected values: - "none" (disable selection capture) - "ctrl_c" (default) - "ctrl_shift_c" (common in terminals on Windows) - "ctrl_insert" (alternative terminal-friendly copy on Windows)
-   */
-  context_grab_method?: string | null;
-  /**
-   * Description for the implicit "Default" (no preset) routing target.
-   */
-  default_preset_description?: string | null;
-  /**
-   * Default preset used when routing is off/undecided.
-   */
-  default_preset_id?: string | null;
-  /**
-   * Per-profile gate for the rewrite step when routed to the implicit "Default" target (i.e., no preset selected).
-   *
-   * This is independent of per-preset rewrite gates. The global/per-profile rewrite gate remains a hard gate that can disable rewrite for *all* presets.
-   */
-  default_target_rewrite_llm_enabled?: boolean;
-  /**
-   * When true, this profile is temporarily disabled and never activated.
-   */
-  disabled?: boolean;
-  gemini_thinking_budget?: number | null;
-  gemini_thinking_level?: string | null;
-  id: string;
-  llm_model?: string | null;
-  llm_provider?: string | null;
-  name: string;
-  openai_reasoning_effort?: string | null;
-  output_hit_enter?: boolean | null;
-  output_mode?: string | null;
-  output_paste_shortcut?: string | null;
-  overlay_mode?: string | null;
-  playing_audio_handling?: string | null;
-  presets?: RewritePreset[];
-  program_paths?: string[];
-  quick_ask_active_window_ocr_mode?: string | null;
-  quick_ask_anthropic_thinking_budget?: number | null;
-  quick_ask_dismiss_mode?: string | null;
-  quick_ask_gemini_thinking_budget?: number | null;
-  quick_ask_gemini_thinking_level?: string | null;
-  quick_ask_include_clipboard_context?: boolean | null;
-  quick_ask_model?: string | null;
-  quick_ask_openai_reasoning_effort?: string | null;
-  quick_ask_provider?: string | null;
-  quick_ask_system_prompt?: string | null;
-  quick_replace_active_window_ocr_mode?: string | null;
-  quick_replace_enabled?: boolean | null;
-  quick_replace_include_clipboard_context?: boolean | null;
-  quick_replace_model?: string | null;
-  quick_replace_provider?: string | null;
-  quick_replace_system_prompt?: string | null;
-  rewrite_active_window_ocr_mode?: string | null;
-  rewrite_include_clipboard_context?: boolean | null;
-  /**
-   * Optional per-profile gate for the rewrite step (falls back to global setting)
-   */
-  rewrite_llm_enabled?: boolean | null;
-  /**
-   * Optional intent router configuration.
-   */
-  router?: IntentRouterSettings | null;
-  sound_enabled?: boolean | null;
-  stt_language?: string | null;
-  stt_model?: string | null;
-  stt_provider?: string | null;
-  stt_timeout_seconds?: number | null;
-  widget_position?: string | null;
 }
 
 // From: settings-changed.schema.json

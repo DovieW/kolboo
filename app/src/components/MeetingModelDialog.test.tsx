@@ -16,58 +16,19 @@ const state = vi.hoisted(() => ({
 	refetchProviders: vi.fn(),
 	refetchCatalog: vi.fn(),
 }));
-vi.mock("../lib/queries/providers", () => ({
-	useAvailableProviders: () => ({
-		isPending: state.loadingProviders,
-		isError: state.providerError,
-		refetch: state.refetchProviders,
-		data:
-			state.loadingProviders || state.providerError
-				? undefined
-				: {
-						stt: state.custom
-							? [
-									{
-										value: "custom_test",
-										label: "My server",
-										models: ["my-transcriber"],
-									},
-								]
-							: state.openai
-								? [{ value: "openai", label: "OpenAI" }]
-								: state.managed
-									? []
-									: [{ value: "whisper", label: "Local Whisper" }],
-					},
-	}),
-	useWhisperModels: () => ({
-		data: [
-			{ id: "base", name: "Base", is_downloaded: true },
-			{ id: "small", name: "Small", is_downloaded: true },
-			{ id: "large", name: "Large", is_downloaded: false },
-		],
-	}),
-	useManagedModels: () => ({
-		isSuccess: !state.catalogError,
-		isError: state.catalogError,
-		refetch: state.refetchCatalog,
-		data: state.openai
-			? [
-					{
-						provider: "openai",
-						id: "gpt-4o-transcribe-diarize",
-						display_name: "Speaker model",
-						capabilities: ["transcription"],
-					},
-				]
-			: [],
-	}),
-}));
-vi.mock("../lib/queries/license", () => ({
-	useLicenseAuthContext: () => ({ data: {} }),
-}));
-vi.mock("../lib/tauri/managedInference", () => ({
-	hasManagedInferenceAccess: () => state.managed,
+vi.mock("../lib/queries/modelChoices", () => ({
+ useModelChoices: () => {
+  const choices: import("../lib/modelSelection").ModelChoice[] = [];
+  const add=(source:"byok"|"managed",provider:string,model:string,name:string)=>choices.push({selection:{source,provider_id:provider,model_id:model},displayName:name,providerName:provider === "custom_test" ? "My server" : provider === "local-whisper" ? "Local Whisper" : "OpenAI",ready:true,capabilities:["After recording",...(model === "gpt-4o-transcribe-diarize" ? ["Speaker labels"]:[])]});
+  if (!state.loadingProviders && !state.providerError) {
+   if (state.custom) add("byok","custom_test","my-transcriber","my-transcriber");
+   else if (state.openai) {add("byok","openai","whisper-1","Whisper");add("byok","openai","gpt-4o-transcribe-diarize","GPT-4o Transcribe · speaker labels");}
+   else if (!state.managed) {add("byok","local-whisper","base","Base");add("byok","local-whisper","small","Small");}
+  }
+  if (state.managed && state.openai && !state.catalogError) add("managed","openai","gpt-4o-transcribe-diarize","Speaker model");
+  const failedSources=[{label:"provider list",query:{isError:state.providerError,isFetching:false,refetch:state.refetchProviders}},{label:"managed models",query:{isError:state.managed && state.catalogError,isFetching:false,refetch:state.refetchCatalog}}].filter(({query})=>query.isError);
+  return {choices,loading:state.loadingProviders,failedSources,managedMessage:state.managed?undefined:"Sign in for Managed",retry:()=>{void state.refetchProviders(); if(state.managed) void state.refetchCatalog();}};
+ },
 }));
 let host: HTMLDivElement;
 let root: Root;

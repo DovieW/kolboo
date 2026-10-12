@@ -61,6 +61,24 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("tauri settings side effects", () => {
+    it("hydrates authoritative profile and linked-preset choices and fails closed when their snapshot is invalid",async()=>{
+        const {tauriSettingsAPI}=await import("./settings");
+        const selected={source:"byok",provider_id:"custom_text",model_id:"raw-id"};
+        currentStore=new FakeStore({model_selection_scopes_enabled:true,model_selection_rewrite:selected});
+        let snapshot:unknown={model_selections:{rewrite:selected},profiles:[{id:"p",name:"Profile",presets:[{id:"q",name:"Preset",model_selections:{prompt_tools:selected}}]},null],error:null};
+        invokeMock.mockImplementation(async command=>command==="get_model_selection_settings"?snapshot:undefined);
+        const settings=await tauriSettingsAPI.getSettings();
+        expect(settings.model_selections?.rewrite).toEqual(selected);
+        expect(settings.rewrite_program_prompt_profiles?.[0]?.presets?.[0]?.model_selections?.prompt_tools).toEqual(selected);
+        expect(invokeMock).toHaveBeenCalledWith("get_model_selection_settings");
+        snapshot={model_selections:{},profiles:[],error:"Invalid saved model selections"};
+        await expect(tauriSettingsAPI.getSettings()).rejects.toThrow("Invalid saved model selections");
+        currentStore=new FakeStore({rewrite_program_prompt_profiles:[{id:"p",name:"Profile",model_selections:{rewrite:selected}}]});
+        snapshot={model_selections:{},profiles:[{id:"p",name:"Profile",model_selections:{rewrite:selected}}],error:null};
+        expect((await tauriSettingsAPI.getSettings()).rewrite_program_prompt_profiles?.[0]?.model_selections?.rewrite).toEqual(selected);
+        currentStore=new FakeStore({rewrite_program_prompt_profiles:[{id:"p",name:"Profile",model_selections:{},presets:[{id:"q",name:"Preset",model_selections:{rewrite:selected}}]}]});
+        expect((await tauriSettingsAPI.getSettings()).rewrite_program_prompt_profiles?.[0]?.model_selections?.rewrite).toEqual(selected);
+    });
 	beforeAll(() => {
 		(globalThis as unknown as { window?: { localStorage?: Storage } }).window =
 			{
@@ -97,6 +115,42 @@ describe("tauri settings side effects", () => {
 			patch: { hotkey_debug_enabled: true },
 			deleteKeys: [],
 		});
+	});
+
+	it("saves atomic model routes, scoped inheritance and runtime invalidation without splitting IDs or source", async () => {
+		vi.resetModules();
+		const {tauriSettingsAPI}=await import("./settings");
+		const selection={source:"byok",provider_id:"custom_a",model_id:" raw::א "} as const;
+		await tauriSettingsAPI.updateModelSelection("transcription",selection);
+		expect(invokeMock).toHaveBeenNthCalledWith(1,"settings_apply_patch",{patch:{model_selection_transcription:selection},deleteKeys:[]});
+		expect(invokeMock).toHaveBeenNthCalledWith(2,"sync_pipeline_config");
+		invokeMock.mockClear();
+		await tauriSettingsAPI.updateModelSelection("rewrite",selection,{profileId:"p",presetId:"q"});
+		expect(invokeMock).toHaveBeenNthCalledWith(1,"settings_apply_patch",{patch:{'model_selection_scope:[null,"q","rewrite"]':selection},deleteKeys:[]});
+		expect(invokeMock).toHaveBeenNthCalledWith(2,"sync_pipeline_config");
+		invokeMock.mockClear();
+		await tauriSettingsAPI.updateModelSelection("rewrite",null,{profileId:"p"});
+		expect(invokeMock).toHaveBeenNthCalledWith(1,"settings_apply_patch",{patch:{'model_selection_scope:["p",null,"rewrite"]':null},deleteKeys:[]});
+		invokeMock.mockClear();
+		await expect(tauriSettingsAPI.updateModelSelection("invalid" as never,selection)).rejects.toThrow("Invalid model action");
+		await expect(tauriSettingsAPI.updateModelSelection("rewrite",{...selection,model_id:""})).rejects.toThrow("Invalid saved model selection");
+		await expect(tauriSettingsAPI.updateModelSelection("rewrite",selection,{profileId:"default"})).rejects.toThrow("Invalid model scope");
+		expect(invokeMock).not.toHaveBeenCalled();
+	});
+
+	it("enforced legacy model paths protect global/scoped atomic routes and clear attempts",async()=>{
+		vi.resetModules();
+		currentStore=new FakeStore({policy_state:{source:"cloud",is_valid:true,enforced_fields:[{path:"llm_provider"}]}});
+		const {tauriSettingsAPI,getPolicyPathEnforcement}=await import("./settings");
+		const selection={source:"byok",provider_id:"custom_a",model_id:"raw"} as const;
+		for(const scope of [undefined,{profileId:"p"},{profileId:"p",presetId:"q"}]) {
+			await expect(tauriSettingsAPI.updateModelSelection("rewrite",selection,scope)).rejects.toThrow();
+			await expect(tauriSettingsAPI.updateModelSelection("rewrite",null,scope)).rejects.toThrow();
+		}
+		expect(invokeMock.mock.calls.every(([command])=>command==="sync_pipeline_config")).toBe(true);
+		const policy={source:"cloud",is_valid:true,enforced_fields:[{path:"rewrite_program_prompt_profiles"}]} as Parameters<typeof getPolicyPathEnforcement>[0];
+		expect(getPolicyPathEnforcement(policy,'model_selection_scope:["p",null,"rewrite"]').enforced).toBe(true);
+		expect(getPolicyPathEnforcement(policy,'model_selection_scope:[null,"q","quick_ask"]').enforced).toBe(true);
 	});
 
 	it("updateOverlayMode persists and tells the backend", async () => {
@@ -325,6 +379,25 @@ describe("tauri settings side effects", () => {
 			expect.anything(),
 		);
 		expect(invokeMock).toHaveBeenCalledWith("sync_pipeline_config");
+	});
+
+	it("does not delete an organization-enforced value when clearing an optional setting", async () => {
+		vi.resetModules();
+		currentStore = new FakeStore({accent_color:"#123456",policy_state:{source:"cloud",is_valid:true,enforced_fields:[{path:"accent_color"}]}});
+		const {tauriSettingsAPI}=await import("./settings");
+		await tauriSettingsAPI.updateAccentColor(null);
+		expect(invokeMock).not.toHaveBeenCalledWith("settings_apply_patch",expect.anything());
+		expect(await currentStore.get("accent_color")).toBe("#123456");
+	});
+
+	it("strips every constrained route alias while retaining unrelated sets and deletes",async()=>{
+		const {removePolicyPathFromPatch}=await import("./settings");
+		const scoped='model_selection_scope:["p",null,"rewrite"]';
+		const patch={model_selection_rewrite:null,unrelated:"kept"};
+		const deletes=["unrelated",scoped,"llm_provider",scoped,"other"];
+		removePolicyPathFromPatch(patch,deletes,"llm_provider");
+		expect(patch).toEqual({unrelated:"kept"});
+		expect(deletes).toEqual(["unrelated","other"]);
 	});
 
 	it("persists normalized policy validity when policy metadata is stale", async () => {

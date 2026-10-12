@@ -53,7 +53,6 @@ fn native_window_manager_integration() {
         .manage(crate::history::HistoryStorage::new(
             history_directory.path().into(),
         ))
-        .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -65,6 +64,13 @@ fn native_window_manager_integration() {
             crate::commands::licensing::email_code::license_request_email_code,
             crate::commands::licensing::email_code::license_verify_email_code,
             crate::commands::licensing::license_cancel_login,
+            crate::commands::config::get_model_selection_settings,
+            crate::commands::config::get_available_providers,
+            crate::commands::config::sync_pipeline_config,
+            crate::commands::settings::settings_apply_patch,
+            crate::commands::llm::llm_complete,
+            crate::commands::llm::iterate_rewrite_prompt,
+            crate::commands::llm::test_rewrite_with_prompt,
         ])
         .build(native_context)
         .unwrap();
@@ -85,11 +91,12 @@ fn native_window_manager_integration() {
             "an upgrade must preserve an opt-out"
         );
     }
+    crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
+    crate::pipeline::native_model_actions(app.handle());
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::pipeline::native_streaming_consumer(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
-    crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
     // A real GTK screen with controlled fractional DPI, not a fake Window.
     gdk::Screen::default().unwrap().set_resolution(168.0);
     let window = WebviewWindowBuilder::new(&app, "main", Default::default())

@@ -24,13 +24,17 @@ pub(crate) fn initialize(store: &impl SettingsPatchStore) -> bool {
 }
 
 pub(crate) fn relinquish_on_edit(
-    store: &impl SettingsPatchStore,
+    store: &dyn SettingsPatchStore,
     patch: &Map<String, Value>,
     deleted: &[String],
 ) {
-    if CHOICES
-        .iter()
-        .any(|key| patch.contains_key(*key) || deleted.iter().any(|item| item == key))
+    if patch
+        .keys()
+        .chain(deleted.iter())
+        .any(|key| key.starts_with("model_selection_"))
+        || CHOICES
+            .iter()
+            .any(|key| patch.contains_key(*key) || deleted.iter().any(|item| item == key))
     {
         store.set(PENDING, json!(false));
     }

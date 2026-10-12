@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { MantineProvider } from "@mantine/core";
+import { Accordion, MantineProvider } from "@mantine/core";
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
@@ -7,6 +7,8 @@ import { QuickAskPanel } from "./prompt/QuickAskPanel";
 import { RewriteSettingsSection } from "./prompt/RewriteSettingsSection";
 import { TranscribeSettingsSection } from "./prompt/TranscribeSettingsSection";
 import { QuickReplaceSettings } from "./QuickReplaceSettings";
+import { PromptIntentRouterSection } from "./prompt/PromptIntentRouterSection";
+import { llmAPI, type AppSettings } from "../../lib/tauri";
 
 const noop = () => {};
 const mutation = { mutate: noop, isPending: false };
@@ -15,31 +17,24 @@ vi.mock("../../lib/queries", () => ({
 	useUpdateSTTLiveOutput: () => mutation,
 	useUpdateSTTSimulatedStreaming: () => mutation,
 }));
+vi.mock("../../lib/queries/settings", () => ({
+	useSettings: () => ({data:undefined}),
+	useUpdateModelSelection: () => mutation,
+}));
+vi.mock("../../lib/queries/modelChoices", () => ({
+	useModelChoices: () => ({choices:[],loading:false,error:false}),
+}));
 const transcribe: ComponentProps<typeof TranscribeSettingsSection> = {
 	activeProfileId: "default",
 	isDefaultScope: true,
 	inheritTooltip: "Inherit default",
-	sttProviderInheriting: false,
-	sttModelInheriting: false,
 	sttLanguageInheriting: false,
 	sttTimeoutInheriting: false,
 	effectiveSttProvider: "openai",
-	sttProviderOptions: [],
-	isSttProviderOptionsDisabled: false,
-	sttProviderIsWhisperServer: false,
-	sttModelOptions: [{ value: "current-model", label: "Current model" }],
 	selectedSttModelForUi: null,
-	sttPricingLabel: null,
 	sttLanguageOptions: [],
 	localProfileSttLanguage: "auto",
-	whisperServerModelDraft: "",
-	onWhisperServerModelDraftChange: noop,
-	onWhisperServerModelBlur: noop,
-	onSttProviderChange: noop,
-	onSttModelChange: noop,
 	onSttLanguageChange: noop,
-	onDisableSttProviderOverride: noop,
-	onDisableSttModelOverride: noop,
 	onDisableSttLanguageOverride: noop,
 	onDisableSttTimeoutOverride: noop,
 	localProfileSttTimeout: 30,
@@ -58,11 +53,6 @@ const transcribe: ComponentProps<typeof TranscribeSettingsSection> = {
 	isSttTestRunning: false,
 	onRunSttTest: noop,
 	hasStoredTranscriptionPrompt: false,
-	managedAccessEnabled: false,
-	managedModelCompatible: false,
-	useManagedInference: false,
-	ownKeyConfigured: true,
-	onUseOwnKeyChange: noop,
 };
 const common = {
 	activeProfileId: "default",
@@ -93,18 +83,7 @@ const rewrite: ComponentProps<typeof RewriteSettingsSection> = {
 	rewriteActiveWindowOcrModeInheriting: false,
 	onRewriteActiveWindowOcrModeChange: noop,
 	onDisableRewriteActiveWindowOcrModeOverride: noop,
-	effectiveLlmProvider: null,
-	isLlmProviderDisabled: false,
-	llmProviderInheriting: false,
-	onLlmProviderChange: noop,
-	onDisableLlmProviderOverride: noop,
-	llmModelOptions: [],
-	llmModelInheriting: false,
-	localProfileLlmModel: null,
-	llmPricingLabel: null,
 	settings: undefined,
-	onLlmModelChange: noop,
-	onDisableLlmModelOverride: noop,
 	supportsOpenAiThinking: false,
 	openAiReasoningEffortInheriting: false,
 	localProfileOpenAiReasoningEffort: "none",
@@ -133,12 +112,6 @@ const rewrite: ComponentProps<typeof RewriteSettingsSection> = {
 	onAnthropicThinkingBudgetChange: noop,
 	onDisableAnthropicThinkingBudgetOverride: noop,
 	formatThinkingBudgetShort: String,
-	managedAccessEnabled: false,
-	managedModelCompatible: false,
-	usingOwnKey: true,
-	ownKeyAvailable: true,
-	ownKeyConfigured: true,
-	onUseOwnKeyChange: noop,
 };
 const ask: ComponentProps<typeof QuickAskPanel> = {
 	...common,
@@ -152,8 +125,6 @@ const ask: ComponentProps<typeof QuickAskPanel> = {
 	localProfileQuickAskActiveWindowOcrMode: "auto",
 	quickAskActiveWindowOcrModeInheriting: false,
 	quickAskIncludeClipboardContextInheriting: false,
-	quickAskProviderInheriting: false,
-	quickAskModelInheriting: false,
 	quickAskOpenAiReasoningEffortInheriting: false,
 	quickAskGeminiThinkingLevelInheriting: false,
 	quickAskGeminiThinkingBudgetInheriting: false,
@@ -169,7 +140,6 @@ const ask: ComponentProps<typeof QuickAskPanel> = {
 	localProfileQuickAskGeminiThinkingBudget: "0",
 	localProfileQuickAskAnthropicThinkingBudget: "0",
 	localQuickAskSystemPrompt: "Test prompt",
-	quickAskModelOptions: [],
 	selectedQuickAskModelForUi: null,
 	quickAskOpenAiThinkingOptions: [],
 	quickAskGeminiThinkingLevelOptions: [],
@@ -180,7 +150,6 @@ const ask: ComponentProps<typeof QuickAskPanel> = {
 	supportsQuickAskGeminiThinkingBudget: false,
 	supportsQuickAskAnthropicThinkingBudget: false,
 	quickAskModelForThinking: null,
-	llmProviderDisabled: false,
 	updateQuickAskIncludeSelectedText: mutation,
 	updateQuickAskConversationHistoryEnabled: mutation,
 	updateQuickAskConversationHistoryCount: mutation,
@@ -192,8 +161,6 @@ const ask: ComponentProps<typeof QuickAskPanel> = {
 	updateQuickAskDismissMode: mutation,
 	setQuickAskIncludeClipboardContextInheriting: noop,
 	setQuickAskActiveWindowOcrModeInheriting: noop,
-	setQuickAskProviderInheriting: noop,
-	setQuickAskModelInheriting: noop,
 	setQuickAskOpenAiReasoningEffortInheriting: noop,
 	setQuickAskGeminiThinkingLevelInheriting: noop,
 	setQuickAskGeminiThinkingBudgetInheriting: noop,
@@ -202,16 +169,12 @@ const ask: ComponentProps<typeof QuickAskPanel> = {
 	setQuickAskDismissModeInheriting: noop,
 	setLocalProfileQuickAskIncludeClipboardContext: noop,
 	setLocalProfileQuickAskActiveWindowOcrMode: noop,
-	setLocalProfileQuickAskProvider: noop,
-	setLocalProfileQuickAskModel: noop,
 	setLocalProfileQuickAskDismissMode: noop,
 	setLocalProfileQuickAskOpenAiReasoningEffort: noop,
 	setLocalProfileQuickAskGeminiThinkingLevel: noop,
 	setLocalProfileQuickAskGeminiThinkingBudget: noop,
 	setLocalProfileQuickAskAnthropicThinkingBudget: noop,
 	setLocalQuickAskSystemPrompt: noop,
-	handleDefaultQuickAskProviderChange: noop,
-	handleDefaultQuickAskModelChange: noop,
 	isOpenAiReasoningEffort: (value): value is "none" => value === "none",
 	isGeminiThinkingLevel: (value): value is "minimal" => value === "minimal",
 	openAiDefaultReasoningEffortForModel: () => "none",
@@ -238,35 +201,63 @@ const replace: ComponentProps<typeof QuickReplaceSettings> = {
 	quickReplaceActiveWindowOcrModeInheriting: false,
 	setQuickReplaceActiveWindowOcrModeInheriting: noop,
 	setLocalProfileQuickReplaceActiveWindowOcrMode: noop,
-	defaultQuickReplaceProvider: null,
-	defaultQuickReplaceModel: null,
 	defaultQuickReplaceSystemPrompt: "Test prompt",
-	effectiveQuickReplaceProvider: null,
-	llmProviderDisabled: false,
-	quickReplaceModelOptions: [],
-	selectedQuickReplaceModelForUi: null,
 	localProfileQuickReplaceEnabled: false,
 	localProfileQuickReplaceIncludeClipboardContext: false,
 	localQuickReplaceSystemPrompt: "Test prompt",
 	quickReplaceEnabledInheriting: false,
 	quickReplaceIncludeClipboardContextInheriting: false,
-	quickReplaceProviderInheriting: false,
-	quickReplaceModelInheriting: false,
 	quickReplaceSystemPromptInheriting: false,
 	setQuickReplaceEnabledInheriting: noop,
 	setQuickReplaceIncludeClipboardContextInheriting: noop,
-	setQuickReplaceProviderInheriting: noop,
-	setQuickReplaceModelInheriting: noop,
 	setQuickReplaceSystemPromptInheriting: noop,
 	setLocalProfileQuickReplaceEnabled: noop,
 	setLocalProfileQuickReplaceIncludeClipboardContext: noop,
-	setLocalProfileQuickReplaceProvider: noop,
-	setLocalProfileQuickReplaceModel: noop,
 	setLocalQuickReplaceSystemPrompt: noop,
-	rewriteProvider: null,
-	rewriteModel: null,
 	isSaving: false,
 };
+
+it("tests Quick Ask with its scoped atomic route rather than the rewrite route", async () => {
+	Reflect.set(globalThis,"IS_REACT_ACT_ENVIRONMENT",true);
+	Object.defineProperty(document,"fonts",{configurable:true,value:{addEventListener:vi.fn(),removeEventListener:vi.fn()}});
+	const host=document.createElement("div"); document.body.append(host);
+	const root=createRoot(host);
+	const selection={source:"byok",provider_id:"ollama",model_id:"ask-id"} as const;
+	const completion=vi.spyOn(llmAPI,"complete").mockResolvedValue({output:"Synthetic answer",provider_used:"ollama",model_used:"ask-id"});
+	try {
+		for (const isDefaultScope of [true,false]) {
+			await act(async()=>root.render(<MantineProvider env="test"><QuickAskPanel {...ask} isDefaultScope={isDefaultScope}
+				activeProfileId={isDefaultScope?"default":"p"}
+				activeProfile={{id:"p",model_selections:{quick_ask:selection}} as ComponentProps<typeof QuickAskPanel>["activeProfile"]}
+				settings={{model_selections:{quick_ask:selection}} as AppSettings}
+				effectiveQuickAskProvider="ollama" effectiveQuickAskModel="ask-id" quickAskTestInput="Synthetic question" /></MantineProvider>));
+			const test=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Test");
+			expect(test).toBeDefined();
+			await act(async()=>test?.click());
+			expect(completion).toHaveBeenLastCalledWith(expect.objectContaining({action:"quick_ask",profileId:isDefaultScope?"default":"p",modelSelection:selection}));
+		}
+	} finally {await act(async()=>root.unmount());host.remove();completion.mockRestore();}
+});
+
+it("changes router strategy without inventing a model and displays scoped routing metadata", async()=>{
+	Reflect.set(globalThis,"IS_REACT_ACT_ENVIRONMENT",true);
+	const host=document.createElement("div");document.body.append(host); const root=createRoot(host);
+	const save=vi.fn();
+	const props:ComponentProps<typeof PromptIntentRouterSection>={activeProfileId:"p",presets:[{id:"q",name:"Preset"}] as ComponentProps<typeof PromptIntentRouterSection>["presets"],settings:undefined,profileRouter:null,effectiveRouter:null,routerStrategyValue:"llm",embeddingProviderValue:"openai",embeddingModels:[],embeddingModelValue:null,isCachingRouterEmbeddings:false,selectDefaultValue:"default",anthropicThinkingBudgets:[],getEmbeddingModelsForProvider:()=>[],saveRouter:save,onCacheRouterEmbeddings:noop};
+	try {
+		for(const settings of [undefined,{rewrite_program_prompt_profiles:[]},{llm_provider:"openai",llm_model:"gpt-5",rewrite_program_prompt_profiles:[{id:"other"},{id:"p",router:{llm_provider:"openai",llm_model:"gpt-5"}}]}] as (AppSettings|undefined)[]) {
+			await act(async()=>root.render(<MantineProvider env="test"><Accordion value="p-intent-router"><PromptIntentRouterSection {...props} settings={settings}/></Accordion></MantineProvider>));
+			expect(host.querySelector('[aria-label="Routing model"]')).not.toBeNull();
+		}
+		for(const effectiveRouter of [null,{llm_provider:"ollama",llm_model:"existing-id"}] as ComponentProps<typeof PromptIntentRouterSection>["effectiveRouter"][]) {
+			await act(async()=>root.render(<MantineProvider env="test"><Accordion value="p-intent-router"><PromptIntentRouterSection {...props} effectiveRouter={effectiveRouter} routerStrategyValue="off"/></Accordion></MantineProvider>));
+			await act(async()=>host.querySelector<HTMLInputElement>('input[role="combobox"]')?.click());
+			const option=[...document.querySelectorAll<HTMLElement>('[role="option"]')].find(option=>option.textContent==="LLM");
+			expect(option).toBeDefined();await act(async()=>option?.click());
+			expect(save).toHaveBeenLastCalledWith(expect.objectContaining({strategy:"llm",llm_provider:effectiveRouter?.llm_provider??null,llm_model:effectiveRouter?.llm_model??null}));
+		}
+	}finally{await act(async()=>root.unmount());host.remove();}
+});
 
 it("labels automatic OCR as Always in all three flows without changing the persisted auto value", async () => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -303,59 +294,42 @@ it("labels automatic OCR as Always in all three flows without changing the persi
 	}
 });
 
-it("shows provider defaults rather than claiming the first model was selected", async () => {
+it("does not select any first model when the shared pickers are unset", async () => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	const host = document.createElement("div");
 	document.body.append(host);
 	const root = createRoot(host);
-	const models = [{ value: "current-model", label: "Current model" }];
-	const onModelChange = vi.fn();
 	try {
 		await act(async () =>
 			root.render(
 				<MantineProvider env="test">
 					<TranscribeSettingsSection
 						{...transcribe}
-						onSttModelChange={onModelChange}
 					/>
 					<RewriteSettingsSection
 						{...rewrite}
-						llmModelOptions={models}
-						onLlmModelChange={onModelChange}
 					/>
-					<QuickAskPanel {...ask} quickAskModelOptions={models} />
+					<QuickAskPanel {...ask} />
 					<QuickReplaceSettings
 						{...replace}
-						quickReplaceModelOptions={models}
 					/>
 				</MantineProvider>,
 			),
 		);
-		const selectors = [
-			...host.querySelectorAll<HTMLInputElement>(
-				'input[placeholder="Provider default"]',
-			),
-		];
+		const selectors = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(button=>button.textContent?.includes("Choose a model"));
 		expect(selectors).toHaveLength(4);
 		expect(selectors.map((input) => input.value)).toEqual(["", "", "", ""]);
-		expect(onModelChange).not.toHaveBeenCalled();
 		await act(async () =>
 			root.render(
 				<MantineProvider env="test">
 					<RewriteSettingsSection
 						{...rewrite}
 						isDefaultScope={false}
-						llmModelOptions={models}
-						localProfileLlmModel="current-model"
 					/>
 				</MantineProvider>,
 			),
 		);
-		expect(
-			host.querySelector<HTMLInputElement>(
-				'input[placeholder="Provider default"]',
-			)?.value,
-		).toBe("Current model");
+		expect(host.textContent).toContain("Choose a model");
 	} finally {
 		await act(async () => root.unmount());
 		host.remove();

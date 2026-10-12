@@ -34,23 +34,6 @@ export const isGeminiThinkingLevel = (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Formatting utilities
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Format a USD rate from micros (1/1,000,000 of a dollar) to a display string. */
-export function formatUsdRateFromMicros(micros: number): string {
-	const safeMicros =
-		typeof micros === "number" && Number.isFinite(micros) ? micros : 0;
-	const dollars = safeMicros / 1_000_000;
-
-	if (dollars > 0 && dollars < 0.01) {
-		return `$${dollars.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}`;
-	}
-
-	return `$${dollars.toFixed(2).replace(/\.00$/, "")}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Router normalization
 // ─────────────────────────────────────────────────────────────────────────────
 

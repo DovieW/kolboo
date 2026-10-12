@@ -12,11 +12,13 @@ const source = vi.hoisted(() => ({
 	empty: false,
 	refetch: vi.fn(),
 }));
-vi.mock("../lib/queries/transcriptionModels", () => ({
-	useTranscriptionModels: () => ({
+vi.mock("../lib/queries/modelChoices", () => ({
+	useModelChoices: () => ({
 		loading: source.loading,
 		failedSources: source.fail ? [{ query: { refetch: source.refetch } }] : [],
-		options: new Map(
+		managedMessage:"Sign in to view Managed models",
+		retry:source.refetch,
+		choices:
 			(source.empty
 				? []
 				: [
@@ -35,8 +37,7 @@ vi.mock("../lib/queries/transcriptionModels", () => ({
 							use_managed: true,
 						},
 					]
-			).map((model) => [model.value, model]),
-		),
+			).map(model => ({selection:{source:model.use_managed?"managed":"byok",provider_id:model.provider,model_id:model.model},displayName:model.label,providerName:model.provider,ready:true,capabilities:["After recording",...(model.model === "gpt-4o-transcribe-diarize" ? ["Speaker labels"]:[])]})),
 	}),
 }));
 let host: HTMLDivElement;

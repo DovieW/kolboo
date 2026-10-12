@@ -54,6 +54,14 @@ fn gen_export_model_selection_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::ModelSelection)
 }
 
+fn gen_export_model_action_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::ModelAction)
+}
+
+fn gen_export_model_settings_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::LoadedModelSettings)
+}
+
 fn gen_export_cache_router_embeddings_response_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::CacheRouterEmbeddingsResponse)
 }
@@ -130,6 +138,10 @@ fn gen_export_iterate_rewrite_prompt_response_schema() -> RootSchema {
 
 fn gen_export_llm_complete_response_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::LlmCompleteResponse)
+}
+
+fn gen_export_llm_complete_args_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::LlmCompleteArgs)
 }
 
 fn gen_export_llm_provider_info_schema() -> RootSchema {
@@ -317,6 +329,8 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
     ),
     schema_spec!("custom-provider.schema.json", "CustomProvider", gen_export_custom_provider_schema),
     schema_spec!("model-selection.schema.json", "ModelSelection", gen_export_model_selection_schema),
+    schema_spec!("model-action.schema.json", "ModelAction", gen_export_model_action_schema),
+    schema_spec!("model-settings.schema.json", "LoadedModelSettings", gen_export_model_settings_schema),
     schema_spec!(
         "cache-router-embeddings-response.schema.json",
         "CacheRouterEmbeddingsResponse",
@@ -416,6 +430,11 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "llm-complete-response.schema.json",
         "LlmCompleteResponse",
         gen_export_llm_complete_response_schema
+    ),
+    schema_spec!(
+        "llm-complete-args.schema.json",
+        "LlmCompleteArgs",
+        gen_export_llm_complete_args_schema
     ),
     schema_spec!(
         "llm-provider-info.schema.json",

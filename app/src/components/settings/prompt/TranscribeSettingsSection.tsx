@@ -7,9 +7,9 @@ import {
 	Switch,
 	Text,
 	Textarea,
-	TextInput,
 	Tooltip,
 } from "@mantine/core";
+import { ActionModelPicker } from "../../ActionModelPicker";
 import { Info, RotateCcw } from "lucide-react";
 import { isRealtimeSttModel } from "../../../lib/modelOptions";
 import {
@@ -22,30 +22,13 @@ interface TranscribeSettingsSectionProps {
 	activeProfileId: string;
 	isDefaultScope: boolean;
 	inheritTooltip: string;
-	sttProviderInheriting: boolean;
-	sttModelInheriting: boolean;
 	sttLanguageInheriting: boolean;
 	sttTimeoutInheriting: boolean;
 	effectiveSttProvider: string | null;
-	sttProviderOptions: Array<{
-		group: string;
-		items: Array<{ value: string; label: string }>;
-	}>;
-	isSttProviderOptionsDisabled: boolean;
-	sttProviderIsWhisperServer: boolean;
-	sttModelOptions: Array<{ value: string; label: string }>;
 	selectedSttModelForUi: string | null;
-	sttPricingLabel: string | null;
 	sttLanguageOptions: Array<{ value: string; label: string }>;
 	localProfileSttLanguage: string;
-	whisperServerModelDraft: string;
-	onWhisperServerModelDraftChange: (value: string) => void;
-	onWhisperServerModelBlur: () => void;
-	onSttProviderChange: (value: string | null) => void;
-	onSttModelChange: (value: string | null) => void;
 	onSttLanguageChange: (value: string | null) => void;
-	onDisableSttProviderOverride: () => void;
-	onDisableSttModelOverride: () => void;
 	onDisableSttLanguageOverride: () => void;
 	onDisableSttTimeoutOverride: () => void;
 	localProfileSttTimeout: number | string;
@@ -64,38 +47,19 @@ interface TranscribeSettingsSectionProps {
 	isSttTestRunning: boolean;
 	onRunSttTest: () => void;
 	hasStoredTranscriptionPrompt: boolean;
-	managedAccessEnabled: boolean;
-	managedModelCompatible: boolean;
-	useManagedInference: boolean;
-	ownKeyConfigured: boolean;
-	onUseOwnKeyChange: (useOwnKey: boolean) => void;
 }
 
 export function TranscribeSettingsSection({
 	activeProfileId,
 	isDefaultScope,
 	inheritTooltip,
-	sttProviderInheriting,
-	sttModelInheriting,
 	sttLanguageInheriting,
 	sttTimeoutInheriting,
 	effectiveSttProvider,
-	sttProviderOptions,
-	isSttProviderOptionsDisabled,
-	sttProviderIsWhisperServer,
-	sttModelOptions,
 	selectedSttModelForUi,
-	sttPricingLabel,
 	sttLanguageOptions,
 	localProfileSttLanguage,
-	whisperServerModelDraft,
-	onWhisperServerModelDraftChange,
-	onWhisperServerModelBlur,
-	onSttProviderChange,
-	onSttModelChange,
 	onSttLanguageChange,
-	onDisableSttProviderOverride,
-	onDisableSttModelOverride,
 	onDisableSttLanguageOverride,
 	onDisableSttTimeoutOverride,
 	localProfileSttTimeout,
@@ -114,11 +78,6 @@ export function TranscribeSettingsSection({
 	isSttTestRunning,
 	onRunSttTest,
 	hasStoredTranscriptionPrompt,
-	managedAccessEnabled,
-	managedModelCompatible,
-	useManagedInference,
-	ownKeyConfigured,
-	onUseOwnKeyChange,
 }: TranscribeSettingsSectionProps) {
 	const { data: globalSettings } = useSettings();
 	const updateSTTLiveOutput = useUpdateSTTLiveOutput();
@@ -140,155 +99,7 @@ export function TranscribeSettingsSection({
 				<span className="settings-mini-header__text">Transcribe</span>
 			</div>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Speech-to-Text Provider</p>
-					<p className="settings-description">Service for transcribing audio</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && sttProviderInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !sttProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={onDisableSttProviderOverride}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={sttProviderOptions}
-						value={effectiveSttProvider}
-						onChange={onSttProviderChange}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={isSttProviderOptionsDisabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{sttProviderIsWhisperServer || sttModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">STT Model</p>
-						<p className="settings-description">
-							Model to use for transcription
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && sttModelInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !sttModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={onDisableSttModelOverride}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						{sttPricingLabel ? (
-							<Text
-								size="xs"
-								c="dimmed"
-								style={{ whiteSpace: "nowrap", lineHeight: 1 }}
-							>
-								{sttPricingLabel}
-							</Text>
-						) : null}
-						{sttProviderIsWhisperServer ? (
-							<TextInput
-								value={whisperServerModelDraft}
-								onChange={(e) =>
-									onWhisperServerModelDraftChange(e.currentTarget.value)
-								}
-								onBlur={onWhisperServerModelBlur}
-								placeholder="whisper-1"
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
-								}}
-							/>
-						) : (
-							<div
-								style={{
-									display: "flex",
-									flexDirection: "column",
-									alignItems: "flex-end",
-									gap: 6,
-								}}
-							>
-								<Select
-									data={sttModelOptions}
-									value={selectedSttModelForUi}
-									onChange={onSttModelChange}
-									placeholder="Provider default"
-									withCheckIcon={false}
-									styles={{
-										input: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											minWidth: 200,
-										},
-									}}
-								/>
-								{managedAccessEnabled && managedModelCompatible ? (
-									<>
-										<Switch
-											label="Use your own API key"
-											checked={!useManagedInference}
-											onChange={(event) =>
-												onUseOwnKeyChange(event.currentTarget.checked)
-											}
-											color="gray"
-											size="sm"
-										/>
-										{!useManagedInference && !ownKeyConfigured ? (
-											<Text size="xs" c="yellow">
-												Add this provider's API key in Providers before use.
-											</Text>
-										) : null}
-									</>
-								) : managedAccessEnabled && selectedSttModelForUi ? (
-									<Text size="xs" c="yellow">
-										This model is not available through Kolboo Managed. It
-										requires your own API key.
-									</Text>
-								) : null}
-							</div>
-						)}
-					</div>
-				</div>
-			) : null}
+			<div className="settings-row"><ActionModelPicker action="transcription" label="Transcription model" profileId={activeProfileId} /></div>
 
 			{/* Simulated Streaming — only for non-realtime STT models */}
 			{showSimulatedStreaming && (

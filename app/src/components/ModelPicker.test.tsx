@@ -126,6 +126,38 @@ it("browses both tabs and details without changing settings, then atomically cho
 	expect(change).toHaveBeenCalledOnce();
 });
 
+it("offers account guidance without blocking Your models and can hide clearing", async () => {
+	const account=vi.fn();
+	await render({value:choices[2]?.selection ?? null,clearable:false,onManagedAccess:account,managedMessage:"Sign in to Managed"});
+	await click("Model");
+	await click("Sign in / View account access");
+	expect(account).toHaveBeenCalledOnce();
+	expect(host.textContent).not.toContain("Clear selection");
+	await click("Your models");
+	expect(change).not.toHaveBeenCalled();
+	expect(host.textContent).toContain("<b>Friendly</b>");
+});
+
+it("labels unpinned legacy preferences without inventing a payment source",async()=>{
+	await render({legacyLabel:"Saved model · Saved provider · legacy routing"});
+	expect(host.querySelector('[aria-label="Model"]')?.textContent).toContain("legacy routing");
+	expect(change).not.toHaveBeenCalled();
+});
+
+it("offers setup for endpoints without models without inventing or saving a model ID", async () => {
+	await render({ choices: [], onSetup: setup, setupProviders: [{provider_id:"ollama",label:"Ollama"}] });
+	await click("Model");
+	await click("Set up Ollama");
+	expect(setup).toHaveBeenCalledExactlyOnceWith({source:"byok",provider_id:"ollama"});
+	expect(change).not.toHaveBeenCalled();
+	await click("Kolboo Managed");
+	expect(host.textContent).not.toContain("Set up Ollama");
+	await click("Your models");
+	await render({ choices: [], onSetup: setup, disabled: true, setupProviders: [{provider_id:"ollama",label:"Ollama"}] });
+	await click("Set up Ollama");
+	expect(setup).toHaveBeenCalledOnce();
+});
+
 it("supports keyboard search/selection and preserves raw identifiers when clearing", async () => {
 	await render({ value: choices[0]?.selection ?? null });
 	expect(host.textContent).toContain("<b>Friendly</b>");

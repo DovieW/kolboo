@@ -52,12 +52,12 @@ vi.mock("./UiSettings", () => ({
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
-async function render() {
+async function render(navigationRequest?: {tab:string;id:number}) {
 	await act(async () =>
 		root.render(
 			<QueryClientProvider client={client}>
 				<MantineProvider env="test">
-					<SettingsShell onRunSetupGuide={vi.fn()} />
+					<SettingsShell onRunSetupGuide={vi.fn()} navigationRequest={navigationRequest}/>
 				</MantineProvider>
 			</QueryClientProvider>,
 		),
@@ -82,6 +82,13 @@ afterEach(async () => {
 });
 
 describe("Settings shell", () => {
+	it("honors explicit key/endpoint setup navigation even with cached Managed readiness",async()=>{
+		await render();
+		await render({tab:"api-keys",id:1});
+		expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("Providers");
+		await render({tab:"ai",id:2});
+		expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain("AI");
+	});
 	it("keeps cached Data controls mounted but deactivates their background work", async () => {
 		await render();
 		const tab = (name: string) => {

@@ -1,12 +1,14 @@
 import { normalizeSttLanguageOverride } from "../../sttLanguages";
+import { normalizeModelSelections } from "../../modelSelection";
 import type {
 	ActiveWindowOcrMode,
 	CleanupPromptSections,
 	CleanupPromptSectionsOverride,
 	ContextGrabMethod,
-	RewritePreset,
 	RewriteProgramPromptProfile,
+	ModelSelections,
 } from "../types";
+import type { NormalizedRewritePreset } from "../presetDefaults";
 import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
@@ -95,9 +97,14 @@ export function normalizeCleanupPromptSectionsOverride(
 	return out;
 }
 
+export type NormalizedRewriteProgramPromptProfile = Omit<RewriteProgramPromptProfile, "model_selections" | "presets"> & {
+	model_selections:ModelSelections;
+	presets:NormalizedRewritePreset[] | null;
+};
+
 export function normalizeRewriteProfile(
 	value: unknown,
-): RewriteProgramPromptProfile | null {
+): NormalizedRewriteProgramPromptProfile | null {
 	if (!isRecord(value)) return null;
 	const p = value;
 	const id = typeof p.id === "string" ? p.id : "";
@@ -232,10 +239,10 @@ export function normalizeRewriteProfile(
 		typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
 
 	const presets_raw = p.presets;
-	const presets: RewritePreset[] | null = Array.isArray(presets_raw)
+	const presets: NormalizedRewritePreset[] | null = Array.isArray(presets_raw)
 		? presets_raw
 				.map(normalizeRawRewritePreset)
-				.filter((x): x is RewritePreset => x !== null)
+				.filter((x) => x !== null)
 		: null;
 
 	const default_preset_id =
@@ -252,6 +259,7 @@ export function normalizeRewriteProfile(
 
 	return {
 		id,
+		model_selections: normalizeModelSelections(p.model_selections),
 		name,
 		program_paths,
 		disabled,

@@ -39,6 +39,7 @@ export function useIterateRewritePrompt() {
 			desiredOutput?: string | null;
 			currentPrompt: string;
 			profileId?: string | null;
+			presetId?: string | null;
 			mode?: "fixed" | "new";
 
 			llmProvider?: string | null;
@@ -58,6 +59,7 @@ export function useTestRewriteWithPrompt() {
 			transcript: string;
 			prompt: string;
 			profileId?: string | null;
+			presetId?: string | null;
 		}): Promise<TestRewriteWithPromptResponse> =>
 			llmAPI.testRewriteWithPrompt(params),
 	});

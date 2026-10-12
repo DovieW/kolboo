@@ -42,6 +42,7 @@ function SettingsPanelLoading({ label }: { label: string }) {
 
 export type SettingsShellProps = {
 	onRunSetupGuide?: () => void;
+	navigationRequest?: { tab: string; id: number } | null;
 };
 
 type EditingOption = {
@@ -50,7 +51,7 @@ type EditingOption = {
 	isDisabledProfile?: boolean;
 };
 
-export function SettingsShell(_props: SettingsShellProps) {
+export function SettingsShell({ navigationRequest }: SettingsShellProps) {
 	const { data: settings } = useSettings();
 	const { data: licenseAuthContext, isFetched: licenseAuthContextResolved } =
 		useLicenseAuthContext();
@@ -78,6 +79,11 @@ export function SettingsShell(_props: SettingsShellProps) {
 
 	const [activeSettingsTab, setActiveSettingsTab] = useState<string>("ai");
 	const [hasUserSelectedTab, setHasUserSelectedTab] = useState(false);
+	useEffect(() => {
+		if (!navigationRequest) return;
+		setHasUserSelectedTab(true);
+		setActiveSettingsTab(navigationRequest.tab);
+	}, [navigationRequest]);
 	const [mountedHeavyTabs, setMountedHeavyTabs] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -100,7 +106,7 @@ export function SettingsShell(_props: SettingsShellProps) {
 	}, [activeSettingsTab, mountedHeavyTabs]);
 
 	useEffect(() => {
-		if (hasUserSelectedTab) return;
+		if (hasUserSelectedTab || navigationRequest) return;
 		if (hasAnyApiKey === undefined) return;
 		if (!licenseAuthContextResolved) return;
 
@@ -113,6 +119,7 @@ export function SettingsShell(_props: SettingsShellProps) {
 		hasUserSelectedTab,
 		licenseAuthContext,
 		licenseAuthContextResolved,
+		navigationRequest,
 	]);
 
 	useEffect(() => {

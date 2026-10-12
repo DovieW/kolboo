@@ -728,6 +728,15 @@ impl Default for RequestLogStore {
 }
 
 impl RequestLogStore {
+    /// Background helpers share the retained archive but own their current
+    /// request. Starting/completing one must not cancel or alter dictation.
+    pub(crate) fn fork_current(&self) -> Self {
+        Self {
+            logs: self.logs.clone(),
+            current: Arc::new(Mutex::new(None)),
+            retention: self.retention.clone(),
+        }
+    }
     /// Create a new log store
     pub fn new() -> Self {
         Self::new_with_retention(RequestLogsRetentionConfig::default())
@@ -993,6 +1002,30 @@ mod tests {
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].id, id2); // Most recent first
         assert_eq!(logs[1].id, id1);
+    }
+
+    #[test]
+    fn background_requests_own_their_log_and_share_only_the_completed_archive() {
+        let store = RequestLogStore::new();
+        let recording = store.start_request("recording".into(), None);
+        let background = store.fork_current();
+        let id = background.start_request("background".into(), None);
+        background.with_current(|log| {
+            log.llm_model = Some("background-model".into());
+            log.complete_success();
+        });
+        assert_eq!(
+            store.with_current(|log| (log.id.clone(), log.status.clone())),
+            Some((recording.clone(), RequestStatus::InProgress))
+        );
+        background.complete_current();
+        let logs = store.get_logs(None);
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].id, recording);
+        assert_eq!(logs[1].id, id);
+        assert_eq!(logs[1].llm_model.as_deref(), Some("background-model"));
+        assert!(logs[0].llm_model.is_none());
+        assert!(background.with_current(|_| ()).is_none());
     }
 
     #[test]

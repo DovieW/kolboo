@@ -101,6 +101,7 @@ pub use commands::history::HistoryDeleteMode;
 pub use commands::history::HistoryDeleteOptions;
 pub use commands::history::HistoryDeleteResult;
 pub use commands::llm::IterateRewritePromptResponse;
+pub use commands::llm::LlmCompleteArgs;
 pub use commands::llm::LlmCompleteResponse;
 pub use commands::llm::LlmProviderInfo;
 pub use commands::llm::TestLlmRewriteResponse;
@@ -128,7 +129,9 @@ pub use history::HistoryActivity;
 pub use history::HistoryPageQuery;
 pub use history::HistoryPageResult;
 pub use history::{HistoryDetail, HistoryEdit, HistoryEditInput};
-pub use model_selection::{ModelSelection, ModelSource};
+pub use model_selection::{
+    LoadedModelSettings, ModelAction, ModelSelection, ModelSelections, ModelSource,
+};
 pub use recordings::options::{RecordingMode, RecordingPreferences};
 pub use recordings::RecordingWaveform;
 pub use recordings::RecordingsStats;
@@ -1260,6 +1263,7 @@ pub fn run() {
             commands::config::get_runtime_config,
             commands::config::get_available_providers,
             commands::config::get_custom_providers,
+            commands::config::get_model_selection_settings,
             commands::config::save_custom_provider,
             commands::config::delete_custom_provider,
             commands::config::sync_pipeline_config,
@@ -1272,7 +1276,6 @@ pub fn run() {
             // LLM formatting commands
             commands::llm::get_llm_default_prompts,
             commands::llm::get_llm_providers,
-            commands::llm::update_llm_config,
             commands::llm::update_llm_prompts,
             commands::llm::get_llm_config,
             commands::llm::test_llm_rewrite,

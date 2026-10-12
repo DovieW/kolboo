@@ -2,6 +2,7 @@ import type {
 	PolicyConstraintViolation,
 	SettingsChangedPayload,
 } from "./types";
+import { MODEL_ACTIONS, modelSelectionSettingKey } from "../modelSelection";
 
 export type RuntimeSyncReason =
 	| "pipeline-setting"
@@ -42,6 +43,7 @@ export type RuntimeSyncPolicyParams = {
 };
 
 const PIPELINE_SETTING_KEYS = new Set([
+	...MODEL_ACTIONS.map(modelSelectionSettingKey),
 	"selected_mic_id",
 	"rewrite_llm_enabled",
 	"quick_replace_enabled",
@@ -133,10 +135,12 @@ function changedKeys(params: {
 	patch?: Record<string, unknown>;
 	deleteKeys?: string[];
 }): Set<string> {
-	return new Set([
+	const keys = new Set([
 		...Object.keys(params.patch ?? {}),
 		...(params.deleteKeys ?? []),
 	]);
+	if ([...keys].some(key => key.startsWith("model_selection_scope:"))) keys.add("rewrite_program_prompt_profiles");
+	return keys;
 }
 
 function buildSettingsChangedPayload(params: {

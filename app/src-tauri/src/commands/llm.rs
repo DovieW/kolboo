@@ -4,14 +4,13 @@ use crate::commands::CommandError;
 use crate::llm::format_text;
 use crate::llm::{LlmConfig, ProgramPromptProfile, PromptSections, SYSTEM_PROMPT_DEFAULT};
 use crate::pipeline::llm_provider_request::{
-    resolve_one_off_llm_request, resolve_one_off_llm_request_for_profile,
+    resolve_one_off_llm_request_for_action, resolve_one_off_llm_request_for_profile,
     OneOffLlmProviderRequestLayer,
 };
 use crate::pipeline::SharedPipeline;
 use crate::request_log::RequestLogStore;
 use crate::stats::EventStatus;
 use schemars::JsonSchema;
-use std::time::Duration;
 use std::time::Instant;
 use tauri::{AppHandle, Manager, State};
 
@@ -61,21 +60,94 @@ fn record_request_log_profile_usage(
     });
 }
 
-/// LLM configuration payload from frontend
-#[derive(Debug, serde::Deserialize)]
-pub struct LlmConfigPayload {
-    /// Whether LLM formatting is enabled
-    pub enabled: bool,
-    /// Provider name: "openai", "anthropic", or "ollama"
-    pub provider: String,
-    /// API key (not needed for ollama)
-    pub api_key: Option<String>,
-    /// Model to use (optional, uses provider default if not specified)
-    pub model: Option<String>,
-    /// Base URL for Ollama (optional)
-    pub ollama_url: Option<String>,
-    /// Timeout in seconds (optional, default 30)
-    pub timeout_secs: Option<u64>,
+fn resolve_requested_preset(
+    config: &LlmConfig,
+    profile_id: Option<&str>,
+    preset_id: Option<&str>,
+) -> Result<Option<crate::llm::ProgramPreset>, CommandError> {
+    let Some(preset_id) = preset_id else {
+        return Ok(None);
+    };
+    config
+        .program_prompt_profiles
+        .iter()
+        .find(|profile| profile.id == profile_id.unwrap_or("default"))
+        .and_then(|profile| profile.presets.iter().find(|preset| preset.id == preset_id))
+        .cloned()
+        .map(Some)
+        .ok_or_else(|| llm_error("The selected preset is no longer available"))
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    #[test]
+    fn explicit_presets_are_scoped_to_the_requested_profile_including_default() {
+        let profiles=serde_json::from_value(serde_json::json!([
+            {"id":"default","name":"Default","presets":[{"id":"default-q","name":"Default preset"}]},
+            {"id":"p","name":"Profile","presets":[{"id":"q","name":"Preset","model_selections":{"prompt_tools":{"source":"byok","provider_id":"ollama","model_id":"raw-id"}}}]}
+        ])).unwrap();
+        let config = LlmConfig {
+            program_prompt_profiles: crate::llm::profile_conversion::build_program_prompt_profiles(
+                profiles,
+                &PromptSections::default(),
+            ),
+            ..Default::default()
+        };
+        assert!(resolve_requested_preset(&config, Some("p"), None)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            resolve_requested_preset(&config, None, Some("default-q"))
+                .unwrap()
+                .unwrap()
+                .id,
+            "default-q"
+        );
+        let preset = resolve_requested_preset(&config, Some("p"), Some("q"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(preset.name, "Preset");
+        let profile = resolve_requested_profile(&config, Some("p")).unwrap();
+        let layer = OneOffLlmProviderRequestLayer::from_preset(
+            Some(&preset),
+            crate::model_selection::ModelAction::PromptTools,
+        );
+        let request = resolve_one_off_llm_request_for_action(
+            &config,
+            profile.as_ref(),
+            crate::model_selection::ModelAction::PromptTools,
+            &[layer],
+        );
+        assert_eq!(request.provider_id, "ollama");
+        assert_eq!(request.params.model.as_deref(), Some("raw-id"));
+        assert_eq!(
+            request.params.selection.unwrap().source,
+            crate::model_selection::ModelSource::Byok
+        );
+        assert!(resolve_requested_preset(&config, Some("p"), Some("default-q")).is_err());
+        assert!(resolve_requested_preset(&config, Some("missing"), Some("q")).is_err());
+        assert!(resolve_requested_preset(&config, Some("p"), Some("missing")).is_err());
+        assert!(resolve_requested_profile(&config, Some("default"))
+            .unwrap()
+            .is_none());
+        assert!(resolve_requested_profile(&config, None).unwrap().is_none());
+        assert!(resolve_requested_profile(&config, Some("missing")).is_err());
+        let absent = OneOffLlmProviderRequestLayer::from_preset(
+            None,
+            crate::model_selection::ModelAction::Rewrite,
+        );
+        assert_eq!(absent, OneOffLlmProviderRequestLayer::default());
+        let mut legacy = preset.clone();
+        legacy.llm_provider = Some("openai".into());
+        legacy.llm_model = Some("rewrite-id".into());
+        let layer = OneOffLlmProviderRequestLayer::from_preset(
+            Some(&legacy),
+            crate::model_selection::ModelAction::Rewrite,
+        );
+        assert_eq!(layer.provider.as_deref(), Some("openai"));
+        assert_eq!(layer.model.as_deref(), Some("rewrite-id"));
+    }
 }
 
 #[derive(Debug, serde::Serialize, JsonSchema)]
@@ -106,10 +178,16 @@ pub struct LlmCompleteResponse {
     pub model_used: String,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, JsonSchema)]
 pub struct LlmCompleteArgs {
     pub provider: String,
     pub model: Option<String>,
+    #[serde(default)]
+    pub action: Option<crate::model_selection::ModelAction>,
+    #[serde(default, alias = "modelSelection")]
+    pub model_selection: Option<crate::model_selection::ModelSelection>,
+    #[serde(default, alias = "profileId")]
+    pub profile_id: Option<String>,
 
     // Optional provider-specific thinking knobs.
     // These are used for ad-hoc completions (History UI, Quick Ask tests).
@@ -460,6 +538,7 @@ pub async fn iterate_rewrite_prompt(
     desired_output: Option<String>,
     current_prompt: String,
     profile_id: Option<String>,
+    preset_id: Option<String>,
     mode: Option<String>,
 
     // Optional Prompt Lab overrides (do not persist; only affect this invocation).
@@ -474,41 +553,36 @@ pub async fn iterate_rewrite_prompt(
 
     let request_log_store = app
         .try_state::<RequestLogStore>()
-        .map(|s| s.inner().clone());
-
-    let mut request_id: Option<String> = None;
-
-    if let Some(store) = request_log_store.as_ref() {
-        let id = store.start_request("prompt-iter".to_string(), None);
-        request_id = Some(id.clone());
-
-        // Tie OCR to this request id so OCR state cannot leak across requests.
-        pipeline.begin_ocr_session(id);
-        store.with_current(|log| {
-            log.raw_transcript = Some(transcript.clone());
-            let mode_label = mode.as_deref().unwrap_or("fixed").to_string();
-            log.info(format!("Prompt iteration started (mode: {})", mode_label));
-        });
-    }
+        .map(|s| s.inner().fork_current());
 
     let config = pipeline.config();
 
     let resolved_profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
 
-    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
-
-    let provider_request = resolve_one_off_llm_request_for_profile(
+    let preset = resolve_requested_preset(
+        &config.llm_config,
+        profile_id.as_deref(),
+        preset_id.as_deref(),
+    )?;
+    let provider_request = resolve_one_off_llm_request_for_action(
         &config.llm_config,
         resolved_profile.as_ref(),
-        &[OneOffLlmProviderRequestLayer {
-            provider: llm_provider,
-            model: llm_model,
-            openai_reasoning_effort: open_ai_reasoning_effort,
-            gemini_thinking_budget,
-            gemini_thinking_level,
-            anthropic_thinking_budget,
-            ..Default::default()
-        }],
+        crate::model_selection::ModelAction::PromptTools,
+        &[
+            OneOffLlmProviderRequestLayer::from_preset(
+                preset.as_ref(),
+                crate::model_selection::ModelAction::PromptTools,
+            ),
+            OneOffLlmProviderRequestLayer {
+                provider: llm_provider,
+                model: llm_model,
+                openai_reasoning_effort: open_ai_reasoning_effort,
+                gemini_thinking_budget,
+                gemini_thinking_level,
+                anthropic_thinking_budget,
+                ..Default::default()
+            },
+        ],
     );
 
     // This is a Settings UI helper: do not enforce request timeouts.
@@ -591,6 +665,14 @@ pub async fn iterate_rewrite_prompt(
         ),
     };
 
+    if let Some(store) = request_log_store.as_ref() {
+        store.start_request_with("prompt-iter".into(), None, |log| {
+            log.raw_transcript = Some(transcript.clone());
+            log.info("Prompt tool request started");
+        });
+    }
+    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
+
     let improved_res = provider.complete(system_prompt, &user_message).await;
 
     match improved_res {
@@ -616,16 +698,13 @@ pub async fn iterate_rewrite_prompt(
                     log.complete_success();
                 });
 
-                crate::stats::emit_cost_events_for_current_request(
+                crate::stats::emit_cost_events_for_log_store(
                     &app,
                     EventStatus::Success,
                     None,
+                    store,
                 );
                 store.complete_current();
-
-                if let Some(req_id) = request_id.as_deref() {
-                    pipeline.end_ocr_session_if_matches(req_id);
-                }
 
                 return Ok(IterateRewritePromptResponse {
                     improved_prompt: improved,
@@ -633,8 +712,6 @@ pub async fn iterate_rewrite_prompt(
                     model_used,
                 });
             }
-
-            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
 
             Ok(IterateRewritePromptResponse {
                 improved_prompt: improved,
@@ -651,14 +728,8 @@ pub async fn iterate_rewrite_prompt(
                     log.complete_error(e.to_string());
                 });
 
-                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
+                crate::stats::emit_cost_events_for_log_store(&app, EventStatus::Error, None, store);
                 store.complete_current();
-
-                if let Some(req_id) = request_id.as_deref() {
-                    pipeline.end_ocr_session_if_matches(req_id);
-                }
-            } else {
-                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
 
             Err(llm_error(e.to_string()))
@@ -677,35 +748,32 @@ pub async fn test_rewrite_with_prompt(
     transcript: String,
     prompt: String,
     profile_id: Option<String>,
+    preset_id: Option<String>,
 ) -> Result<TestRewriteWithPromptResponse, CommandError> {
     let llm_started_at = Instant::now();
 
     let request_log_store = app
         .try_state::<RequestLogStore>()
-        .map(|s| s.inner().clone());
-
-    let mut request_id: Option<String> = None;
-
-    if let Some(store) = request_log_store.as_ref() {
-        let id = store.start_request("prompt-test".to_string(), None);
-        request_id = Some(id.clone());
-
-        // Tie OCR to this request id so OCR state cannot leak across requests.
-        pipeline.begin_ocr_session(id);
-        store.with_current(|log| {
-            log.raw_transcript = Some(transcript.clone());
-            log.info("Prompt test started");
-        });
-    }
+        .map(|s| s.inner().fork_current());
 
     let config = pipeline.config();
 
     let resolved_profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
 
-    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
-
-    let provider_request =
-        resolve_one_off_llm_request_for_profile(&config.llm_config, resolved_profile.as_ref(), &[]);
+    let preset = resolve_requested_preset(
+        &config.llm_config,
+        profile_id.as_deref(),
+        preset_id.as_deref(),
+    )?;
+    let provider_request = resolve_one_off_llm_request_for_action(
+        &config.llm_config,
+        resolved_profile.as_ref(),
+        crate::model_selection::ModelAction::PromptTools,
+        &[OneOffLlmProviderRequestLayer::from_preset(
+            preset.as_ref(),
+            crate::model_selection::ModelAction::PromptTools,
+        )],
+    );
 
     let provider = provider_request
         .create_without_timeout(
@@ -715,6 +783,14 @@ pub async fn test_rewrite_with_prompt(
             request_log_store.clone(),
         )
         .map_err(|e| llm_error(e.to_string()))?;
+
+    if let Some(store) = request_log_store.as_ref() {
+        store.start_request_with("prompt-test".into(), None, |log| {
+            log.raw_transcript = Some(transcript.clone());
+            log.info("Prompt tool request started");
+        });
+    }
+    record_request_log_profile_usage(request_log_store.as_ref(), resolved_profile.as_ref());
 
     let output_res = provider
         .complete(prompt.as_str(), transcript.as_str())
@@ -743,16 +819,13 @@ pub async fn test_rewrite_with_prompt(
                     log.complete_success();
                 });
 
-                crate::stats::emit_cost_events_for_current_request(
+                crate::stats::emit_cost_events_for_log_store(
                     &app,
                     EventStatus::Success,
                     None,
+                    store,
                 );
                 store.complete_current();
-
-                if let Some(req_id) = request_id.as_deref() {
-                    pipeline.end_ocr_session_if_matches(req_id);
-                }
 
                 return Ok(TestRewriteWithPromptResponse {
                     output,
@@ -760,8 +833,6 @@ pub async fn test_rewrite_with_prompt(
                     model_used,
                 });
             }
-
-            crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
 
             Ok(TestRewriteWithPromptResponse {
                 output,
@@ -778,14 +849,8 @@ pub async fn test_rewrite_with_prompt(
                     log.complete_error(e.to_string());
                 });
 
-                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
+                crate::stats::emit_cost_events_for_log_store(&app, EventStatus::Error, None, store);
                 store.complete_current();
-
-                if let Some(req_id) = request_id.as_deref() {
-                    pipeline.end_ocr_session_if_matches(req_id);
-                }
-            } else {
-                crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Error, None);
             }
 
             Err(llm_error(e.to_string()))
@@ -799,7 +864,6 @@ pub async fn test_rewrite_with_prompt(
 /// and the transcript bundle as the *user prompt*.
 #[tauri::command]
 pub async fn llm_complete(
-    app: AppHandle,
     pipeline: State<'_, SharedPipeline>,
     args: LlmCompleteArgs,
 ) -> Result<LlmCompleteResponse, CommandError> {
@@ -808,6 +872,9 @@ pub async fn llm_complete(
     let LlmCompleteArgs {
         provider,
         model,
+        action,
+        model_selection,
+        profile_id,
         openai_reasoning_effort,
         gemini_thinking_budget,
         gemini_thinking_level,
@@ -816,9 +883,19 @@ pub async fn llm_complete(
         user_prompt,
     } = args;
 
-    let provider_request = resolve_one_off_llm_request(
+    let action = action.unwrap_or(crate::model_selection::ModelAction::HistoryAnalysis);
+    if action == crate::model_selection::ModelAction::Transcription {
+        return Err(llm_error(
+            "A transcription model cannot perform text completion",
+        ));
+    }
+    let profile = resolve_requested_profile(&config.llm_config, profile_id.as_deref())?;
+    let provider_request = resolve_one_off_llm_request_for_action(
         &config.llm_config,
+        profile.as_ref(),
+        action,
         &[OneOffLlmProviderRequestLayer {
+            selection: model_selection,
             provider: Some(provider),
             model,
             openai_reasoning_effort,
@@ -841,9 +918,6 @@ pub async fn llm_complete(
         .await
         .map_err(|e| llm_error(e.to_string()))?;
 
-    // Best-effort: emit LLM cost event for the current request log (if any).
-    crate::stats::emit_cost_events_for_current_request(&app, EventStatus::Success, None);
-
     Ok(LlmCompleteResponse {
         output: output.trim().to_string(),
         provider_used: provider.name().to_string(),
@@ -859,49 +933,6 @@ pub struct LlmProviderInfo {
     pub requires_api_key: bool,
     pub default_model: String,
     pub models: Vec<String>,
-}
-
-/// Update LLM configuration on the pipeline
-#[tauri::command]
-pub fn update_llm_config(
-    pipeline: State<'_, SharedPipeline>,
-    config: LlmConfigPayload,
-) -> Result<(), CommandError> {
-    // Get current pipeline config and update just the LLM portion
-    // Note: This is a simplified approach - in a full implementation,
-    // we'd want to preserve other config and only update LLM settings
-    let llm_config = LlmConfig {
-        custom_providers: get_current_pipeline_config(&pipeline)?
-            .llm_config
-            .custom_providers,
-        enabled: config.enabled,
-        provider: config.provider,
-        api_key: config.api_key.unwrap_or_default(),
-        model: config.model,
-        ollama_url: config.ollama_url,
-        managed_gateway_url: None,
-        openai_reasoning_effort: None,
-        gemini_thinking_budget: None,
-        gemini_thinking_level: None,
-        anthropic_thinking_budget: None,
-        prompts: PromptSections::default(),
-        program_prompt_profiles: Vec::new(),
-        timeout: Duration::from_secs(config.timeout_secs.unwrap_or(30)),
-    };
-
-    // Get current config from pipeline and update LLM portion
-    let current_config = get_current_pipeline_config(&pipeline)?;
-    let new_config = crate::pipeline::PipelineConfig {
-        llm_config,
-        ..current_config
-    };
-
-    pipeline
-        .update_config(new_config)
-        .map_err(|e| llm_error(e.to_string()))?;
-
-    log::info!("LLM configuration updated");
-    Ok(())
 }
 
 /// Update LLM prompt configuration

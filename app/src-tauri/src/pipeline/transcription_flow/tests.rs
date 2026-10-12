@@ -300,7 +300,8 @@ async fn routing_cancellation_never_rewrites_or_overwrites_the_new_log() {
         &ctx,
         &callbacks,
         ctx.active_profile.as_ref().unwrap(),
-        "raw transcript"
+        "raw transcript",
+        &Default::default(),
     )
     .await
     .is_none());
@@ -330,6 +331,7 @@ fn minimal_profile_with_llm_overrides(
     model: Option<&str>,
 ) -> ProgramPromptProfile {
     ProgramPromptProfile {
+        model_selections: Default::default(),
         id: "test-profile".to_string(),
         name: "Test Profile".to_string(),
         program_paths: vec![],
@@ -376,6 +378,7 @@ fn embeddings_router_profile() -> ProgramPromptProfile {
     let mut profile = minimal_profile_with_llm_overrides(None, None);
     profile.presets = vec![
         crate::llm::ProgramPreset {
+            model_selections: Default::default(),
             id: "email".to_string(),
             name: "Email".to_string(),
             routing_hints: vec!["email hint".to_string()],
@@ -393,6 +396,7 @@ fn embeddings_router_profile() -> ProgramPromptProfile {
             anthropic_thinking_budget: None,
         },
         crate::llm::ProgramPreset {
+            model_selections: Default::default(),
             id: "calendar".to_string(),
             name: "Calendar".to_string(),
             routing_hints: vec!["calendar hint".to_string()],
@@ -456,7 +460,12 @@ fn forced_llm_provider_model_take_precedence_over_profile() {
         forced_llm_model: Some("llama-3.1-8b-instant".to_string()),
     };
 
-    let llm_config = crate::llm::LlmConfig::default();
+    let mut llm_config = crate::llm::LlmConfig::default();
+    llm_config.selection = Some(crate::model_selection::ModelSelection {
+        source: crate::model_selection::ModelSource::Byok,
+        provider_id: "saved-provider".into(),
+        model_id: "saved-model".into(),
+    });
     let _ = resolve_llm_for_rewrite(&ctx, &callbacks, &None, &llm_config);
 
     let recorded = callbacks.0.lock().expect("lock").clone();
@@ -503,7 +512,7 @@ async fn route_preset_consumes_routing_decision_and_records_outcome() {
         forced_llm_model: None,
     };
 
-    let result = route_preset(&ctx, &callbacks, "send email").await;
+    let result = route_preset(&ctx, &callbacks, "send email", &Default::default()).await;
 
     assert_eq!(result.routed_preset_id.as_deref(), Some("email"));
     assert_eq!(

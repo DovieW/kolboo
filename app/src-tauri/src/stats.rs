@@ -1144,6 +1144,18 @@ pub fn emit_cost_events_for_current_request_with_duration(
     status: EventStatus,
     audio_secs: Option<f64>,
 ) {
+    let Some(log_store) = app.try_state::<RequestLogStore>() else {
+        return;
+    };
+    emit_cost_events_for_log_store(app, status, audio_secs, log_store.inner());
+}
+
+pub(crate) fn emit_cost_events_for_log_store(
+    app: &AppHandle,
+    status: EventStatus,
+    audio_secs: Option<f64>,
+    log_store: &RequestLogStore,
+) {
     log::info!(
         "emit_cost_events_for_current_request called with status {:?}",
         status
@@ -1151,11 +1163,6 @@ pub fn emit_cost_events_for_current_request_with_duration(
 
     let Some(stats_store) = app.try_state::<StatsStore>() else {
         log::warn!("StatsStore not available");
-        return;
-    };
-
-    let Some(log_store) = app.try_state::<RequestLogStore>() else {
-        log::warn!("RequestLogStore not available");
         return;
     };
 

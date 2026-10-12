@@ -1,9 +1,11 @@
 import { normalizeSttLanguageOverride } from "../../sttLanguages";
+import { normalizeModelSelections } from "../../modelSelection";
 import {
 	normalizeRewritePreset as normalizeCanonicalRewritePreset,
 	normalizePresetRoutingHints,
+	type NormalizedRewritePreset,
 } from "../presetDefaults";
-import type { CleanupPromptSectionsOverride, RewritePreset } from "../types";
+import type { CleanupPromptSectionsOverride } from "../types";
 import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
@@ -32,7 +34,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
  */
 export function normalizeRawRewritePreset(
 	value: unknown,
-): RewritePreset | null {
+): NormalizedRewritePreset | null {
 	const p = isRecord(value) ? value : null;
 	if (!p) return null;
 	const id = typeof p.id === "string" ? p.id : "";
@@ -48,6 +50,7 @@ export function normalizeRawRewritePreset(
 		: null;
 
 	return normalizeCanonicalRewritePreset({
+		model_selections: normalizeModelSelections(p.model_selections),
 		id,
 		name,
 		description,

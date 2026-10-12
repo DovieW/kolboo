@@ -383,6 +383,12 @@ impl CleanupPromptSectionsSetting {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewriteProgramPromptProfile {
+    /// Atomic per-action choices. An absent action retains legacy inheritance.
+    #[serde(
+        default,
+        deserialize_with = "crate::model_selection::deserialize_selections"
+    )]
+    pub model_selections: crate::model_selection::ModelSelections,
     pub id: String,
     pub name: String,
     #[serde(
@@ -543,6 +549,11 @@ pub fn filter_enabled_rewrite_profiles(
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewritePreset {
+    #[serde(
+        default,
+        deserialize_with = "crate::model_selection::deserialize_selections"
+    )]
+    pub model_selections: crate::model_selection::ModelSelections,
     #[serde(default)]
     pub id: String,
     #[serde(default)]

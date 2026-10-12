@@ -4,7 +4,6 @@ import {
 	Group,
 	Loader,
 	Select,
-	Switch,
 	Text,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -12,9 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
 import {
 	EMBEDDING_MODELS,
-	isRealtimeSttModel,
 	type ModelOption,
-	managedModelByokTarget,
 } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
@@ -22,7 +19,6 @@ import {
 	useHasLastAudioForSttTest,
 	useIterateRewritePrompt,
 	useLicenseAuthContext,
-	useModelPricing,
 	useSettings,
 	useTestLlmRewrite,
 	useTestRewriteWithPrompt,
@@ -41,9 +37,7 @@ import {
 	useUpdateQuickAskGeminiThinkingBudget,
 	useUpdateQuickAskGeminiThinkingLevel,
 	useUpdateQuickAskIncludeSelectedText,
-	useUpdateQuickAskModel,
 	useUpdateQuickAskOpenAiReasoningEffort,
-	useUpdateQuickAskProvider,
 	useUpdateQuickAskSystemPrompt,
 	useUpdateRewriteLlmEnabled,
 	useUpdateRewriteProgramPromptProfiles,
@@ -52,7 +46,6 @@ import {
 	useUpdateSTTProvider,
 	useUpdateSTTTimeout,
 	useUpdateSTTTranscriptionPrompt,
-	useUpdateSTTUseManagedInference,
 } from "../../lib/queries";
 import {
 	DEFAULT_STT_LANGUAGE,
@@ -76,7 +69,6 @@ import { PromptSettingsModals } from "./prompt/PromptSettingsModals";
 import { QuickAskPanel } from "./prompt/QuickAskPanel";
 import { RewriteSettingsSection } from "./prompt/RewriteSettingsSection";
 import {
-	formatUsdRateFromMicros,
 	isGeminiThinkingLevel,
 	isOpenAiReasoningEffort,
 	normalizeRouter,
@@ -105,7 +97,6 @@ import {
 } from "./prompt/useThinkingOptions";
 import { QuickReplaceSettings } from "./QuickReplaceSettings";
 import { RewritePromptLabModal } from "./RewritePromptLabModal";
-import { SettingsRow } from "./SettingsRow";
 
 const INHERIT_TOOLTIP = "Inheriting from Default profile";
 
@@ -151,8 +142,7 @@ export function PromptSettings({
 		useAvailableProviders();
 	const { data: licenseAuthContext } = useLicenseAuthContext();
 	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
-	const [showAllProvidersAndModels, setShowAllProvidersAndModels] =
-		useState(false);
+	const showAllProvidersAndModels = true;
 	const updateCleanupPromptSections = useUpdateCleanupPromptSections();
 	const updateRewriteLlmEnabled = useUpdateRewriteLlmEnabled();
 	const updateRewriteProgramPromptProfiles =
@@ -166,7 +156,6 @@ export function PromptSettings({
 	// Default profile (global) provider settings
 	const updateSTTProvider = useUpdateSTTProvider();
 	const updateSTTModel = useUpdateSTTModel();
-	const updateSTTUseManagedInference = useUpdateSTTUseManagedInference();
 	const updateSTTLanguage = useUpdateSTTLanguage();
 	const updateSTTTranscriptionPrompt = useUpdateSTTTranscriptionPrompt();
 	const updateLLMProvider = useUpdateLLMProvider();
@@ -177,8 +166,6 @@ export function PromptSettings({
 	const updateGeminiThinkingLevel = useUpdateGeminiThinkingLevel();
 	const _updateSTTTimeout = useUpdateSTTTimeout();
 
-	const updateQuickAskProvider = useUpdateQuickAskProvider();
-	const updateQuickAskModel = useUpdateQuickAskModel();
 	const updateQuickAskSystemPrompt = useUpdateQuickAskSystemPrompt();
 	const updateQuickAskDismissMode = useUpdateQuickAskDismissMode();
 	const updateQuickAskIncludeSelectedText =
@@ -265,9 +252,7 @@ export function PromptSettings({
 		localProfileLlmModel,
 		setLocalProfileLlmModel,
 		localProfileQuickAskProvider,
-		setLocalProfileQuickAskProvider,
 		localProfileQuickAskModel,
-		setLocalProfileQuickAskModel,
 		localProfileQuickAskDismissMode,
 		setLocalProfileQuickAskDismissMode,
 		localQuickAskSystemPrompt,
@@ -275,9 +260,7 @@ export function PromptSettings({
 		localProfileQuickReplaceEnabled,
 		setLocalProfileQuickReplaceEnabled,
 		localProfileQuickReplaceProvider,
-		setLocalProfileQuickReplaceProvider,
 		localProfileQuickReplaceModel,
-		setLocalProfileQuickReplaceModel,
 		localQuickReplaceSystemPrompt,
 		setLocalQuickReplaceSystemPrompt,
 		localProfileRewriteIncludeClipboardContext,
@@ -312,17 +295,13 @@ export function PromptSettings({
 		setLocalProfileQuickAskGeminiThinkingBudget,
 		localProfileQuickAskAnthropicThinkingBudget,
 		setLocalProfileQuickAskAnthropicThinkingBudget,
-		sttProviderInheriting,
 		setSttProviderInheriting,
-		sttModelInheriting,
 		setSttModelInheriting,
 		sttLanguageInheriting,
 		setSttLanguageInheriting,
 		sttTimeoutInheriting,
 		setSttTimeoutInheriting,
-		llmProviderInheriting,
 		setLlmProviderInheriting,
-		llmModelInheriting,
 		setLlmModelInheriting,
 		rewriteEnabledInheriting,
 		setRewriteEnabledInheriting,
@@ -346,20 +325,12 @@ export function PromptSettings({
 		setGeminiThinkingBudgetInheriting,
 		anthropicThinkingBudgetInheriting,
 		setAnthropicThinkingBudgetInheriting,
-		quickAskProviderInheriting,
-		setQuickAskProviderInheriting,
-		quickAskModelInheriting,
-		setQuickAskModelInheriting,
 		quickAskSystemPromptInheriting,
 		setQuickAskSystemPromptInheriting,
 		quickAskDismissModeInheriting,
 		setQuickAskDismissModeInheriting,
 		quickReplaceEnabledInheriting,
 		setQuickReplaceEnabledInheriting,
-		quickReplaceProviderInheriting,
-		setQuickReplaceProviderInheriting,
-		quickReplaceModelInheriting,
-		setQuickReplaceModelInheriting,
 		quickReplaceSystemPromptInheriting,
 		setQuickReplaceSystemPromptInheriting,
 		quickAskOpenAiReasoningEffortInheriting,
@@ -414,30 +385,15 @@ export function PromptSettings({
 	}, [activeProfile]);
 
 	const {
-		sttCloudProviders,
-		sttLocalProviders,
-		sttProviderOptions,
-		llmCloudProviders,
-		llmLocalProviders,
-		llmProviderOptions,
 		effectiveSttProvider,
 		effectiveSttModel,
 		effectiveLlmProvider,
 		effectiveLlmModel,
 		effectiveQuickAskProvider,
 		effectiveQuickAskModel,
-		effectiveQuickReplaceProvider,
-		sttModelOptions,
-		llmModelOptions,
-		quickAskModelOptions,
-		quickReplaceModelOptions,
 		selectedSttModelForUi,
-		selectedLlmModelForUi,
 		selectedQuickAskModelForUi,
-		selectedQuickReplaceModelForUi,
 		defaultQuickReplaceEnabled,
-		defaultQuickReplaceProvider,
-		defaultQuickReplaceModel,
 		defaultQuickReplaceSystemPrompt,
 		defaultRewriteIncludeClipboardContext,
 		defaultQuickReplaceIncludeClipboardContext,
@@ -445,7 +401,6 @@ export function PromptSettings({
 		quickAskIncludeSelectedText,
 		quickAskConversationHistoryEnabled,
 		quickAskConversationHistoryCount,
-		managedModels,
 		ollamaModelsQuery,
 		getLlmModelOptionsForProvider,
 	} = usePromptProviderOptions({
@@ -663,65 +618,8 @@ export function PromptSettings({
 		setWhisperServerModelDraft(selectedSttModelForUi ?? "");
 	}, [sttProviderIsWhisperServer, selectedSttModelForUi]);
 
-	const sttPricing = useModelPricing(
-		effectiveSttProvider,
-		"stt",
-		selectedSttModelForUi,
-	);
-	const llmPricing = useModelPricing(
-		effectiveLlmProvider,
-		"llm",
-		selectedLlmModelForUi,
-	);
 
-	const sttPricingLabel = useMemo(() => {
-		const stt = sttPricing.data?.stt;
-		const isRealtime = isRealtimeSttModel(
-			effectiveSttProvider,
-			selectedSttModelForUi,
-		);
 
-		if (!stt) {
-			// No pricing data but still realtime — show just the tag.
-			return isRealtime ? "Realtime" : null;
-		}
-
-		const minSecs =
-			typeof stt.min_billed_secs === "number" ? stt.min_billed_secs : null;
-
-		const withMinBill = (base: string) =>
-			minSecs ? `${base} · min ${minSecs}s` : base;
-
-		const withRealtime = (label: string) =>
-			isRealtime ? `Realtime · ${label}` : label;
-
-		if (typeof stt.usd_micros_per_hour === "number") {
-			const base = `${formatUsdRateFromMicros(stt.usd_micros_per_hour)}/hr`;
-			return withRealtime(withMinBill(base));
-		}
-
-		// Some providers report pricing as USD/minute. For consistency in the UI,
-		// normalize everything to USD/hour.
-		if (typeof stt.usd_micros_per_minute === "number") {
-			const perHourMicros = Math.round(stt.usd_micros_per_minute * 60);
-			const base = `${formatUsdRateFromMicros(perHourMicros)}/hr`;
-			return withRealtime(withMinBill(base));
-		}
-
-		// No pricing but still realtime
-		if (isRealtime) return "Realtime";
-
-		return null;
-	}, [sttPricing.data, effectiveSttProvider, selectedSttModelForUi]);
-
-	const llmPricingLabel = useMemo(() => {
-		const llm = llmPricing.data?.llm;
-		if (!llm) return null;
-
-		const input = formatUsdRateFromMicros(llm.input_usd_micros_per_1m);
-		const output = formatUsdRateFromMicros(llm.output_usd_micros_per_1m);
-		return `in ${input} · out ${output} /1M tok`;
-	}, [llmPricing.data]);
 
 	// Thinking options (supports flags, dropdown options, utility functions)
 	const {
@@ -907,10 +805,6 @@ export function PromptSettings({
 		handleDisableRewriteEnabledOverride,
 		handleRewriteIncludeClipboardContextChange,
 		handleDisableRewriteIncludeClipboardContextOverride,
-		handleRewriteLlmProviderChange,
-		handleDisableRewriteLlmProviderOverride,
-		handleRewriteLlmModelChange,
-		handleDisableRewriteLlmModelOverride,
 		handleRewriteOpenAiThinkingChange,
 		handleDisableRewriteOpenAiThinkingOverride,
 		handleRewriteGeminiThinkingLevelChange,
@@ -952,82 +846,14 @@ export function PromptSettings({
 		openDisableOverrideDialog,
 	});
 
-	const managedSttCompatible = Boolean(
-		managedModels?.some(
-			(model) =>
-				model.provider === effectiveSttProvider &&
-				model.id === selectedSttModelForUi &&
-				model.capabilities.includes("transcription"),
-		),
-	);
-	const sttOwnKeyConfigured = Boolean(
-		availableProviders?.stt.some(
-			(provider) =>
-				!provider.is_local && provider.value === effectiveSttProvider,
-		),
-	);
 
-	const managedLlmSelection = managedModels?.find((model) => {
-		if (!model.capabilities.includes("chat_completions")) return false;
-		if (effectiveLlmProvider === "managed") {
-			return model.id === selectedLlmModelForUi;
-		}
-		const target = managedModelByokTarget(model);
-		return (
-			target?.provider === effectiveLlmProvider &&
-			target.model === selectedLlmModelForUi
-		);
-	});
-	const managedLlmCompatible = Boolean(managedLlmSelection);
-	const managedLlmByokTarget = managedLlmSelection
-		? managedModelByokTarget(managedLlmSelection)
-		: null;
-	const llmUsingOwnKey =
-		managedLlmCompatible && effectiveLlmProvider !== "managed";
-	const llmOwnKeyConfigured = Boolean(
-		managedLlmByokTarget &&
-			availableProviders?.llm.some(
-				(provider) =>
-					!provider.is_local &&
-					provider.value === managedLlmByokTarget.provider,
-			),
-	);
 
-	const setRewriteProviderAndModel = (provider: string, model: string) => {
-		if (isDefaultScope) {
-			updateLLMProvider.mutate(provider, {
-				onSuccess: () => updateLLMModel.mutate(model),
-			});
-			return;
-		}
-		setLlmProviderInheriting(false);
-		setLlmModelInheriting(false);
-		setLocalProfileLlmProvider(provider);
-		setLocalProfileLlmModel(model);
-		saveProfileMetadata({ llm_provider: provider, llm_model: model });
-	};
 
-	const handleLlmUseOwnKeyChange = (useOwnKey: boolean) => {
-		if (!managedLlmSelection) return;
-		if (useOwnKey) {
-			const target = managedModelByokTarget(managedLlmSelection);
-			if (!target) return;
-			setShowAllProvidersAndModels(true);
-			setRewriteProviderAndModel(target.provider, target.model);
-			return;
-		}
-		setRewriteProviderAndModel("managed", managedLlmSelection.id);
-	};
 
 	const {
-		handleWhisperServerModelDraftBlur,
-		handleSttProviderChange,
-		handleSttModelChange,
 		handleSttLanguageChange,
 		handleSttTimeoutChange,
 		handleSttTimeoutBlur,
-		handleDisableSttProviderOverride,
-		handleDisableSttModelOverride,
 		handleDisableSttLanguageOverride,
 		handleDisableSttTimeoutOverride,
 	} = useSttSettingsHandlers({
@@ -1061,23 +887,7 @@ export function PromptSettings({
 		openDisableOverrideDialog,
 	});
 
-	const handleDefaultQuickAskProviderChange = (value: string | null) => {
-		if (!value) return;
-		updateQuickAskProvider.mutate(value, {
-			onSuccess: () => {
-				const models = getLlmModelOptionsForProvider(value);
-				const firstModel = models?.[0];
-				if (firstModel) {
-					updateQuickAskModel.mutate(firstModel.value);
-				}
-			},
-		});
-	};
 
-	const handleDefaultQuickAskModelChange = (value: string | null) => {
-		if (!value) return;
-		updateQuickAskModel.mutate(value);
-	};
 
 	if (isLoading) {
 		return (
@@ -1263,6 +1073,7 @@ export function PromptSettings({
 				opened={promptLabOpen}
 				onClose={closePromptLab}
 				profileId={activeProfileId}
+				presetId={promptLabApplyTarget?.type === "preset" ? promptLabApplyTarget.presetId : undefined}
 				profileLabel={promptLabContextLabel || activeProfileLabel}
 				initialLlmProvider={effectiveLlmProvider}
 				initialLlmModel={effectiveLlmModel}
@@ -1300,6 +1111,7 @@ export function PromptSettings({
 						desiredOutput: params.desiredOutput,
 						currentPrompt: params.currentPrompt,
 						profileId: params.profileId,
+						presetId: params.presetId,
 						mode: params.mode,
 						llmProvider: params.llmProvider,
 						llmModel: params.llmModel,
@@ -1320,6 +1132,7 @@ export function PromptSettings({
 						transcript: params.transcript,
 						prompt: params.prompt,
 						profileId: params.profileId,
+						presetId: params.presetId,
 					});
 
 					return {
@@ -1330,53 +1143,18 @@ export function PromptSettings({
 				}}
 			/>
 
-			{managedAccessEnabled ? (
-				<SettingsRow
-					label="Provider visibility"
-					description="Managed providers and models are shown by default."
-					className="provider-visibility-row"
-					noDivider
-					right={
-						<Switch
-							label="Show all providers and models"
-							checked={showAllProvidersAndModels}
-							onChange={(event) =>
-								setShowAllProvidersAndModels(event.currentTarget.checked)
-							}
-							color="gray"
-							size="md"
-						/>
-					}
-				/>
-			) : null}
 
 			<TranscribeSettingsSection
 				activeProfileId={activeProfileId}
 				isDefaultScope={isDefaultScope}
 				inheritTooltip={INHERIT_TOOLTIP}
-				sttProviderInheriting={sttProviderInheriting}
-				sttModelInheriting={sttModelInheriting}
 				sttTimeoutInheriting={sttTimeoutInheriting}
 				sttLanguageInheriting={sttLanguageInheriting}
 				effectiveSttProvider={effectiveSttProvider}
-				sttProviderOptions={sttProviderOptions}
-				isSttProviderOptionsDisabled={
-					sttCloudProviders.length === 0 && sttLocalProviders.length === 0
-				}
-				sttProviderIsWhisperServer={sttProviderIsWhisperServer}
-				sttModelOptions={sttModelOptions}
 				selectedSttModelForUi={selectedSttModelForUi}
-				sttPricingLabel={sttPricingLabel}
 				sttLanguageOptions={STT_LANGUAGE_OPTIONS}
 				localProfileSttLanguage={localProfileSttLanguage}
-				whisperServerModelDraft={whisperServerModelDraft}
-				onWhisperServerModelDraftChange={setWhisperServerModelDraft}
-				onWhisperServerModelBlur={handleWhisperServerModelDraftBlur}
-				onSttProviderChange={handleSttProviderChange}
-				onSttModelChange={handleSttModelChange}
 				onSttLanguageChange={handleSttLanguageChange}
-				onDisableSttProviderOverride={handleDisableSttProviderOverride}
-				onDisableSttModelOverride={handleDisableSttModelOverride}
 				onDisableSttLanguageOverride={handleDisableSttLanguageOverride}
 				onDisableSttTimeoutOverride={handleDisableSttTimeoutOverride}
 				localProfileSttTimeout={localProfileSttTimeout}
@@ -1395,16 +1173,10 @@ export function PromptSettings({
 				isSttTestRunning={testSttLastAudio.isPending}
 				onRunSttTest={handleRunSttTest}
 				hasStoredTranscriptionPrompt={hasStoredTranscriptionPrompt}
-				managedAccessEnabled={managedAccessEnabled}
-				managedModelCompatible={managedSttCompatible}
-				useManagedInference={settings?.stt_use_managed_inference ?? true}
-				ownKeyConfigured={sttOwnKeyConfigured}
-				onUseOwnKeyChange={(useOwnKey) =>
-					updateSTTUseManagedInference.mutate(!useOwnKey)
-				}
 			/>
 
 			<RewriteSettingsSection
+				activeProfileId={activeProfileId}
 				isDefaultScope={isDefaultScope}
 				inheritTooltip={INHERIT_TOOLTIP}
 				ocrProviderAvailable={ocrProviderAvailable}
@@ -1439,21 +1211,7 @@ export function PromptSettings({
 				onDisableRewriteActiveWindowOcrModeOverride={
 					handleDisableRewriteActiveWindowOcrModeOverride
 				}
-				effectiveLlmProvider={effectiveLlmProvider}
-				llmProviderOptions={llmProviderOptions}
-				isLlmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				llmProviderInheriting={llmProviderInheriting}
-				onLlmProviderChange={handleRewriteLlmProviderChange}
-				onDisableLlmProviderOverride={handleDisableRewriteLlmProviderOverride}
-				llmModelOptions={llmModelOptions}
-				llmModelInheriting={llmModelInheriting}
-				localProfileLlmModel={localProfileLlmModel}
-				llmPricingLabel={llmPricingLabel}
 				settings={settings}
-				onLlmModelChange={handleRewriteLlmModelChange}
-				onDisableLlmModelOverride={handleDisableRewriteLlmModelOverride}
 				supportsOpenAiThinking={supportsOpenAiThinking}
 				openAiReasoningEffortInheriting={openAiReasoningEffortInheriting}
 				localProfileOpenAiReasoningEffort={localProfileOpenAiReasoningEffort}
@@ -1498,12 +1256,6 @@ export function PromptSettings({
 					handleDisableRewriteAnthropicThinkingBudgetOverride
 				}
 				formatThinkingBudgetShort={formatThinkingBudgetShort}
-				managedAccessEnabled={managedAccessEnabled}
-				managedModelCompatible={managedLlmCompatible}
-				usingOwnKey={llmUsingOwnKey}
-				ownKeyAvailable={Boolean(managedLlmByokTarget)}
-				ownKeyConfigured={llmOwnKeyConfigured}
-				onUseOwnKeyChange={handleLlmUseOwnKeyChange}
 			/>
 			{/* System prompt + test rewrite live inside the preset editor (Default or a specific preset). */}
 
@@ -1729,7 +1481,6 @@ export function PromptSettings({
 							selectDefaultValue={SELECT_DEFAULT}
 							anthropicThinkingBudgets={ANTHROPIC_THINKING_LEVEL_BUDGETS}
 							getEmbeddingModelsForProvider={getEmbeddingModelsForProvider}
-							getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
 							saveRouter={saveRouter}
 							onCacheRouterEmbeddings={handleCacheRouterEmbeddings}
 						/>
@@ -1761,16 +1512,7 @@ export function PromptSettings({
 				setLocalProfileQuickReplaceActiveWindowOcrMode={
 					setLocalProfileQuickReplaceActiveWindowOcrMode
 				}
-				defaultQuickReplaceProvider={defaultQuickReplaceProvider}
-				defaultQuickReplaceModel={defaultQuickReplaceModel}
 				defaultQuickReplaceSystemPrompt={defaultQuickReplaceSystemPrompt}
-				effectiveQuickReplaceProvider={effectiveQuickReplaceProvider}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
-				quickReplaceModelOptions={quickReplaceModelOptions}
-				selectedQuickReplaceModelForUi={selectedQuickReplaceModelForUi}
 				localProfileQuickReplaceEnabled={localProfileQuickReplaceEnabled}
 				localProfileQuickReplaceIncludeClipboardContext={
 					localProfileQuickReplaceIncludeClipboardContext
@@ -1780,15 +1522,11 @@ export function PromptSettings({
 				quickReplaceIncludeClipboardContextInheriting={
 					quickReplaceIncludeClipboardContextInheriting
 				}
-				quickReplaceProviderInheriting={quickReplaceProviderInheriting}
-				quickReplaceModelInheriting={quickReplaceModelInheriting}
 				quickReplaceSystemPromptInheriting={quickReplaceSystemPromptInheriting}
 				setQuickReplaceEnabledInheriting={setQuickReplaceEnabledInheriting}
 				setQuickReplaceIncludeClipboardContextInheriting={
 					setQuickReplaceIncludeClipboardContextInheriting
 				}
-				setQuickReplaceProviderInheriting={setQuickReplaceProviderInheriting}
-				setQuickReplaceModelInheriting={setQuickReplaceModelInheriting}
 				setQuickReplaceSystemPromptInheriting={
 					setQuickReplaceSystemPromptInheriting
 				}
@@ -1796,16 +1534,9 @@ export function PromptSettings({
 				setLocalProfileQuickReplaceIncludeClipboardContext={
 					setLocalProfileQuickReplaceIncludeClipboardContext
 				}
-				setLocalProfileQuickReplaceProvider={
-					setLocalProfileQuickReplaceProvider
-				}
-				setLocalProfileQuickReplaceModel={setLocalProfileQuickReplaceModel}
 				setLocalQuickReplaceSystemPrompt={setLocalQuickReplaceSystemPrompt}
 				saveProfileMetadata={saveProfileMetadata}
 				openDisableOverrideDialog={openDisableOverrideDialog}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
-				rewriteProvider={settings?.llm_provider ?? null}
-				rewriteModel={settings?.llm_model ?? null}
 				isSaving={updateRewriteProgramPromptProfiles.isPending}
 			/>
 			<QuickAskPanel
@@ -1838,8 +1569,6 @@ export function PromptSettings({
 				quickAskIncludeClipboardContextInheriting={
 					quickAskIncludeClipboardContextInheriting
 				}
-				quickAskProviderInheriting={quickAskProviderInheriting}
-				quickAskModelInheriting={quickAskModelInheriting}
 				quickAskOpenAiReasoningEffortInheriting={
 					quickAskOpenAiReasoningEffortInheriting
 				}
@@ -1875,7 +1604,6 @@ export function PromptSettings({
 					localProfileQuickAskAnthropicThinkingBudget
 				}
 				localQuickAskSystemPrompt={localQuickAskSystemPrompt}
-				quickAskModelOptions={quickAskModelOptions}
 				selectedQuickAskModelForUi={selectedQuickAskModelForUi}
 				quickAskOpenAiThinkingOptions={quickAskOpenAiThinkingOptions}
 				quickAskGeminiThinkingLevelOptions={quickAskGeminiThinkingLevelOptions}
@@ -1896,10 +1624,6 @@ export function PromptSettings({
 					supportsQuickAskAnthropicThinkingBudget
 				}
 				quickAskModelForThinking={quickAskModelForThinking}
-				llmProviderOptions={llmProviderOptions}
-				llmProviderDisabled={
-					llmCloudProviders.length === 0 && llmLocalProviders.length === 0
-				}
 				updateQuickAskIncludeSelectedText={updateQuickAskIncludeSelectedText}
 				updateQuickAskConversationHistoryEnabled={
 					updateQuickAskConversationHistoryEnabled
@@ -1920,8 +1644,6 @@ export function PromptSettings({
 				setQuickAskIncludeClipboardContextInheriting={
 					setQuickAskIncludeClipboardContextInheriting
 				}
-				setQuickAskProviderInheriting={setQuickAskProviderInheriting}
-				setQuickAskModelInheriting={setQuickAskModelInheriting}
 				setQuickAskOpenAiReasoningEffortInheriting={
 					setQuickAskOpenAiReasoningEffortInheriting
 				}
@@ -1939,8 +1661,6 @@ export function PromptSettings({
 				setLocalProfileQuickAskIncludeClipboardContext={
 					setLocalProfileQuickAskIncludeClipboardContext
 				}
-				setLocalProfileQuickAskProvider={setLocalProfileQuickAskProvider}
-				setLocalProfileQuickAskModel={setLocalProfileQuickAskModel}
 				setLocalProfileQuickAskDismissMode={setLocalProfileQuickAskDismissMode}
 				setLocalProfileQuickAskOpenAiReasoningEffort={
 					setLocalProfileQuickAskOpenAiReasoningEffort
@@ -1955,13 +1675,8 @@ export function PromptSettings({
 					setLocalProfileQuickAskAnthropicThinkingBudget
 				}
 				setLocalQuickAskSystemPrompt={setLocalQuickAskSystemPrompt}
-				handleDefaultQuickAskProviderChange={
-					handleDefaultQuickAskProviderChange
-				}
-				handleDefaultQuickAskModelChange={handleDefaultQuickAskModelChange}
 				openDisableOverrideDialog={openDisableOverrideDialog}
 				saveProfileMetadata={saveProfileMetadata}
-				getLlmModelOptionsForProvider={getLlmModelOptionsForProvider}
 				isOpenAiReasoningEffort={isOpenAiReasoningEffort}
 				isGeminiThinkingLevel={isGeminiThinkingLevel}
 				openAiDefaultReasoningEffortForModel={

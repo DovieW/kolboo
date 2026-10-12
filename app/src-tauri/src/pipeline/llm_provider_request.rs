@@ -27,6 +27,7 @@ use crate::request_log::RequestLogStore;
 /// without accidentally erasing a profile/global choice with `"   "`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OneOffLlmProviderRequestLayer {
+    pub(crate) selection: Option<crate::model_selection::ModelSelection>,
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) ollama_url: Option<String>,
@@ -37,6 +38,28 @@ pub(crate) struct OneOffLlmProviderRequestLayer {
 }
 
 impl OneOffLlmProviderRequestLayer {
+    pub(crate) fn from_preset(
+        preset: Option<&crate::llm::ProgramPreset>,
+        action: crate::model_selection::ModelAction,
+    ) -> Self {
+        let Some(preset) = preset else {
+            return Self::default();
+        };
+        Self {
+            selection: preset.model_selections.get(&action).cloned(),
+            provider: (action == crate::model_selection::ModelAction::Rewrite)
+                .then_some(preset.llm_provider.clone())
+                .flatten(),
+            model: (action == crate::model_selection::ModelAction::Rewrite)
+                .then_some(preset.llm_model.clone())
+                .flatten(),
+            openai_reasoning_effort: preset.openai_reasoning_effort.clone(),
+            gemini_thinking_budget: preset.gemini_thinking_budget,
+            gemini_thinking_level: preset.gemini_thinking_level.clone(),
+            anthropic_thinking_budget: preset.anthropic_thinking_budget,
+            ..Default::default()
+        }
+    }
     /// Convert the rewrite-profile portion of persisted settings into a one-off resolution layer.
     ///
     /// Quick Ask / Quick Replace keep their own product-specific config Modules. They should map
@@ -48,6 +71,10 @@ impl OneOffLlmProviderRequestLayer {
         };
 
         Self {
+            selection: profile
+                .model_selections
+                .get(&crate::model_selection::ModelAction::Rewrite)
+                .cloned(),
             provider: profile.llm_provider.clone(),
             model: profile.llm_model.clone(),
             ollama_url: None,
@@ -114,6 +141,66 @@ pub(crate) fn resolve_one_off_llm_request_for_profile(
     resolve_one_off_llm_request(base_config, &layers)
 }
 
+/// An action inherits the rewrite model only when its own route is absent.
+/// Provider knobs remain profile-inheritable without changing payment source.
+pub(crate) fn resolve_one_off_llm_request_for_action(
+    base_config: &LlmConfig,
+    profile: Option<&ProgramPromptProfile>,
+    action: crate::model_selection::ModelAction,
+    additional_layers: &[OneOffLlmProviderRequestLayer],
+) -> OneOffLlmProviderRequest {
+    let mut base = base_config.clone();
+    base.selection = base.model_selections.get(&action).cloned().or_else(|| {
+        (action != crate::model_selection::ModelAction::QuickAsk)
+            .then_some(base.selection.clone())
+            .flatten()
+    });
+    let mut layer = OneOffLlmProviderRequestLayer::from_profile(profile);
+    layer.selection = profile
+        .and_then(|profile| profile.model_selections.get(&action))
+        .cloned()
+        .or_else(|| {
+            matches!(
+                action,
+                crate::model_selection::ModelAction::Rewrite
+                    | crate::model_selection::ModelAction::HistoryAnalysis
+                    | crate::model_selection::ModelAction::PromptTools
+            )
+            .then_some(layer.selection.clone())
+            .flatten()
+        });
+    if let Some(profile) = profile {
+        match action {
+            crate::model_selection::ModelAction::QuickAsk => {
+                layer.provider = profile.quick_ask_provider.clone();
+                layer.model = profile.quick_ask_model.clone();
+                layer.openai_reasoning_effort = profile.quick_ask_openai_reasoning_effort.clone();
+                layer.gemini_thinking_budget = profile.quick_ask_gemini_thinking_budget;
+                layer.gemini_thinking_level = profile.quick_ask_gemini_thinking_level.clone();
+                layer.anthropic_thinking_budget = profile.quick_ask_anthropic_thinking_budget;
+            }
+            crate::model_selection::ModelAction::QuickReplace => {
+                layer.provider = profile.quick_replace_provider.clone();
+                layer.model = profile.quick_replace_model.clone();
+            }
+            crate::model_selection::ModelAction::IntentRouter => {
+                layer.provider = profile
+                    .router
+                    .as_ref()
+                    .and_then(|router| router.llm_provider.clone());
+                layer.model = profile
+                    .router
+                    .as_ref()
+                    .and_then(|router| router.llm_model.clone());
+            }
+            _ => {}
+        }
+    }
+    let mut layers = vec![layer];
+    layers.extend_from_slice(additional_layers);
+    resolve_one_off_llm_request(&base, &layers)
+}
+
 /// Resolve a one-off request from the global rewrite config plus additional override layers.
 ///
 /// Resolution order is:
@@ -129,6 +216,7 @@ pub(crate) fn resolve_one_off_llm_request(
     let mut provider_id = normalize_optional_string(Some(base_config.provider.clone()))
         .unwrap_or_else(|| "openai".to_string());
     let mut model = normalize_optional_string(base_config.model.clone());
+    let mut selection = base_config.selection.clone();
     let mut ollama_url = normalize_optional_string(base_config.ollama_url.clone());
     let mut openai_reasoning_effort =
         normalize_optional_string(base_config.openai_reasoning_effort.clone());
@@ -138,6 +226,14 @@ pub(crate) fn resolve_one_off_llm_request(
     let mut anthropic_thinking_budget = base_config.anthropic_thinking_budget;
 
     for layer in layers {
+        selection = crate::model_selection::inherit_model_selection(
+            selection.as_ref(),
+            &[(
+                layer.selection.as_ref(),
+                layer.provider.as_deref(),
+                layer.model.as_deref(),
+            )],
+        );
         if let Some(value) = normalize_optional_string(layer.provider.clone()) {
             provider_id = value;
         }
@@ -161,9 +257,14 @@ pub(crate) fn resolve_one_off_llm_request(
         }
     }
 
+    if let Some(choice) = selection.as_ref() {
+        provider_id = choice.provider_id.clone();
+        model = Some(choice.model_id.clone());
+    }
     OneOffLlmProviderRequest {
         provider_id,
         params: LlmProviderParams {
+            selection,
             model,
             // The no-timeout constructor ignores this field. We still keep the configured timeout
             // here so the same resolved request can also drive the normal one-off constructor.
@@ -189,8 +290,149 @@ mod tests {
     use crate::llm::PromptSections;
     use std::time::Duration;
 
+    #[test]
+    fn quick_actions_and_router_use_their_own_profile_routes_and_knobs() {
+        use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+        let global = ModelSelection {
+            source: ModelSource::Managed,
+            provider_id: "groq".into(),
+            model_id: "global".into(),
+        };
+        let mut base = LlmConfig {
+            selection: Some(global.clone()),
+            ollama_url: Some("http://local.test".into()),
+            ..Default::default()
+        };
+        let mut p = profile("p");
+        p.model_selections.insert(
+            ModelAction::Rewrite,
+            ModelSelection {
+                source: ModelSource::Byok,
+                provider_id: "anthropic".into(),
+                model_id: "rewrite-only".into(),
+            },
+        );
+        p.llm_provider = Some("anthropic".into());
+        p.llm_model = Some("rewrite-only".into());
+        p.quick_ask_provider = Some("openai".into());
+        p.quick_ask_model = Some("ask".into());
+        p.quick_ask_openai_reasoning_effort = Some("high".into());
+        p.quick_ask_gemini_thinking_budget = Some(12);
+        p.quick_ask_gemini_thinking_level = Some("low".into());
+        p.quick_ask_anthropic_thinking_budget = Some(34);
+        let ask =
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::QuickAsk, &[]);
+        assert_eq!(ask.provider_id, "openai");
+        assert_eq!(ask.params.model.as_deref(), Some("ask"));
+        assert!(ask.params.selection.is_none());
+        assert_eq!(ask.params.openai_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(ask.params.gemini_thinking_budget, Some(12));
+        assert_eq!(ask.params.gemini_thinking_level.as_deref(), Some("low"));
+        assert_eq!(ask.params.anthropic_thinking_budget, Some(34));
+        base.model_selections
+            .insert(ModelAction::QuickAsk, global.clone());
+        assert_eq!(
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::QuickAsk, &[])
+                .params
+                .selection
+                .unwrap()
+                .model_id,
+            "ask"
+        );
+        p.quick_replace_provider = Some("ollama".into());
+        p.quick_replace_model = Some("replace".into());
+        let replace =
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::QuickReplace, &[]);
+        assert_eq!(replace.provider_id, "ollama");
+        assert_eq!(replace.params.model.as_deref(), Some("replace"));
+        assert_eq!(
+            replace.params.selection.unwrap().source,
+            ModelSource::Managed
+        );
+        assert_eq!(
+            replace.params.ollama_url.as_deref(),
+            Some("http://local.test")
+        );
+        let router =
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::IntentRouter, &[]);
+        assert_eq!(router.params.selection, Some(global.clone()));
+        assert_eq!(router.provider_id, "groq");
+        assert_eq!(router.params.model.as_deref(), Some("global"));
+        p.router = Some(
+            serde_json::from_value(
+                serde_json::json!({"llm_provider":"openai","llm_model":"router"}),
+            )
+            .unwrap(),
+        );
+        let router =
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::IntentRouter, &[]);
+        assert_eq!(router.provider_id, "openai");
+        assert_eq!(router.params.selection.unwrap().model_id, "router");
+    }
+
+    #[test]
+    fn per_action_and_profile_routes_preserve_atomic_identity_over_stale_fields() {
+        use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+        let global = ModelSelection {
+            source: ModelSource::Byok,
+            provider_id: "openai".into(),
+            model_id: "global".into(),
+        };
+        let action = ModelSelection {
+            source: ModelSource::Managed,
+            provider_id: "groq".into(),
+            model_id: "action".into(),
+        };
+        let mut base = LlmConfig {
+            selection: Some(global.clone()),
+            ..Default::default()
+        };
+        base.model_selections
+            .insert(ModelAction::HistoryAnalysis, action.clone());
+        let resolved =
+            resolve_one_off_llm_request_for_action(&base, None, ModelAction::HistoryAnalysis, &[]);
+        assert_eq!(resolved.params.selection, Some(action.clone()));
+        assert_eq!(resolved.provider_id, "groq");
+        assert_eq!(resolved.params.model.as_deref(), Some("action"));
+        let mut p = profile("p");
+        p.model_selections
+            .insert(ModelAction::Rewrite, global.clone());
+        assert_eq!(
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::PromptTools, &[])
+                .params
+                .selection,
+            Some(global)
+        );
+        p.model_selections
+            .insert(ModelAction::PromptTools, action.clone());
+        p.llm_provider = Some("stale".into());
+        p.llm_model = Some("stale".into());
+        let resolved =
+            resolve_one_off_llm_request_for_action(&base, Some(&p), ModelAction::PromptTools, &[]);
+        assert_eq!(resolved.params.selection, Some(action.clone()));
+        assert_eq!(resolved.provider_id, "groq");
+        let override_layer = OneOffLlmProviderRequestLayer {
+            model: Some("override".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            resolve_one_off_llm_request_for_action(
+                &base,
+                Some(&p),
+                ModelAction::PromptTools,
+                &[override_layer]
+            )
+            .params
+            .selection
+            .unwrap()
+            .model_id,
+            "override"
+        );
+    }
+
     fn profile(id: &str) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             program_paths: Vec::new(),

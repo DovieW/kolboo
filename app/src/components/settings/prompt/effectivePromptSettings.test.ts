@@ -34,6 +34,20 @@ function preset(overrides: Partial<RewritePreset>): RewritePreset {
 }
 
 describe("prompt profile fallback resolution", () => {
+	it("explains atomic preset/global/profile choices rather than superseded legacy IDs",()=>{
+		const global={source:"byok",provider_id:"custom_a",model_id:" raw::א "} as const;
+		const selected={source:"managed",provider_id:"groq",model_id:"published"} as const;
+		const views=resolvePresetRuntimeFallbackViews({profile:profile({stt_provider:"stale",stt_model:"stale",model_selections:{transcription:global}}),preset:preset({llm_provider:"stale",llm_model:"stale",model_selections:{rewrite:selected}}),settings:{llm_provider:"legacy",llm_model:"legacy",model_selections:{rewrite:global}},defaultSttTimeout:10,defaultSttLanguage:"auto"});
+		expect(views.sttProvider).toMatchObject({value:"custom_a",source:"profile"});
+		expect(views.sttModel).toMatchObject({value:" raw::א ",source:"profile"});
+		expect(views.llmProvider).toMatchObject({value:"groq",source:"preset"});
+		expect(views.llmModel).toMatchObject({value:"published",source:"preset"});
+		const inherited=resolvePresetRuntimeFallbackViews({profile:null,preset:null,settings:{model_selections:{rewrite:global}},defaultSttTimeout:10,defaultSttLanguage:"auto"});
+		expect(inherited.llmProvider).toMatchObject({value:"custom_a",source:"global"});
+		expect(inherited.llmModel).toMatchObject({value:" raw::א ",source:"global"});
+		const blank=resolvePresetRuntimeFallbackViews({profile:profile({llm_provider:"",llm_model:" "}),preset:null,settings:{llm_provider:"openai"},defaultSttTimeout:10,defaultSttLanguage:"auto"});
+		expect(blank.llmProvider.value).toBe("openai");
+	});
 	it("uses explicit Default profile values before global settings", () => {
 		const fallbacks = resolvePromptProfileFallbacks({
 			defaultProfile: profile({

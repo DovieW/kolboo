@@ -22,6 +22,8 @@ const MAX_WAV_SIZE_BYTES: usize = 50 * 1024 * 1024;
 /// Configuration for the recording pipeline
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
+    pub model_selections: crate::model_selection::ModelSelections,
+    pub model_selection_error: Option<String>,
     /// Optional backend input device name (CPAL device name).
     ///
     /// When set, recording will attempt to use the first input device whose name
@@ -194,6 +196,8 @@ impl OcrConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
+            model_selections: Default::default(),
+            model_selection_error: None,
             input_device_name: None,
             max_duration_secs: 300.0, // 5 minutes max
             stt_provider: default_values::DEFAULT_STT_PROVIDER.to_string(),

@@ -174,6 +174,8 @@ describe("settings contract: Rust defaults vs TS getSettings", () => {
 			// UI prompt editing state (backend falls back to its own defaults)
 			"cleanup_prompt_sections",
 			// Provider/model selections are optional and can be unset
+			// Derived view of independent global/scoped action keys, never seeded.
+			"model_selections",
 			"stt_model",
 			"llm_provider",
 			"llm_model",

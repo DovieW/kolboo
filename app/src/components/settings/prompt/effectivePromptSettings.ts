@@ -57,8 +57,22 @@ type PresetRuntimeSettings = Partial<
 		| "stt_timeout_seconds"
 		| "llm_provider"
 		| "llm_model"
+		| "model_selections"
 	>
 >;
+
+function presetModelFieldView(action: "transcription" | "rewrite", key: "stt_provider" | "stt_model" | "llm_provider" | "llm_model", settings: PresetRuntimeSettings | undefined, profile: RewriteProgramPromptProfile | null, preset: RewritePreset | null): SettingsValueView<string | null> {
+	const field = key.endsWith("_provider") ? "provider_id" : "model_id";
+	const profileChoice = profile?.model_selections?.[action];
+	const presetChoice = preset?.model_selections?.[action];
+	return presetSettingView({
+		globalValue: settings?.model_selections?.[action]?.[field] ?? settings?.[key],
+		profile: profileChoice ? {...profile, [key]: profileChoice[field]} : profile,
+		preset: presetChoice ? {...preset, [key]: presetChoice[field]} : preset,
+		key, defaultValue: null,
+		normalize: value => typeof value === "string" && value.trim() ? value : null,
+	});
+}
 
 export function profileSettingIsInherited(
 	profile: RewriteProgramPromptProfile,
@@ -230,22 +244,8 @@ export function resolvePresetRuntimeFallbackViews({
 	// the profile Settings View helpers. Keeping this logic here lets production UI
 	// explain effective preset values without rebuilding fallback rules inline.
 	return {
-		sttProvider: presetSettingView<string | null>({
-			globalValue: settings?.stt_provider,
-			profile,
-			preset,
-			key: "stt_provider",
-			defaultValue: null,
-			normalize: stringOrNull,
-		}),
-		sttModel: presetSettingView<string | null>({
-			globalValue: settings?.stt_model,
-			profile,
-			preset,
-			key: "stt_model",
-			defaultValue: null,
-			normalize: stringOrNull,
-		}),
+		sttProvider: presetModelFieldView("transcription","stt_provider",settings,profile,preset),
+		sttModel: presetModelFieldView("transcription","stt_model",settings,profile,preset),
 		sttLanguage: presetSettingView<string | null>({
 			globalValue: settings?.stt_language,
 			profile,
@@ -262,21 +262,7 @@ export function resolvePresetRuntimeFallbackViews({
 			defaultValue: defaultSttTimeout,
 			normalize: finitePositiveNumberOrNull,
 		}),
-		llmProvider: presetSettingView<string | null>({
-			globalValue: settings?.llm_provider,
-			profile,
-			preset,
-			key: "llm_provider",
-			defaultValue: null,
-			normalize: stringOrNull,
-		}),
-		llmModel: presetSettingView<string | null>({
-			globalValue: settings?.llm_model,
-			profile,
-			preset,
-			key: "llm_model",
-			defaultValue: null,
-			normalize: stringOrNull,
-		}),
+		llmProvider: presetModelFieldView("rewrite","llm_provider",settings,profile,preset),
+		llmModel: presetModelFieldView("rewrite","llm_model",settings,profile,preset),
 	};
 }

@@ -265,6 +265,7 @@ mod tests {
 
     fn preset(id: &str) -> ProgramPreset {
         ProgramPreset {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             routing_hints: vec![],
@@ -285,6 +286,7 @@ mod tests {
 
     fn profile(id: &str, presets: Vec<ProgramPreset>) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             program_paths: vec![],

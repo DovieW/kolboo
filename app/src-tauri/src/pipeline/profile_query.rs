@@ -80,6 +80,7 @@ mod tests {
 
     fn profile(id: &str, name: &str, program_path: &str) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: name.to_string(),
             program_paths: vec![program_path.to_string()],

@@ -375,6 +375,11 @@ const REALTIME_STT_MODELS = new Set([
 	"speechmatics::standard",
 ]);
 
+/** These protocols cannot perform a batch request for the same selected model. */
+export function isStreamingOnlySttModel(provider: string, model: string): boolean {
+	return (provider === "openai" || provider === "assemblyai" || provider === "fireworks") && isRealtimeSttModel(provider, model);
+}
+
 export function listAllSttModelKeys(): Array<{ key: string; label: string }> {
 	return listAllModelKeys(STT_MODELS);
 }

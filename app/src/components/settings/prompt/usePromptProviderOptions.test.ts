@@ -61,6 +61,20 @@ const options = {
 	effectiveRouterLlmProvider: null,
 };
 
+it("keeps atomic profile choices and missing selections visible independently of catalog availability",()=>{
+    const stt={source:"byok" as const,provider_id:"unavailable_audio",model_id:"saved-speech"};
+    const rewrite={source:"managed" as const,provider_id:"openai",model_id:"saved-text"};
+    const profile={id:"p",name:"Profile",program_paths:[],cleanup_prompt_sections:{},model_selections:{transcription:stt,rewrite}};
+    const scoped=usePromptProviderOptions({...options,activeProfileId:"p",isDefaultScope:false,profiles:[profile],settings:{...options.settings,model_selections:{transcription:stt,rewrite}} as AppSettings});
+    expect(scoped.effectiveSttProvider).toBe("unavailable_audio");
+    expect(scoped.effectiveLlmProvider).toBe("openai");
+    expect(scoped.effectiveLlmModel).toBe("saved-text");
+    expect(scoped.selectedSttModelForUi).toBe("saved-speech");
+    const inherited=usePromptProviderOptions({...options,activeProfileId:"missing",isDefaultScope:false,settings:{...options.settings,stt_provider:null,llm_provider:null,stt_model:null,llm_model:null} as unknown as AppSettings});
+    expect(inherited.effectiveSttProvider).toBeNull(); expect(inherited.effectiveLlmProvider).toBeNull();
+    expect(inherited.effectiveLlmModel).toBeNull();
+});
+
 it("offers configured custom capabilities and model IDs for BYOK", () => {
 	const result = usePromptProviderOptions(options);
 	expect(result.sttCloudProviders).toEqual([
@@ -237,6 +251,12 @@ it("preserves saved IDs across catalog refreshes in all BYOK prompt flows", () =
 		isDefaultScope: false,
 	});
 	expect(inherited.selectedLlmModelForUi).toBeNull();
+	const inheritedIds=usePromptProviderOptions({...options,settings,activeProfileId:"profile",isDefaultScope:false,localProfileSttModel:null,localProfileLlmModel:null});
+	expect(inheritedIds.effectiveSttModel).toBe("old-stt");
+	expect(inheritedIds.effectiveLlmModel).toBe("old-llm");
+	const modelDefaults=usePromptProviderOptions({...options,settings:{...options.settings,stt_model:null,llm_model:null},activeProfileId:"profile",isDefaultScope:false});
+	expect(modelDefaults.effectiveSttModel).toBeNull();
+	expect(modelDefaults.effectiveLlmModel).toBeNull();
 	const empty = usePromptProviderOptions({
 		...options,
 		settings: undefined,

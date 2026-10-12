@@ -11,6 +11,7 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { Trash2 } from "lucide-react";
+import { ActionModelPicker } from "../../ActionModelPicker";
 import type { CleanupPromptSections, RewritePreset } from "../../../lib/tauri";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 import type { PresetRuntimeFallbackViews } from "./effectivePromptSettings";
@@ -331,6 +332,8 @@ export function PresetEditorModal({
 							}}
 						/>
 
+						<ActionModelPicker action="transcription" label="Preset transcription model" profileId={activeProfileId} presetId={selectedPreset.id} disabled={isSavingProfiles}/>
+						<ActionModelPicker action="rewrite" label="Preset rewrite model" profileId={activeProfileId} presetId={selectedPreset.id} disabled={isSavingProfiles}/>
 						<div>
 							<Text size="xs" c="dimmed" mb={4}>
 								Rewrite step

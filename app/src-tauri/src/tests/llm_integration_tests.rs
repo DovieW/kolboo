@@ -375,6 +375,26 @@ async fn test_managed_complete_parses_stable_api_edge_error() {
 }
 
 #[tokio::test]
+async fn managed_atomic_choice_sends_exact_provider_hint_and_raw_model() {
+    let server = MockServer::start().await;
+    let model = "raw/model-ID";
+    Mock::given(method("POST"))
+        .and(header("x-kolboo-model-provider","groq"))
+        .and(header("authorization","Bearer synthetic-session"))
+        .and(body_json(json!({"model":model,"messages":[{"role":"system","content":"sys"},{"role":"user","content":"user"}]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"message":{"content":"synthetic output"}}]})))
+        .expect(1).mount(&server).await;
+    let provider =
+        ManagedLlmProvider::new("synthetic-session".into(), Some(model.into()), server.uri())
+            .with_selected_provider(Some("groq".into()));
+    assert_eq!(
+        provider.complete("sys", "user").await.unwrap(),
+        "synthetic output"
+    );
+    assert_eq!(provider.model(), model);
+}
+
+#[tokio::test]
 async fn test_ollama_complete_sends_expected_request_body() {
     let mock_server = MockServer::start().await;
 

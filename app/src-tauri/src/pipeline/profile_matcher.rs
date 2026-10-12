@@ -115,6 +115,7 @@ mod tests {
 
     fn profile(id: &str, program_paths: Vec<&str>) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             program_paths: program_paths.into_iter().map(ToString::to_string).collect(),

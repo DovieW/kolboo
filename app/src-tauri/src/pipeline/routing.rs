@@ -884,6 +884,7 @@ mod tests {
 
     fn preset(id: &str, hint: &str) -> ProgramPreset {
         ProgramPreset {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             routing_hints: vec![hint.to_string()],
@@ -904,6 +905,7 @@ mod tests {
 
     fn profile(strategy: IntentRouterStrategy) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: "profile".to_string(),
             name: "Profile".to_string(),
             program_paths: vec![],

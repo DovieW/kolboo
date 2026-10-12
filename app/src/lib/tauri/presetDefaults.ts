@@ -1,4 +1,5 @@
-import type { RewritePreset } from "./types";
+import type { ModelSelections, RewritePreset } from "./types";
+import { normalizeModelSelections } from "../modelSelection";
 
 export const DEFAULT_NEW_PRESET_NAME = "New preset";
 
@@ -27,8 +28,11 @@ export function normalizePresetRoutingHints(
  * Important: this intentionally converts `undefined` optionals into explicit `null`s so the
  * preset editor can treat missing legacy fields the same way as an explicit “inherit” choice.
  */
-export function normalizeRewritePreset(preset: RewritePreset): RewritePreset {
+export type NormalizedRewritePreset = RewritePreset & {model_selections:ModelSelections};
+
+export function normalizeRewritePreset(preset: RewritePreset): NormalizedRewritePreset {
 	return {
+		model_selections: normalizeModelSelections(preset.model_selections),
 		id: preset.id,
 		name: preset.name,
 		description: normalizeNullable(preset.description),

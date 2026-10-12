@@ -18,6 +18,7 @@ import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
 import { MicStatusCard } from "./components/MicStatusCard";
 import { RecordingBar } from "./components/RecordingBar";
+import { ModelNavigationContext } from "./components/ModelNavigation";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { TelemetryDisclosureModal } from "./components/settings/TelemetryDisclosureModal";
@@ -138,10 +139,12 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 
 function SettingsViewWithGuideLauncher({
 	onRunSetupGuide,
+	navigationRequest,
 }: {
 	onRunSetupGuide: () => void;
+	navigationRequest: {tab: string; id: number} | null;
 }) {
-	return <SettingsShell onRunSetupGuide={onRunSetupGuide} />;
+	return <SettingsShell onRunSetupGuide={onRunSetupGuide} navigationRequest={navigationRequest}/>;
 }
 
 function AccentColorSync() {
@@ -187,6 +190,7 @@ export default function App() {
 		bootShouldAutoOpenGuide ? "settings" : "home",
 	);
 	const [logsJumpToId, setLogsJumpToId] = useState<string | null>(null);
+	const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<{tab: string; id: number} | null>(null);
 	const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
 		() => bootShouldAutoOpenGuide,
 	);
@@ -380,6 +384,7 @@ export default function App() {
 			case "settings":
 				return (
 					<SettingsViewWithGuideLauncher
+						navigationRequest={settingsNavigationRequest}
 						onRunSetupGuide={() => {
 							setSettingsGuideOpen(true);
 						}}
@@ -421,7 +426,13 @@ export default function App() {
 	}
 
 	return (
-		<div className="app-layout">
+		<ModelNavigationContext.Provider value={{
+			account: () => setActiveView("account"),
+			setup: (selection) => {
+				setActiveView("settings");
+				setSettingsNavigationRequest(previous => ({tab: selection.provider_id === "ollama" || selection.provider_id === "whisper-server" || selection.provider_id === "local-whisper" ? "ai" : "api-keys", id: (previous?.id ?? 0) + 1}));
+			},
+		}}><div className="app-layout">
 			<AggregateAnalyticsBridge
 				enabled={aggregateAnalyticsEnabled}
 				page={activeView}
@@ -481,5 +492,6 @@ export default function App() {
 				}}
 			/>
 		</div>
+		</ModelNavigationContext.Provider>
 	);
 }

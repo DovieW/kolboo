@@ -2,13 +2,13 @@ import { Button, Group, Stack, Switch, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
 import {
 	modelSelectionKey,
-	recordingModelChoices,
 	recordingModelFromSelection,
 	recordingModelSelection,
 } from "../lib/modelSelection";
-import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
+import { useModelChoices } from "../lib/queries/modelChoices";
 import type { RecordingPreferences } from "../lib/tauri/types";
 import { ModelPicker } from "./ModelPicker";
+import { useModelNavigation } from "./ModelNavigation";
 
 type Selection = RecordingPreferences["meeting_model"];
 export function FileModelPicker({
@@ -22,7 +22,8 @@ export function FileModelPicker({
 	onReadyChange: (ready: boolean) => void;
 	disabled: boolean;
 }) {
-	const { options, loading, failedSources } = useTranscriptionModels();
+	const { choices, setupProviders, loading, failedSources, managedMessage, retry } = useModelChoices("file");
+	const navigation = useModelNavigation();
 	const [speakers, setSpeakers] = useState(
 		value?.model === "gpt-4o-transcribe-diarize",
 	);
@@ -31,12 +32,11 @@ export function FileModelPicker({
 	}, [value]);
 	const selection = recordingModelSelection(value);
 	const selected = selection ? modelSelectionKey(selection) : null;
-	const allChoices = recordingModelChoices(options.values());
-	const available = allChoices.some(
-		(choice) => modelSelectionKey(choice.selection) === selected,
+	const available = choices.some(
+		(choice) => choice.ready && modelSelectionKey(choice.selection) === selected,
 	);
-	const models = [...options.values()].filter(
-		(option) => (option.model === "gpt-4o-transcribe-diarize") === speakers,
+	const models = choices.filter(
+		(choice) => choice.capabilities.includes("Speaker labels") === speakers,
 	);
 	useEffect(() => {
 		onReadyChange(available);
@@ -60,13 +60,17 @@ export function FileModelPicker({
 			<ModelPicker
 				label="Transcription model"
 				loading={loading}
-				choices={recordingModelChoices(models)}
+				choices={models}
+				setupProviders={setupProviders}
 				value={recordingModelSelection(value)}
 				disabled={disabled}
 				onChange={(selection) =>
 					onChange(recordingModelFromSelection(selection))
 				}
-				managedMessage="Managed choices depend on your signed-in account and current access. Your models remain available independently."
+				managedMessage={managedMessage}
+				onRetry={retry}
+				onSetup={navigation?.setup}
+				onManagedAccess={navigation?.account}
 			/>
 			{failedSources.length > 0 ? (
 				<Group gap="xs">
@@ -77,11 +81,7 @@ export function FileModelPicker({
 						variant="subtle"
 						size="compact-xs"
 						disabled={disabled}
-						onClick={() =>
-							void Promise.allSettled(
-								failedSources.map((source) => source.query.refetch()),
-							)
-						}
+						onClick={retry}
 					>
 						Retry
 					</Button>

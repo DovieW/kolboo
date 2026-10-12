@@ -62,6 +62,8 @@ mod stt_provider_resolver;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_model_actions;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::native_streaming_consumer;
 mod transcription_flow;
 mod types;
@@ -261,6 +263,7 @@ struct PipelineInner {
 }
 
 struct EffectiveSttSettings {
+    selection: Option<crate::model_selection::ModelSelection>,
     provider_id: String,
     model: Option<String>,
     language: Option<String>,
@@ -273,13 +276,13 @@ impl PipelineInner {
         active_profile: Option<&ProgramPromptProfile>,
         active_preset: Option<&ProgramPreset>,
     ) -> EffectiveSttSettings {
-        let provider_id = canonicalize_stt_provider_id(
+        let mut provider_id = canonicalize_stt_provider_id(
             active_preset
                 .and_then(|p| p.stt_provider.as_deref())
                 .or_else(|| active_profile.and_then(|p| p.stt_provider.as_deref()))
                 .unwrap_or(self.config.stt_provider.as_str()),
         );
-        let model = active_preset
+        let mut model = active_preset
             .and_then(|p| p.stt_model.clone())
             .or_else(|| active_profile.and_then(|p| p.stt_model.clone()))
             .or_else(|| self.config.stt_model.clone());
@@ -295,7 +298,29 @@ impl PipelineInner {
             .map(|s| seconds_to_duration_or(s, self.config.transcription_timeout))
             .unwrap_or(self.config.transcription_timeout);
 
+        let action = crate::model_selection::ModelAction::Transcription;
+        let selection = crate::model_selection::inherit_model_selection(
+            self.config.model_selections.get(&action),
+            &[
+                (
+                    active_profile.and_then(|p| p.model_selections.get(&action)),
+                    active_profile.and_then(|p| p.stt_provider.as_deref()),
+                    active_profile.and_then(|p| p.stt_model.as_deref()),
+                ),
+                (
+                    active_preset.and_then(|p| p.model_selections.get(&action)),
+                    active_preset.and_then(|p| p.stt_provider.as_deref()),
+                    active_preset.and_then(|p| p.stt_model.as_deref()),
+                ),
+            ],
+        );
+        if let Some(choice) = &selection {
+            provider_id = choice.provider_id.clone();
+            model = Some(choice.model_id.clone());
+        }
+
         EffectiveSttSettings {
+            selection,
             provider_id,
             model,
             language,
@@ -775,6 +800,7 @@ impl SharedPipeline {
         let cache_key = llm_provider_cache_key(
             provider_id,
             &LlmProviderParams {
+                selection: None,
                 model: model.map(|s| s.to_string()),
                 timeout: Duration::from_secs(30),
                 ollama_url: None,
@@ -1154,11 +1180,20 @@ impl SharedPipeline {
 
             // Create the provider on-demand if it's not cached yet (e.g. first
             // recording after app start, or after a config sync that cleared the cache).
-            let provider = match inner.get_or_create_stt_provider(
-                &effective.provider_id,
-                effective.model.clone(),
-                effective.language.clone(),
-            ) {
+            let provider_result = if let Some(choice) = &effective.selection {
+                stt_provider_resolver::get_or_create_selected_stt_provider(
+                    &mut inner,
+                    choice,
+                    effective.language.clone(),
+                )
+            } else {
+                inner.get_or_create_stt_provider(
+                    &effective.provider_id,
+                    effective.model.clone(),
+                    effective.language.clone(),
+                )
+            };
+            let provider = match provider_result {
                 Ok(p) => p,
                 Err(e) => {
                     log::warn!(

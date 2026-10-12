@@ -484,11 +484,18 @@ pub async fn settings_apply_patch(
         .store("settings.json")
         .map_err(|e| CommandError::unknown(format!("Failed to open settings store: {}", e)))?;
 
-    let payload = crate::settings::patch::apply_settings_patch(&store, patch, delete_keys)?;
-
-    store
-        .save()
-        .map_err(|e| CommandError::unknown(format!("Failed to save settings store: {}", e)))?;
+    // No await while applying/saving: serialize patches so rollback cannot
+    // discard another window's successfully persisted model choice.
+    let payload = {
+        let _guard = crate::settings::patch::WRITE_LOCK
+            .lock()
+            .map_err(|_| CommandError::unknown("Settings write lock is unavailable"))?;
+        crate::settings::patch::persist_settings_patch(&store, patch, delete_keys, || {
+            store
+                .save()
+                .map_err(|_| CommandError::unknown("Settings could not be saved"))
+        })?
+    };
 
     crate::app_shared::emit_settings_changed(&app, payload);
 

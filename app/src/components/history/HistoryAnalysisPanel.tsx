@@ -1,3 +1,4 @@
+import { ActionModelPicker } from "../ActionModelPicker";
 import {
 	ActionIcon,
 	Badge,
@@ -8,7 +9,6 @@ import {
 	Modal,
 	NumberInput,
 	SegmentedControl,
-	Select,
 	Stack,
 	Text,
 	Textarea,
@@ -17,7 +17,6 @@ import {
 import { Copy, Send } from "lucide-react";
 import type { AnalysisPromptStyle } from "../../lib/history/readModel";
 import { analysisStyleLabel } from "../../lib/history/readModel";
-import type { LlmProviderInfo } from "../../lib/tauri";
 
 export function HistoryAnalysisPanel({
 	analysisOpened,
@@ -39,11 +38,6 @@ export function HistoryAnalysisPanel({
 	sendDrawerOpened,
 	onCloseSendDrawer,
 	isNarrow,
-	llmProviders,
-	sendProvider,
-	onSendProviderChange,
-	sendModel,
-	onSendModelChange,
 	sendProviderUsed,
 	sendModelUsed,
 	onGenerateSendOutput,
@@ -71,11 +65,6 @@ export function HistoryAnalysisPanel({
 	sendDrawerOpened: boolean;
 	onCloseSendDrawer: () => void;
 	isNarrow: boolean;
-	llmProviders: LlmProviderInfo[] | undefined;
-	sendProvider: string | null;
-	onSendProviderChange: (providerId: string | null) => void;
-	sendModel: string | null;
-	onSendModelChange: (modelId: string | null) => void;
 	sendProviderUsed: string;
 	sendModelUsed: string;
 	onGenerateSendOutput: () => void;
@@ -84,9 +73,6 @@ export function HistoryAnalysisPanel({
 	onSendOutputChange: (value: string) => void;
 	onCopySendOutput: () => void;
 }) {
-	const selectedProvider = (llmProviders ?? []).find(
-		(provider) => provider.id === sendProvider,
-	);
 
 	return (
 		<>
@@ -119,54 +105,7 @@ export function HistoryAnalysisPanel({
 				size={isNarrow ? "70%" : 460}
 			>
 				<Stack gap="sm">
-					<Group grow>
-						<Select
-							label="Provider"
-							placeholder="Select provider"
-							data={(llmProviders ?? []).map((provider) => ({
-								value: provider.id,
-								label: provider.name,
-							}))}
-							value={sendProvider}
-							onChange={onSendProviderChange}
-							renderOption={({ option }) => option.label}
-							styles={{
-								input: {
-									backgroundColor: "transparent",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-								},
-								dropdown: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-								},
-							}}
-						/>
-
-						<Select
-							label="Model"
-							placeholder="Select model"
-							data={(selectedProvider?.models ?? []).map((model) => ({
-								value: model,
-								label: model,
-							}))}
-							value={sendModel}
-							onChange={onSendModelChange}
-							searchable
-							renderOption={({ option }) => option.label}
-							styles={{
-								input: {
-									backgroundColor: "transparent",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-								},
-								dropdown: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-								},
-							}}
-						/>
-					</Group>
+					<ActionModelPicker action="history_analysis" label="Analysis model" disabled={isSendPending}/>
 
 					<Group justify="space-between" align="center">
 						<Text size="xs" c="dimmed">

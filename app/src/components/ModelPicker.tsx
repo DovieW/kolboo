@@ -18,6 +18,7 @@ import {
 	submitModelChoice,
 } from "../lib/modelSelection";
 import type { ModelSelection } from "../lib/tauri/types";
+import type { ModelProviderSetup } from "./ModelNavigation";
 
 /** Pure controlled picker: browsing/searching/details never persist a choice. */
 export function ModelPicker({
@@ -30,7 +31,11 @@ export function ModelPicker({
 	managedMessage,
 	onRetry,
 	onSetup,
+	setupProviders = [],
 	onInherit,
+	onManagedAccess,
+	clearable = true,
+	legacyLabel,
 }: {
 	label: string;
 	value: ModelSelection | null;
@@ -40,8 +45,12 @@ export function ModelPicker({
 	loading?: boolean;
 	managedMessage?: string;
 	onRetry?: () => void;
-	onSetup?: (selection: ModelSelection) => void;
+	onSetup?: (selection: ModelProviderSetup) => void;
+	setupProviders?: { provider_id: string; label: string }[];
 	onInherit?: () => void;
+	onManagedAccess?: () => void;
+	clearable?: boolean;
+	legacyLabel?: string;
 }) {
 	const [tab, setTab] = useState<string | null>(value?.source ?? "byok");
 	const [search, setSearch] = useState("");
@@ -71,7 +80,7 @@ export function ModelPicker({
 				store={combobox}
 				withinPortal={false}
 				onOptionSubmit={(key) => {
-					submitModelChoice(choices, key, disabled, (selection) => {
+					submitModelChoice(matching, key, disabled, (selection) => {
 						onChange(selection);
 						combobox.closeDropdown();
 					});
@@ -97,7 +106,7 @@ export function ModelPicker({
 								{selected?.providerName ?? value.provider_id} ·{" "}
 								{value.source === "managed" ? "Managed" : "Your models"}
 							</>
-						) : (
+						) : legacyLabel ? legacyLabel : (
 							<Input.Placeholder>
 								{loading ? "Loading models…" : "Choose a model"}
 							</Input.Placeholder>
@@ -135,6 +144,9 @@ export function ModelPicker({
 						<Text size="sm" c="dimmed" p="xs" role="status">
 							{managedMessage}
 						</Text>
+					)}
+					{tab === "managed" && managedMessage && onManagedAccess && (
+						<Button size="compact-xs" variant="subtle" onClick={onManagedAccess} disabled={disabled}>Sign in / View account access</Button>
 					)}
 					<ScrollArea.Autosize mah={320} type="auto">
 						<Combobox.Options>
@@ -197,6 +209,13 @@ export function ModelPicker({
 							)}
 						</Combobox.Options>
 					</ScrollArea.Autosize>
+					{tab === "byok" && onSetup && setupProviders.map((provider) => (
+						<Button key={provider.provider_id} variant="subtle" size="compact-xs"
+							disabled={disabled}
+							onClick={() => onSetup({ source: "byok", provider_id: provider.provider_id })}>
+							Set up {provider.label}
+						</Button>
+					))}
 					{onRetry && (
 						<Button
 							variant="subtle"
@@ -223,7 +242,7 @@ export function ModelPicker({
 				</Combobox.Dropdown>
 			</Combobox>
 			<Group gap="xs">
-				{value && (
+				{value && clearable && (
 					<Button
 						variant="subtle"
 						size="compact-xs"

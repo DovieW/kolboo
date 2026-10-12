@@ -21,9 +21,11 @@ Notes:
   not the first catalog entry. Explicitly selecting a new provider/model saves it.
 - New models without a verified cost estimate show unknown pricing, not free
   usage. Live discovery can supply pricing; it is an estimate, not your invoice.
-- For users with Managed access, Settings initially filters these lists to the
-  models returned by the authenticated Managed catalog. The full lists remain
-  available through **Show all providers and models** for BYOK/local use.
+- Model pickers have two searchable tabs: **Kolboo Managed** and **Your models**.
+  Both stay visible. Sign-in or a failed Managed catalog does not block BYOK/local
+  choices. Browsing tabs, search and model details do not change routing.
+  Selecting a result saves its source, provider and exact model ID together.
+  Unconfigured providers offer secure setup; unknown prices never appear as free.
 
 ---
 
@@ -39,10 +41,15 @@ can still bulk-add IDs, then name individual rows. Display names are plain text
 and affect picker labels only: requests, saved selections, and history keep the
 original model ID. Leave the display name blank to show the ID.
 
-Files and meetings use a searchable model popout with **Kolboo Managed** and
-**Your models** tabs. Changing tabs or viewing model details does not change the
-saved choice. Selecting a result saves its source, provider and raw model ID
-together. Missing choices stay visible rather than selecting another model.
+Transcription, rewriting, Quick Ask, Quick Replace, intent routing, History
+analysis, Prompt Lab, files and meetings use the same picker. Choices are filtered
+for the action; realtime-only transcription models are not offered for files or
+meetings. Missing saved choices stay visible rather than selecting another model.
+Profile and linked-preset overrides retain inheritance; choosing **Use inherited
+selection** clears only that override. Linked presets share their model choices.
+Unpinned older selections are labeled **legacy routing** and retain their previous
+preferences until you select an explicit source/model. Provider defaults are not
+replaced by the first catalog result.
 
 New or missing dictation language settings default to **Auto-detect**. Existing
 explicit hints (including English) are preserved; profiles and presets can still
@@ -54,7 +61,7 @@ Details distinguish unknown pricing from a free model.
 
 Custom providers always use your key directly, never Kolboo Managed. They appear
 in normal/profile model choices and the Meeting model picker after a key is saved.
-For a Managed account, enable **Show all providers and models** to select them.
+They remain available under **Your models** for Managed accounts too.
 
 - Language models use `POST {base}/chat/completions` and JSON chat responses.
 - Transcription models use `POST {base}/audio/transcriptions` with WAV multipart

@@ -17,6 +17,395 @@ use tokio_util::sync::CancellationToken;
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
 
+#[cfg(target_os = "linux")]
+pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
+    use serde_json::json;
+    use tauri::Manager;
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    assert_eq!(
+        std::env::var("KOLBOO_NATIVE_WINDOW_TEST").as_deref(),
+        Ok("1")
+    );
+    let window = tauri::WebviewWindowBuilder::new(app, "model-action-test", Default::default())
+        .visible(false)
+        .build()
+        .unwrap();
+    let invoke = |command: &str, body: serde_json::Value| {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let webview: &tauri::Webview = window.as_ref();
+        webview.clone().on_message(
+            tauri::webview::InvokeRequest {
+                cmd: command.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().unwrap(),
+                body: tauri::ipc::InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: app.invoke_key().into(),
+            },
+            Box::new(move |_, _, response, _, _| {
+                tx.send(response).unwrap();
+            }),
+        );
+        rx.recv_timeout(Duration::from_secs(5)).unwrap()
+    };
+    tauri::async_runtime::block_on(async {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(wiremock::matchers::body_string_contains(
+                "Synthetic failure",
+            ))
+            .respond_with(ResponseTemplate::new(503))
+            .with_priority(1)
+            .expect(4)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"message":{"content":" Synthetic output "}})),
+            )
+            .with_priority(2)
+            .expect(8)
+            .mount(&server)
+            .await;
+        let profiles=serde_json::from_value(json!([{"id":"p","name":"Profile",
+            "model_selections":{"prompt_tools":{"source":"byok","provider_id":"ollama","model_id":"profile-id"}},
+            "presets":[{"id":"q","name":"Preset","model_selections":{"prompt_tools":{"source":"byok","provider_id":"ollama","model_id":"preset-id"}}}]
+        }])).unwrap();
+        let mut config = test_config_for_transcription();
+        config.llm_config.program_prompt_profiles =
+            crate::llm::profile_conversion::build_program_prompt_profiles(
+                profiles,
+                &Default::default(),
+            );
+        config.llm_config.provider = "ollama".into();
+        config.llm_config.model = Some("global-id".into());
+        config.llm_config.ollama_url = Some(server.uri());
+        // Reuse the updater fixture's managed state. Replacing/removing Tauri
+        // state can invalidate borrowed IPC references, so restore only config.
+        let pipeline = app.state::<SharedPipeline>();
+        let original_config = pipeline.config();
+        pipeline.update_config(config).unwrap();
+        for with_logs in [false, true] {
+            if with_logs {
+                assert!(app.manage(crate::request_log::RequestLogStore::new()));
+            }
+            crate::stats::emit_cost_events_for_current_request_with_duration(
+                app,
+                crate::stats::EventStatus::Success,
+                None,
+            );
+            let logs = app.try_state::<crate::request_log::RequestLogStore>();
+            let recording_id = logs
+                .as_ref()
+                .map(|logs| logs.start_request("unrelated-recording".into(), None));
+            for (command, body) in [
+                (
+                    "llm_complete",
+                    json!({"args":{"provider":"ollama","model":"explicit-id","action":"history_analysis","modelSelection":{"source":"byok","provider_id":"ollama","model_id":"explicit-id"},"systemPrompt":"sys","userPrompt":"input"}}),
+                ),
+                (
+                    "iterate_rewrite_prompt",
+                    json!({"profileId":"p","presetId":"q","mode":"new","transcript":"","problemOutput":"Synthetic goal","currentPrompt":"Synthetic prompt"}),
+                ),
+                (
+                    "test_rewrite_with_prompt",
+                    json!({"profileId":"p","presetId":"q","transcript":"input","prompt":"sys"}),
+                ),
+            ] {
+                match invoke(command, body) {
+                    tauri::ipc::InvokeResponse::Ok(tauri::ipc::InvokeResponseBody::Json(body)) => {
+                        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+                        assert_eq!(body["provider_used"], "ollama");
+                        assert_eq!(
+                            body["model_used"],
+                            if command == "llm_complete" {
+                                "explicit-id"
+                            } else {
+                                "preset-id"
+                            }
+                        );
+                    }
+                    other => panic!("Model-action IPC failed: {other:?}"),
+                }
+            }
+            let requests = server.received_requests().await.unwrap();
+            assert_eq!(requests.len(), if with_logs { 8 } else { 3 });
+            let requests = &requests[if with_logs { 5 } else { 0 }..];
+            for (index, request) in requests.iter().enumerate() {
+                assert_eq!(
+                    serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["model"],
+                    if index == 0 {
+                        "explicit-id"
+                    } else {
+                        "preset-id"
+                    }
+                );
+            }
+            for args in [
+                json!({"provider":"ollama","action":"transcription","systemPrompt":"sys","userPrompt":"input"}),
+                json!({"provider":"ollama","profileId":"missing","systemPrompt":"sys","userPrompt":"input"}),
+            ] {
+                assert!(matches!(
+                    invoke("llm_complete", json!({"args":args})),
+                    tauri::ipc::InvokeResponse::Err(_)
+                ));
+            }
+            let request_count = server.received_requests().await.unwrap().len();
+            for command in ["iterate_rewrite_prompt", "test_rewrite_with_prompt"] {
+                assert!(matches!(
+                    invoke(
+                        command,
+                        json!({"profileId":"p","presetId":"missing","mode":"new","transcript":"input","problemOutput":"goal","currentPrompt":"prompt","prompt":"sys"})
+                    ),
+                    tauri::ipc::InvokeResponse::Err(_)
+                ));
+            }
+            assert_eq!(
+                server.received_requests().await.unwrap().len(),
+                request_count
+            );
+            for command in ["iterate_rewrite_prompt", "test_rewrite_with_prompt"] {
+                assert!(matches!(
+                    invoke(
+                        command,
+                        json!({"profileId":"p","presetId":"q","mode":"new","transcript":"Synthetic failure","problemOutput":"goal","currentPrompt":"prompt","prompt":"sys"})
+                    ),
+                    tauri::ipc::InvokeResponse::Err(_)
+                ));
+            }
+            assert_eq!(
+                server.received_requests().await.unwrap().len(),
+                request_count + 2
+            );
+            if let Some(logs) = logs.as_ref() {
+                assert_eq!(
+                    logs.with_current(|log| (log.id.clone(), log.status.clone())),
+                    Some((
+                        recording_id.clone().unwrap(),
+                        crate::request_log::RequestStatus::InProgress
+                    ))
+                );
+                assert_eq!(
+                    logs.get_logs(None)
+                        .iter()
+                        .filter(|log| log.stt_provider.starts_with("prompt-"))
+                        .count(),
+                    4
+                );
+                let count = logs.count();
+                assert!(matches!(
+                    invoke(
+                        "iterate_rewrite_prompt",
+                        json!({"profileId":"p","presetId":"q","mode":"fixed","transcript":"input","problemOutput":"output","currentPrompt":"prompt"})
+                    ),
+                    tauri::ipc::InvokeResponse::Err(_)
+                ));
+                assert_eq!(
+                    logs.count(),
+                    count,
+                    "invalid inputs do not start or cancel a log"
+                );
+                assert_eq!(logs.with_current(|log| log.id.clone()), recording_id);
+                logs.with_current(|log| log.complete_cancelled());
+                logs.complete_current();
+                logs.clear();
+            }
+        }
+        // The runtime Quick Ask and Quick Replace paths must carry the same
+        // atomic choice into the actual adapter, not just into a UI test call.
+        use crate::sessions::{
+            quick_action_execution as execution, quick_action_lifecycle as lifecycle,
+        };
+        let selected = crate::model_selection::ModelSelection {
+            source: crate::model_selection::ModelSource::Byok,
+            provider_id: "ollama".into(),
+            model_id: "quick-id".into(),
+        };
+        let result = TranscriptionResult {
+            speaker_segments: vec![],
+            stt_text: "Synthetic question".into(),
+            final_text: "Synthetic question".into(),
+            stt_duration_ms: 0,
+            stt_retry: None,
+            llm_duration_ms: None,
+            llm_provider_used: None,
+            llm_model_used: None,
+            llm_outcome: LlmOutcome::NotAttempted(LlmNotAttemptedReason::DisabledByDefaultProfile),
+            live_output_completed: false,
+        };
+        let ask = lifecycle::QuickAskProfileConfig {
+            selection: Some(selected.clone()),
+            ..Default::default()
+        };
+        let ocr_config = pipeline.config().ocr_config;
+        execution::answer_quick_ask(execution::QuickAskExecution {
+            app,
+            pipeline: pipeline.inner(),
+            request_id: None,
+            result: &result,
+            fallback_text: "",
+            profile_config: &ask,
+            probe_plan: lifecycle::QuickActionProbePlan::new(
+                lifecycle::QuickActionKind::QuickAsk,
+                0,
+                crate::commands::text::ContextGrabMethod::None,
+                0,
+            ),
+            ocr_mode: "off",
+            ocr_config: &ocr_config,
+        })
+        .await;
+        if let Some(window) = app.get_webview_window("quick-ask") {
+            window.close().unwrap();
+        }
+        let replace = lifecycle::QuickReplaceConfig {
+            selection: Some(selected),
+            enabled: true,
+            provider: Some("ollama".into()),
+            model: Some("quick-id".into()),
+            system_prompt: "Synthetic instruction".into(),
+            include_clipboard_context: false,
+        };
+        {
+            let state = app.state::<crate::state::AppState>();
+            let mut probe = state.quick_replace_probe.lock().unwrap();
+            probe.epoch = 1;
+            probe.ready = true;
+            probe.selection_text = Some("Synthetic selection".into());
+        }
+        let replaced = execution::try_quick_replace(execution::QuickReplaceExecution {
+            app,
+            pipeline: pipeline.inner(),
+            request_id: None,
+            config: &replace,
+            probe_plan: lifecycle::QuickActionProbePlan::new(
+                lifecycle::QuickActionKind::QuickReplace,
+                1,
+                crate::commands::text::ContextGrabMethod::CtrlC,
+                0,
+            ),
+            ocr_mode: "off",
+            ocr_config: &ocr_config,
+            output_value: "Synthetic instruction".into(),
+        })
+        .await;
+        assert_eq!(replaced.output_value, "Synthetic output");
+        assert!(replaced.failure.is_none());
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 12);
+        for request in &requests[10..] {
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["model"],
+                "quick-id"
+            );
+        }
+        pipeline.update_config(original_config).unwrap();
+    });
+    window.close().unwrap();
+}
+
+#[test]
+fn atomic_stt_routing_preserves_source_inheritance_cache_and_fail_closed_errors() {
+    use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+    let choice = |source, provider: &str, model: &str| ModelSelection {
+        source,
+        provider_id: provider.into(),
+        model_id: model.into(),
+    };
+    let byok = choice(ModelSource::Byok, "groq", "whisper-large-v3-turbo");
+    let mut cfg = test_config_for_transcription();
+    cfg.managed_inference_enabled = true;
+    cfg.managed_stt_preferred = true;
+    cfg.managed_inference_gateway_url = Some("https://gateway.example.test".into());
+    cfg.managed_inference_access_token = Some("synthetic-session".into());
+    cfg.stt_api_keys
+        .insert("groq".into(), "synthetic-vendor-key".into());
+    cfg.model_selections
+        .insert(ModelAction::Transcription, byok.clone());
+    let p = SharedPipeline::new_for_tests(cfg, Box::new(FakeAudioCapture::new()));
+    let mut inner = p.inner.lock().unwrap();
+    let first = stt_provider_resolver::get_or_create_selected_stt_provider(&mut inner, &byok, None)
+        .unwrap();
+    let again = stt_provider_resolver::get_or_create_selected_stt_provider(&mut inner, &byok, None)
+        .unwrap();
+    assert!(Arc::ptr_eq(&first, &again));
+    let managed = choice(ModelSource::Managed, "groq", "whisper-large-v3-turbo");
+    let paid =
+        stt_provider_resolver::get_or_create_selected_stt_provider(&mut inner, &managed, None)
+            .unwrap();
+    assert!(!Arc::ptr_eq(&first, &paid));
+    assert_eq!(inner.stt_provider_cache.len(), 2);
+    assert!(stt_provider_resolver::get_or_create_selected_stt_provider(
+        &mut inner,
+        &choice(ModelSource::Managed, "groq", "not-allowed"),
+        None
+    )
+    .is_err());
+    assert!(stt_provider_resolver::get_or_create_selected_stt_provider(
+        &mut inner,
+        &choice(ModelSource::Byok, "groq", ""),
+        None
+    )
+    .is_err());
+    inner.config.model_selection_error = Some("Invalid model settings".into());
+    assert!(
+        stt_provider_resolver::get_or_create_selected_stt_provider(&mut inner, &byok, None)
+            .is_err()
+    );
+    let request = || SttProviderResolutionRequest {
+        active_profile: None,
+        active_preset: None,
+        forced_provider: None,
+        forced_model: None,
+        forced_language: None,
+    };
+    assert!(
+        stt_provider_resolver::resolve_stt_provider_for_transcription(&mut inner, request())
+            .is_err()
+    );
+    inner.config.model_selection_error = None;
+    let mut profile = create_routing_test_profile(Vec::new());
+    profile
+        .model_selections
+        .insert(ModelAction::Transcription, byok.clone());
+    let resolved = stt_provider_resolver::resolve_stt_provider_for_transcription(
+        &mut inner,
+        SttProviderResolutionRequest {
+            active_profile: Some(&profile),
+            ..request()
+        },
+    )
+    .unwrap();
+    assert_eq!(resolved.provider_id, "groq");
+    assert_eq!(resolved.model.as_deref(), Some("whisper-large-v3-turbo"));
+    inner.config.managed_inference_enabled = false;
+    profile
+        .model_selections
+        .insert(ModelAction::Transcription, managed);
+    assert!(
+        stt_provider_resolver::resolve_stt_provider_for_transcription(
+            &mut inner,
+            SttProviderResolutionRequest {
+                active_profile: Some(&profile),
+                ..request()
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        profile.model_selections[&ModelAction::Transcription].source,
+        ModelSource::Managed
+    );
+    assert_eq!(inner.stt_provider_cache.len(), 2);
+}
+
 #[test]
 fn unavailable_provider_key_errors_do_not_claim_the_saved_key_is_missing() {
     let config = PipelineConfig::default();
@@ -42,6 +431,7 @@ fn unavailable_provider_key_errors_do_not_claim_the_saved_key_is_missing() {
         &config,
         "groq",
         LlmProviderParams {
+            selection: None,
             model: None,
             timeout: Duration::from_secs(1),
             ollama_url: None,
@@ -71,6 +461,7 @@ fn failed_locks_and_stale_callbacks_fail_closed_without_creating_providers() {
     };
     cancel.cancel();
     let params = LlmProviderParams {
+        selection: None,
         model: None,
         timeout: Duration::from_secs(1),
         ollama_url: None,
@@ -544,6 +935,10 @@ fn mock_llm_config(
     program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile>,
 ) -> crate::llm::LlmConfig {
     crate::llm::LlmConfig {
+        model_selections: Default::default(),
+        selection: None,
+        selection_error: None,
+        managed_access_token: None,
         enabled,
         custom_providers: Vec::new(),
         provider: MOCK_PROVIDER.to_string(),
@@ -790,22 +1185,48 @@ pub(crate) fn native_streaming_consumer(app: &tauri::AppHandle) {
     tauri::async_runtime::block_on(async {
         let mut config = test_config_for_transcription();
         config.llm_config.enabled = false;
-        let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
-        p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(StreamingProvider));
-        p.start_recording().unwrap();
-        p.try_start_concurrent_streaming(app).await;
-        assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
-        let result = p.stop_and_transcribe_detailed().await.unwrap();
-        assert_eq!(result.final_text, "א גוטן טאָג");
-        // Finalization guarantees all queued preview events have been emitted.
-        let event = received.try_recv().unwrap();
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&event).unwrap(),
-            serde_json::json!({"text": "א גוטן טאָג"})
-        );
-        assert!(received.try_recv().is_err());
-        assert!(!result.live_output_completed);
-        assert_eq!(p.state(), PipelineState::Idle);
+        for atomic in [false, true] {
+            let selected = crate::model_selection::ModelSelection {
+                source: crate::model_selection::ModelSource::Byok,
+                provider_id: MOCK_PROVIDER.into(),
+                model_id: "mock-model".into(),
+            };
+            if atomic {
+                config
+                    .model_selections
+                    .insert(crate::model_selection::ModelAction::Transcription, selected);
+            }
+            let p =
+                SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+            if atomic {
+                p.inner.lock().unwrap().stt_provider_cache.insert(
+                    serde_json::json!([MOCK_PROVIDER, "mock-model", null, false, "byok"])
+                        .to_string(),
+                    Arc::new(StreamingProvider),
+                );
+            } else {
+                p.inject_stt_provider_for_tests(
+                    MOCK_PROVIDER,
+                    None,
+                    None,
+                    Arc::new(StreamingProvider),
+                );
+            }
+            p.start_recording().unwrap();
+            p.try_start_concurrent_streaming(app).await;
+            assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
+            let result = p.stop_and_transcribe_detailed().await.unwrap();
+            assert_eq!(result.final_text, "א גוטן טאָג");
+            // Finalization guarantees all queued preview events have been emitted.
+            let event = received.try_recv().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+                serde_json::json!({"text": "א גוטן טאָג"})
+            );
+            assert!(received.try_recv().is_err());
+            assert!(!result.live_output_completed);
+            assert_eq!(p.state(), PipelineState::Idle);
+        }
     });
     app.unlisten(listener);
 }
@@ -2135,6 +2556,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
     let prompt_presets: Vec<ProgramPreset> = presets
         .into_iter()
         .map(|(id, name, hints)| ProgramPreset {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: name.to_string(),
             routing_hints: hints.into_iter().map(|s| s.to_string()).collect(),
@@ -2154,6 +2576,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
         .collect();
 
     ProgramPromptProfile {
+        model_selections: Default::default(),
         id: "test-profile".to_string(),
         name: "Test Profile".to_string(),
         program_paths: vec![],

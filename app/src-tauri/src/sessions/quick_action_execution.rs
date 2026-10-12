@@ -142,9 +142,12 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
     );
 
     let pipeline_config = input.pipeline.config();
+    let mut action_base_config = pipeline_config.llm_config.clone();
+    action_base_config.selection = None;
     let provider_request = resolve_one_off_llm_request(
-        &pipeline_config.llm_config,
+        &action_base_config,
         &[OneOffLlmProviderRequestLayer {
+            selection: quick_ask_config.selection.clone(),
             provider: Some(provider.clone()),
             model: model.clone(),
             openai_reasoning_effort: quick_ask_config.openai_reasoning_effort.clone(),
@@ -439,6 +442,7 @@ pub(crate) async fn try_quick_replace(
             let provider_request = resolve_one_off_llm_request(
                 &pipeline_config.llm_config,
                 &[OneOffLlmProviderRequestLayer {
+                    selection: input.config.selection.clone(),
                     provider: Some(provider.clone()),
                     model: model.clone(),
                     ..Default::default()

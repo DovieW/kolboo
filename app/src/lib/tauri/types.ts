@@ -2,9 +2,12 @@ import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
 import type {
 	RecordingPreferences as GeneratedRecordingPreferences,
 	MeetingModel,
+	ModelAction,
+	ModelSelection,
 } from "./types.generated";
 
-export type { ModelSelection } from "./types.generated";
+export type { ModelAction, ModelSelection } from "./types.generated";
+export type ModelSelections = Partial<Record<ModelAction, ModelSelection>>;
 
 /**
  * Connection state for UI display (maps from pipeline state)
@@ -171,6 +174,7 @@ export interface IntentRouterSettings {
 }
 
 export interface RewritePreset {
+	model_selections?: ModelSelections;
 	id: string;
 	name: string;
 
@@ -207,6 +211,7 @@ export interface RewritePreset {
 }
 
 export interface RewriteProgramPromptProfile {
+	model_selections?: ModelSelections;
 	id: string;
 	name: string;
 	program_paths: string[];
@@ -840,6 +845,7 @@ export type LocalWhisperLoadMode = "manual" | "on_transcribe" | "on_launch";
 export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 
 export interface AppSettings {
+	model_selections?: ModelSelections;
 	// Settings schema version (used for migrations).
 	settings_version: number;
 	policy_state: PolicyState;

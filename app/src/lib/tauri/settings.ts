@@ -24,6 +24,7 @@ import {
 	TELEMETRY_DISCLOSURE_VERSION_KEY,
 } from "../settings/telemetryDisclosure";
 import { DEFAULT_STT_LANGUAGE, normalizeSttLanguage } from "../sttLanguages";
+import { MODEL_ACTIONS, modelSelectionSettingKey, modelSelectionPolicyKey, scopedModelSelectionKey, normalizeModelSelection, normalizeModelSelections } from "../modelSelection";
 import { emitTyped } from "./events";
 import { DEFAULT_SETTINGS_VALUES } from "./settingsDefaults";
 import {
@@ -77,6 +78,9 @@ import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
 import { settingValueView } from "./settingsViews";
 import type {
 	AppSettings,
+	ModelAction,
+	ModelSelection,
+	ModelSelections,
 	AudioCue,
 	CleanupPromptSections,
 	LicenseState,
@@ -250,6 +254,13 @@ export type PolicyPathEnforcement = {
 };
 
 const POLICY_PATH_ALIASES: Readonly<Record<string, string[]>> = {
+	model_selection_transcription: ["stt_provider", "stt_model", "stt_use_managed_inference"],
+	model_selection_rewrite: ["llm_provider", "llm_model"],
+	model_selection_quick_ask: ["quick_ask_provider", "quick_ask_model"],
+	model_selection_quick_replace: ["quick_replace_provider", "quick_replace_model"],
+	model_selection_intent_router: ["llm_provider", "llm_model", "rewrite_program_prompt_profiles"],
+	model_selection_history_analysis: ["llm_provider", "llm_model"],
+	model_selection_prompt_tools: ["llm_provider", "llm_model"],
 	quick_ask_hotkey: ["quick_ask_hold_hotkey"],
 	quick_ask_hold_hotkey: ["quick_ask_hotkey"],
 	posthog_analytics_enabled: ["disable_product_analytics"],
@@ -270,6 +281,20 @@ function clonePatchRecord(
 
 function canonicalPolicyPath(path: string): string {
 	return path.trim();
+}
+
+function policyAliases(path: string): Set<string> {
+	const scopeKey = modelSelectionPolicyKey(path);
+	const canonical = scopeKey ?? path;
+	const aliases = new Set([path, canonical, ...(POLICY_PATH_ALIASES[canonical] ?? [])]);
+	if (scopeKey) aliases.add("rewrite_program_prompt_profiles");
+	for (const [key, linked] of Object.entries(POLICY_PATH_ALIASES)) {
+		if (linked.includes(canonical)) {
+			aliases.add(key);
+			for (const alias of linked) aliases.add(alias);
+		}
+	}
+	return aliases;
 }
 
 export function getPolicyPathEnforcement(
@@ -293,16 +318,7 @@ export function getPolicyPathEnforcement(
 		};
 	}
 
-	const aliases = new Set<string>([
-		normalizedPath,
-		...(POLICY_PATH_ALIASES[normalizedPath] ?? []),
-	]);
-	for (const [canonical, linked] of Object.entries(POLICY_PATH_ALIASES)) {
-		if (linked.includes(normalizedPath)) {
-			aliases.add(canonical);
-			for (const alias of linked) aliases.add(alias);
-		}
-	}
+	const aliases = policyAliases(normalizedPath);
 
 	for (const field of policy.enforced_fields) {
 		const fieldPath = canonicalPolicyPath(field.path);
@@ -328,33 +344,18 @@ function patchTouchesPolicyPath(
 	deleteKeys: string[],
 	path: string,
 ): boolean {
-	if (Object.hasOwn(patch, path)) return true;
-	if (deleteKeys.includes(path)) return true;
-
-	const aliases = POLICY_PATH_ALIASES[path] ?? [];
-	for (const alias of aliases) {
-		if (Object.hasOwn(patch, alias)) return true;
-		if (deleteKeys.includes(alias)) return true;
-	}
-
-	return false;
+	return [...Object.keys(patch), ...deleteKeys].some(key => policyAliases(key).has(path));
 }
 
-function removePolicyPathFromPatch(
+/** Pure policy projection shared by patch preparation and its contract tests. */
+export function removePolicyPathFromPatch(
 	patch: Record<string, unknown>,
 	deleteKeys: string[],
 	path: string,
 ): void {
-	delete patch[path];
-	for (const alias of POLICY_PATH_ALIASES[path] ?? []) {
-		delete patch[alias];
-	}
-
-	const blocked = new Set([path, ...(POLICY_PATH_ALIASES[path] ?? [])]);
-	for (let i = deleteKeys.length - 1; i >= 0; i -= 1) {
-		const key = deleteKeys[i];
-		if (typeof key !== "string") continue;
-		if (blocked.has(key)) {
+	for (const key of Object.keys(patch)) if (policyAliases(key).has(path)) delete patch[key];
+	for (const [i, key] of [...deleteKeys.entries()].reverse()) {
+		if (policyAliases(key).has(path)) {
 			deleteKeys.splice(i, 1);
 		}
 	}
@@ -464,6 +465,7 @@ async function preparePolicyAwarePatch(params: {
 async function applySettingsPatch(params: {
 	patch?: Record<string, unknown>;
 	deleteKeys?: string[];
+	rejectPolicyChanges?: boolean;
 }): Promise<void> {
 	const prepared = await preparePolicyAwarePatch(params);
 	const hasPatch = Object.keys(prepared.patch).length > 0;
@@ -487,9 +489,19 @@ async function applySettingsPatch(params: {
 	});
 
 	await reloadSettingsStoreFromDisk();
+	if (params.rejectPolicyChanges && prepared.violations.length > 0) {
+		throw new Error("This model choice is controlled by organization policy");
+	}
 }
 
 export const tauriSettingsAPI = {
+	async updateModelSelection(action: ModelAction, selection: ModelSelection | null, scope?: {profileId: string; presetId?: string | null}): Promise<void> {
+		if (!MODEL_ACTIONS.includes(action)) throw new Error("Invalid model action");
+		const key = scope ? scopedModelSelectionKey(scope.profileId, scope.presetId ?? null, action) : modelSelectionSettingKey(action);
+		if (scope) modelSelectionPolicyKey(key);
+		const choice = normalizeModelSelection(selection);
+		await applySettingsPatch({patch: {[key]: choice},rejectPolicyChanges:true});
+	},
 	async getSettings(): Promise<AppSettings> {
 		const store = await getStore();
 
@@ -533,11 +545,11 @@ export const tauriSettingsAPI = {
 
 		const rawProfiles =
 			(await store.get<unknown>("rewrite_program_prompt_profiles")) ?? [];
-		const rewrite_program_prompt_profiles: RewriteProgramPromptProfile[] =
+		const rewrite_program_prompt_profiles =
 			Array.isArray(rawProfiles)
 				? rawProfiles
 						.map(normalizeRewriteProfile)
-						.filter((p): p is RewriteProgramPromptProfile => p !== null)
+						.filter((p) => p !== null)
 				: [];
 
 		// Backward compatibility:
@@ -610,7 +622,20 @@ export const tauriSettingsAPI = {
 		const hotkey_shortcuts =
 			normalizedShortcutCards ?? buildShortcutCardsFromLegacy(legacyHotkeys);
 
+		const model_selections: ModelSelections = {};
+		for (const action of MODEL_ACTIONS) {
+			const selection = normalizeModelSelection(await store.get(modelSelectionSettingKey(action)));
+			if (selection) model_selections[action] = selection;
+		}
+		let effective_profiles = rewrite_program_prompt_profiles;
+		if (await store.get("model_selection_scopes_enabled") === true || rewrite_program_prompt_profiles.some(profile => Object.keys(profile.model_selections).length > 0 || (profile.presets ?? []).some(preset => Object.keys(preset.model_selections).length > 0))) {
+			const loaded = await invoke<import("./types.generated").LoadedModelSettings>("get_model_selection_settings");
+			if (loaded.error) throw new Error(loaded.error);
+			Object.assign(model_selections, normalizeModelSelections(loaded.model_selections));
+			effective_profiles = loaded.profiles.map(normalizeRewriteProfile).filter((profile) => profile !== null);
+		}
 		const settings: AppSettings = {
+			model_selections,
 			settings_version: settingsVersion,
 			policy_state: normalizePolicyState(await store.get("policy_state")),
 			license_state: normalizeLicenseState(await store.get("license_state")),
@@ -671,7 +696,7 @@ export const tauriSettingsAPI = {
 
 				return normalized;
 			})(),
-			rewrite_program_prompt_profiles,
+			rewrite_program_prompt_profiles: effective_profiles,
 			stt_provider: await readSettingValue(
 				"stt_provider",
 				DEFAULT_SETTINGS_VALUES.stt_provider,

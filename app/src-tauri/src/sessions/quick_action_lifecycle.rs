@@ -100,6 +100,7 @@ enum PrimaryRecordingFlow {
 /// Start-time Quick Ask configuration resolved from active/default profiles.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct QuickAskProfileConfig {
+    pub(crate) selection: Option<crate::model_selection::ModelSelection>,
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) system_prompt: Option<String>,
@@ -115,6 +116,15 @@ impl QuickAskProfileConfig {
         active_profile: Option<&ProgramPromptProfile>,
         default_profile: Option<&ProgramPromptProfile>,
     ) -> Self {
+        let action = crate::model_selection::ModelAction::QuickAsk;
+        let selection = crate::model_selection::inherit_model_selection(
+            default_profile.and_then(|p| p.model_selections.get(&action)),
+            &[(
+                active_profile.and_then(|p| p.model_selections.get(&action)),
+                active_profile.and_then(|p| p.quick_ask_provider.as_deref()),
+                active_profile.and_then(|p| p.quick_ask_model.as_deref()),
+            )],
+        );
         let include_clipboard_context = active_profile
             .and_then(|p| p.quick_ask_include_clipboard_context)
             .or_else(|| default_profile.and_then(|p| p.quick_ask_include_clipboard_context))
@@ -122,6 +132,7 @@ impl QuickAskProfileConfig {
 
         active_profile
             .map(|p| Self {
+                selection: selection.clone(),
                 provider: p.quick_ask_provider.clone(),
                 model: p.quick_ask_model.clone(),
                 system_prompt: p.quick_ask_system_prompt.clone(),
@@ -132,6 +143,7 @@ impl QuickAskProfileConfig {
                 include_clipboard_context,
             })
             .unwrap_or(Self {
+                selection,
                 include_clipboard_context,
                 ..Default::default()
             })
@@ -141,6 +153,8 @@ impl QuickAskProfileConfig {
 /// Global Quick Ask settings read by the caller from the settings store.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct QuickAskGlobalConfig {
+    pub(crate) selection: Option<crate::model_selection::ModelSelection>,
+    pub(crate) fallback_selection: Option<crate::model_selection::ModelSelection>,
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) system_prompt: Option<String>,
@@ -157,6 +171,7 @@ pub(crate) struct QuickAskGlobalConfig {
 /// Effective Quick Ask config after profile -> global Quick Ask -> global rewrite fallback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QuickAskEffectiveConfig {
+    pub(crate) selection: Option<crate::model_selection::ModelSelection>,
     pub(crate) provider: String,
     pub(crate) model: Option<String>,
     pub(crate) system_prompt: String,
@@ -172,7 +187,21 @@ pub(crate) struct QuickAskEffectiveConfig {
 
 impl QuickAskEffectiveConfig {
     pub(crate) fn resolve(profile: &QuickAskProfileConfig, global: QuickAskGlobalConfig) -> Self {
-        Self {
+        let inherited = global.selection.as_ref().or_else(|| {
+            (global.provider.is_none() && global.model.is_none())
+                .then_some(global.fallback_selection.as_ref())
+                .flatten()
+        });
+        let selection = crate::model_selection::inherit_model_selection(
+            inherited,
+            &[(
+                profile.selection.as_ref(),
+                profile.provider.as_deref(),
+                profile.model.as_deref(),
+            )],
+        );
+        let mut config = Self {
+            selection: selection.clone(),
             provider: profile
                 .provider
                 .clone()
@@ -203,13 +232,19 @@ impl QuickAskEffectiveConfig {
             conversation_history_enabled: global.conversation_history_enabled,
             conversation_history_count: global.conversation_history_count_raw.clamp(1, 20) as usize,
             request_logs_privacy_mode: global.request_logs_privacy_mode,
+        };
+        if let Some(choice) = selection {
+            config.provider = choice.provider_id;
+            config.model = Some(choice.model_id);
         }
+        config
     }
 }
 
 /// Effective Quick Replace config resolved at recording stop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QuickReplaceConfig {
+    pub(crate) selection: Option<crate::model_selection::ModelSelection>,
     pub(crate) enabled: bool,
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
@@ -230,6 +265,25 @@ impl QuickReplaceConfig {
             .or_else(|| default_profile.and_then(|p| p.quick_replace_enabled));
 
         let enabled = !is_quick_ask_session && enabled_opt.unwrap_or(legacy_enabled);
+        let action = crate::model_selection::ModelAction::QuickReplace;
+        let selection = crate::model_selection::inherit_model_selection(
+            global_llm_config
+                .model_selections
+                .get(&action)
+                .or(global_llm_config.selection.as_ref()),
+            &[
+                (
+                    default_profile.and_then(|p| p.model_selections.get(&action)),
+                    default_profile.and_then(|p| p.quick_replace_provider.as_deref()),
+                    default_profile.and_then(|p| p.quick_replace_model.as_deref()),
+                ),
+                (
+                    active_profile.and_then(|p| p.model_selections.get(&action)),
+                    active_profile.and_then(|p| p.quick_replace_provider.as_deref()),
+                    active_profile.and_then(|p| p.quick_replace_model.as_deref()),
+                ),
+            ],
+        );
 
         let provider = active_profile
             .and_then(|p| p.quick_replace_provider.clone())
@@ -262,9 +316,16 @@ impl QuickReplaceConfig {
             .unwrap_or(false);
 
         Self {
+            provider: selection
+                .as_ref()
+                .map(|choice| choice.provider_id.clone())
+                .or(provider),
+            model: selection
+                .as_ref()
+                .map(|choice| choice.model_id.clone())
+                .or(model),
+            selection,
             enabled,
-            provider,
-            model,
             system_prompt,
             include_clipboard_context,
         }
@@ -413,6 +474,7 @@ mod tests {
 
     fn profile(id: &str) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             program_paths: Vec::new(),
@@ -556,6 +618,8 @@ mod tests {
         let cfg = QuickAskEffectiveConfig::resolve(
             &profile_cfg,
             QuickAskGlobalConfig {
+                selection: None,
+                fallback_selection: None,
                 provider: Some("quick-ask-provider".into()),
                 model: Some("quick-ask-model".into()),
                 system_prompt: Some("global prompt".into()),
@@ -628,6 +692,81 @@ mod tests {
             true,
         );
         assert!(!quick_ask_cfg.enabled);
+    }
+
+    #[test]
+    fn quick_action_routes_keep_atomic_ids_and_payment_source_through_inheritance() {
+        use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+        let saved = ModelSelection {
+            source: ModelSource::Byok,
+            provider_id: "ollama".into(),
+            model_id: "raw-id".into(),
+        };
+        let mut default = profile("default");
+        default
+            .model_selections
+            .insert(ModelAction::QuickAsk, saved.clone());
+        default
+            .model_selections
+            .insert(ModelAction::QuickReplace, saved.clone());
+        for active in [None, Some(profile("active"))] {
+            let ask = QuickAskProfileConfig::from_profiles(active.as_ref(), Some(&default));
+            let effective = QuickAskEffectiveConfig::resolve(&ask, QuickAskGlobalConfig::default());
+            assert_eq!(effective.selection, Some(saved.clone()));
+            assert_eq!(effective.provider, "ollama");
+            assert_eq!(effective.model.as_deref(), Some("raw-id"));
+            let replace = QuickReplaceConfig::resolve(
+                active.as_ref(),
+                Some(&default),
+                &LlmConfig::default(),
+                false,
+                true,
+            );
+            assert_eq!(replace.selection, Some(saved.clone()));
+            assert_eq!(replace.provider.as_deref(), Some("ollama"));
+            assert_eq!(replace.model.as_deref(), Some("raw-id"));
+        }
+        let mut active = profile("active");
+        let explicit = ModelSelection {
+            source: ModelSource::Managed,
+            provider_id: "groq".into(),
+            model_id: "selected-id".into(),
+        };
+        active.quick_ask_provider = Some("legacy-action".into());
+        active.quick_ask_model = Some("legacy-model".into());
+        let inherited = QuickAskProfileConfig::from_profiles(Some(&active), Some(&default));
+        assert_eq!(
+            inherited.selection,
+            Some(ModelSelection {
+                source: ModelSource::Byok,
+                provider_id: "legacy-action".into(),
+                model_id: "legacy-model".into()
+            })
+        );
+        active
+            .model_selections
+            .insert(ModelAction::QuickAsk, explicit.clone());
+        active
+            .model_selections
+            .insert(ModelAction::QuickReplace, explicit.clone());
+        let ask = QuickAskEffectiveConfig::resolve(
+            &QuickAskProfileConfig::from_profiles(Some(&active), Some(&default)),
+            QuickAskGlobalConfig::default(),
+        );
+        assert_eq!(ask.selection, Some(explicit.clone()));
+        assert_eq!(ask.provider, "groq");
+        assert_eq!(ask.model.as_deref(), Some("selected-id"));
+        assert_eq!(
+            QuickReplaceConfig::resolve(
+                Some(&active),
+                Some(&default),
+                &LlmConfig::default(),
+                false,
+                true
+            )
+            .selection,
+            Some(explicit)
+        );
     }
 
     #[test]

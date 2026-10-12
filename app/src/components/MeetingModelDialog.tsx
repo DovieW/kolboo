@@ -11,17 +11,18 @@ import {
 import { useState } from "react";
 import {
 	modelSelectionKey,
-	recordingModelChoices,
 	recordingModelFromSelection,
 	recordingModelSelection,
+	submitModelChoice,
 } from "../lib/modelSelection";
-import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
+import { useModelChoices } from "../lib/queries/modelChoices";
 import {
 	normalizeSttLanguage,
 	STT_LANGUAGE_OPTIONS,
 } from "../lib/sttLanguages";
 import type { RecordingPreferences } from "../lib/tauri/types";
 import { ModelPicker } from "./ModelPicker";
+import { useModelNavigation } from "./ModelNavigation";
 
 export function MeetingModelDialog({
 	preferences,
@@ -36,18 +37,14 @@ export function MeetingModelDialog({
 	saving: boolean;
 	error?: string | null;
 }) {
-	const { options, loading, failedSources } = useTranscriptionModels();
+	const { choices, setupProviders, loading, failedSources, managedMessage, retry } = useModelChoices("meeting");
+	const navigation = useModelNavigation();
 	const [selection, setSelection] = useState(
 		recordingModelSelection(preferences.meeting_model),
 	);
 	const [language, setLanguage] = useState(preferences.language_hint ?? "auto");
-	const choices = recordingModelChoices(options.values());
-	const chosen = selection
-		? choices.find(
-				(choice) =>
-					modelSelectionKey(choice.selection) === modelSelectionKey(selection),
-			)
-		: undefined;
+	const selectionKey = selection ? modelSelectionKey(selection) : "";
+	const chosen = choices.find(choice => modelSelectionKey(choice.selection) === selectionKey);
 	return (
 		<Modal
 			opened
@@ -75,7 +72,7 @@ export function MeetingModelDialog({
 					<Alert color="orange" title="Some models couldn't load">
 						<Text size="sm">
 							Couldn't load {failedSources.map(({ label }) => label).join(", ")}
-							.{options.size > 0 && " You can still choose an available model."}
+							.{choices.some(choice => choice.ready) && " You can still choose an available model."}
 						</Text>
 						<Button
 							variant="subtle"
@@ -84,11 +81,7 @@ export function MeetingModelDialog({
 							disabled={
 								saving || failedSources.some(({ query }) => query.isFetching)
 							}
-							onClick={() => {
-								void Promise.allSettled(
-									failedSources.map(({ query }) => query.refetch()),
-								);
-							}}
+							onClick={retry}
 						>
 							Retry loading models
 						</Button>
@@ -98,9 +91,14 @@ export function MeetingModelDialog({
 					label="Model"
 					loading={loading}
 					choices={choices}
+					setupProviders={setupProviders}
 					value={selection}
 					onChange={setSelection}
 					disabled={saving}
+					managedMessage={managedMessage}
+					onRetry={retry}
+					onSetup={navigation?.setup}
+					onManagedAccess={navigation?.account}
 				/>
 				<Select
 					label="Language hint"
@@ -117,13 +115,13 @@ export function MeetingModelDialog({
 					models must be enabled by Kolboo; other cloud models require your key
 					in Settings → Providers.
 				</Text>
-				{!options.size && !loading && failedSources.length === 0 && (
+				{choices.length === 0 && !loading && failedSources.length === 0 && (
 					<Text size="sm">
 						No models are available. Configure a provider in Settings, or
 						refresh your managed access.
 					</Text>
 				)}
-				{selection && !chosen && !loading && failedSources.length === 0 && (
+				{selection && !chosen?.ready && !loading && failedSources.length === 0 && (
 					<Alert color="orange">
 						Your saved model is no longer available. Choose another model to
 						change this setting; your saved choice has not been replaced.
@@ -139,15 +137,14 @@ export function MeetingModelDialog({
 						Cancel
 					</Button>
 					<Button
-						disabled={!chosen}
+						disabled={!chosen?.ready}
 						loading={saving}
 						onClick={() => {
-							if (chosen)
-								onSave({
+							submitModelChoice(choices, selectionKey, saving, model => onSave({
 									...preferences,
 									language_hint: language,
-									meeting_model: recordingModelFromSelection(chosen.selection),
-								});
+									meeting_model: recordingModelFromSelection(model),
+								}));
 						}}
 					>
 						Save

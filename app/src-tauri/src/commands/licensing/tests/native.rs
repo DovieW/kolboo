@@ -567,7 +567,243 @@ pub(crate) fn email_code_session_lifecycle(
         store.set("custom_providers", json!([{"id":"custom_fixture", "name":"Fixture", "base_url":"https://provider.example.test", "stt_models":["speech"], "llm_models":["text"], "stt_model_names":{"speech":"Speech name"}, "llm_model_names":{"text":"Text name"}}]));
         crate::secrets::set_api_key(app, "custom_fixture_api_key", "synthetic-custom-key").unwrap();
         crate::secrets::set_api_key(app, "groq_api_key", "synthetic-groq-key").unwrap();
-        let providers = crate::commands::config::get_available_providers(app.clone());
+        // The actual settings IPC persists one atomic route, hydrates independent
+        // profile/preset keys and makes inheritance durable. No provider request.
+        let profiles_before = store.get("rewrite_program_prompt_profiles");
+        let root_key = crate::model_selection::ModelAction::Rewrite.settings_key();
+        let root_before = store.get(root_key);
+        let marker_before = store.get("model_selection_scopes_enabled");
+        let defaults_before = store.get(crate::settings::managed_defaults::PENDING);
+        store.set("rewrite_program_prompt_profiles", json!([
+            {"id":"default","name":"Default"},
+            {"id":"scope-model-test","name":"Scoped","presets":[{"id":"preset-model-test","name":"Preset"}]}
+        ]));
+        let root = json!({"source":"byok","provider_id":"custom_fixture","model_id":"text"});
+        let scoped = json!({"source":"managed","provider_id":"openai","model_id":"published-only"});
+        let scope_key = crate::model_selection::scoped_selection_key(
+            "scope-model-test",
+            Some("preset-model-test"),
+            crate::model_selection::ModelAction::Rewrite,
+        );
+        for (key, value) in [
+            (root_key.to_string(), root.clone()),
+            (scope_key.clone(), scoped.clone()),
+        ] {
+            assert!(matches!(
+                invoke(
+                    "settings_apply_patch",
+                    json!({"patch":{key:value},"deleteKeys":[]})
+                ),
+                tauri::ipc::InvokeResponse::Ok(_)
+            ));
+            assert!(matches!(
+                invoke("sync_pipeline_config", json!({})),
+                tauri::ipc::InvokeResponse::Ok(_)
+            ));
+        }
+        let snapshot = match invoke("get_model_selection_settings", json!({})) {
+            tauri::ipc::InvokeResponse::Ok(tauri::ipc::InvokeResponseBody::Json(value)) => {
+                serde_json::from_str::<serde_json::Value>(&value).unwrap()
+            }
+            _ => panic!("Model settings IPC did not serialize"),
+        };
+        assert_eq!(snapshot["model_selections"]["rewrite"], root);
+        assert_eq!(
+            snapshot["profiles"][1]["presets"][0]["model_selections"]["rewrite"],
+            scoped
+        );
+        assert!(snapshot["error"].is_null());
+        for (key, value) in [
+            (
+                root_key,
+                json!({"source":"byok","provider_id":"private-identifier","model_id":""}),
+            ),
+            (root_key, json!({"source":"unknown"})),
+            ("rewrite_program_prompt_profiles", json!(false)),
+            (
+                "rewrite_program_prompt_profiles",
+                json!([{"id":"p","name":"p","model_selections":{"rewrite":{"source":"byok","provider_id":"private-identifier","model_id":""}}}]),
+            ),
+            (scope_key.as_str(), json!({"source":"unknown"})),
+        ] {
+            let original = store.get(key);
+            store.set(key, value);
+            let blocked = crate::commands::config::get_model_selection_settings(app.clone());
+            assert!(blocked.selections.is_empty() && blocked.profiles.is_empty());
+            assert!(!blocked.error.unwrap().contains("private-identifier"));
+            match original {
+                Some(value) => store.set(key, value),
+                None => {
+                    store.delete(key);
+                }
+            }
+        }
+        let poisoned_lock = std::sync::Mutex::new(());
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = poisoned_lock.lock().unwrap();
+            panic!("synthetic poisoned model snapshot lock");
+        });
+        let blocked = crate::model_selection::read_model_settings_locked(app, &poisoned_lock);
+        assert_eq!(
+            blocked.error.as_deref(),
+            Some("Model settings are unavailable")
+        );
+        assert!(blocked.selections.is_empty() && blocked.profiles.is_empty());
+        // This is a single-test, isolated native process. Verify the actual
+        // shared write boundary fails closed, then repair it before continuing.
+        let before_poison = store.entries();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = crate::settings::patch::WRITE_LOCK.lock().unwrap();
+            panic!("synthetic settings transaction failure");
+        });
+        let patch_rejected = matches!(
+            invoke(
+                "settings_apply_patch",
+                json!({"patch":{root_key:null},"deleteKeys":[]})
+            ),
+            tauri::ipc::InvokeResponse::Err(_)
+        );
+        let import_rejected = crate::commands::backup::import_settings_from_value(
+            app,
+            json!({"llm_model":"must-not-write"}),
+        )
+        .is_err();
+        crate::settings::patch::WRITE_LOCK.clear_poison();
+        assert!(patch_rejected && import_rejected);
+        assert_eq!(
+            store
+                .entries()
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            before_poison.into_iter().collect()
+        );
+        assert!(matches!(
+            invoke(
+                "settings_apply_patch",
+                json!({"patch":{scope_key.clone():null},"deleteKeys":[]})
+            ),
+            tauri::ipc::InvokeResponse::Ok(_)
+        ));
+        assert!(
+            crate::commands::config::get_model_selection_settings(app.clone()).profiles[1].presets
+                [0]
+            .model_selections
+            .is_empty()
+        );
+        assert!(matches!(
+            invoke(
+                "settings_apply_patch",
+                json!({"patch":{root_key:{"source":"unknown","provider_id":"secret","model_id":"secret"}},"deleteKeys":[]})
+            ),
+            tauri::ipc::InvokeResponse::Err(_)
+        ));
+        assert_eq!(store.get(root_key), Some(root));
+        let quick_ask = crate::settings_view::read_quick_ask_global_config(
+            app,
+            crate::settings::store::SettingsReadMode::Cached,
+        );
+        assert_eq!(quick_ask.selection, None);
+        assert_eq!(
+            quick_ask.fallback_selection.as_ref().unwrap().provider_id,
+            "custom_fixture"
+        );
+        // Importing an old backup removes atomic routes that would otherwise
+        // override its raw IDs, while replacing profile sidecars atomically.
+        let import_before = store.entries();
+        assert!(crate::commands::backup::import_settings_from_value(app, json!(false)).is_err());
+        crate::commands::backup::import_settings_from_value(
+            app,
+            json!({
+                "llm_provider":"ollama", "llm_model":"restored-id",
+                "rewrite_program_prompt_profiles":[{"id":"restored","name":"Restored"}]
+            }),
+        )
+        .unwrap();
+        assert_eq!(store.get(root_key), None);
+        assert_eq!(store.get(&scope_key), None);
+        assert_eq!(store.get("llm_model"), Some(json!("restored-id")));
+        let imported = crate::commands::config::get_model_selection_settings(app.clone());
+        assert!(imported.error.is_none());
+        assert!(imported
+            .profiles
+            .iter()
+            .any(|profile| profile.id == "restored"));
+        assert!(!imported
+            .profiles
+            .iter()
+            .any(|profile| profile.id == "scope-model-test"));
+        for key in store.keys() {
+            store.delete(&key);
+        }
+        for (key, value) in import_before {
+            store.set(key, value);
+        }
+        store.save().unwrap();
+        // A real disk failure must roll back both commands' in-memory changes.
+        let settings_path = app.path().app_data_dir().unwrap().join("settings.json");
+        assert!(settings_path.is_file());
+        let backup = tempfile::NamedTempFile::new_in(settings_path.parent().unwrap()).unwrap();
+        std::fs::rename(&settings_path, backup.path()).unwrap();
+        std::fs::create_dir(&settings_path).unwrap();
+        let before_failed_save = store.entries();
+        assert!(matches!(
+            invoke(
+                "settings_apply_patch",
+                json!({"patch":{root_key:null},"deleteKeys":[]})
+            ),
+            tauri::ipc::InvokeResponse::Err(_)
+        ));
+        assert_eq!(
+            store
+                .entries()
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            before_failed_save.clone().into_iter().collect()
+        );
+        assert!(crate::commands::backup::import_settings_from_value(
+            app,
+            json!({"llm_model":"must-not-persist"})
+        )
+        .is_err());
+        assert_eq!(
+            store
+                .entries()
+                .into_iter()
+                .collect::<std::collections::BTreeMap<_, _>>(),
+            before_failed_save.into_iter().collect()
+        );
+        std::fs::remove_dir(&settings_path).unwrap();
+        std::fs::rename(backup.path(), &settings_path).unwrap();
+        for (key, value) in [
+            ("rewrite_program_prompt_profiles", profiles_before),
+            (root_key, root_before),
+            ("model_selection_scopes_enabled", marker_before),
+            (crate::settings::managed_defaults::PENDING, defaults_before),
+        ] {
+            match value {
+                Some(value) => store.set(key, value),
+                None => {
+                    store.delete(key);
+                }
+            }
+        }
+        store.delete(&scope_key);
+        store.save().unwrap();
+        let all_providers =
+            crate::commands::config::get_available_providers(app.clone(), Some(true));
+        assert!(all_providers
+            .stt
+            .iter()
+            .any(|p| p.value == "openai" && p.configured == Some(false)));
+        assert!(all_providers
+            .stt
+            .iter()
+            .any(|p| p.value == "custom_fixture" && p.configured == Some(true)));
+        assert!(all_providers
+            .llm
+            .iter()
+            .any(|p| p.value == "ollama" && p.configured.is_some()));
+        let providers = crate::commands::config::get_available_providers(app.clone(), None);
         let speech = providers
             .stt
             .iter()
@@ -814,6 +1050,12 @@ pub(crate) fn email_code_session_lifecycle(
             .unwrap();
         drop(resources);
         let removed = app.resources_table().take_any(rid).unwrap();
+        let unavailable = crate::commands::config::get_model_selection_settings(app.clone());
+        assert_eq!(
+            unavailable.error.as_deref(),
+            Some("Model settings could not be read safely")
+        );
+        assert!(unavailable.profiles.is_empty() && unavailable.selections.is_empty());
         assert!(try_apply_first_install_models(app, Some(&models)).is_err());
         let repaired = app
             .store_builder("settings.json")

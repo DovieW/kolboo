@@ -32,6 +32,7 @@ fn managed_llm_api_base_url(provider: &str, gateway_url: &str) -> Option<String>
 
 #[derive(Debug, Clone)]
 pub(crate) struct LlmProviderParams {
+    pub selection: Option<crate::model_selection::ModelSelection>,
     pub model: Option<String>,
     pub timeout: Duration,
     pub ollama_url: Option<String>,
@@ -50,6 +51,18 @@ pub(super) struct ResolvedCachedLlmProviderConfig {
 }
 
 pub(super) fn llm_provider_cache_key(provider_id: &str, params: &LlmProviderParams) -> String {
+    if let Some(selection) = &params.selection {
+        return serde_json::json!([
+            selection,
+            params.timeout.as_secs_f64(),
+            params.ollama_url,
+            params.openai_reasoning_effort,
+            params.gemini_thinking_budget,
+            params.gemini_thinking_level,
+            params.anthropic_thinking_budget
+        ])
+        .to_string();
+    }
     let model_key = params
         .model
         .clone()
@@ -93,7 +106,13 @@ pub(super) fn resolve_cached_llm_provider_config(
     provider_id: &str,
     params: LlmProviderParams,
 ) -> Result<ResolvedCachedLlmProviderConfig, PipelineError> {
-    let provider_id = resolve_llm_provider_for_runtime(pipeline_config, provider_id);
+    if let Some(error) = &pipeline_config.model_selection_error {
+        return Err(PipelineError::Config(error.clone()));
+    }
+    let provider_id = match &params.selection {
+        Some(selection) => selected_llm_provider(selection)?,
+        None => resolve_llm_provider_for_runtime(pipeline_config, provider_id),
+    };
     let managed_ready =
         pipeline_config.managed_inference_enabled && managed_gateway_ready(pipeline_config);
     let managed_transport_active = managed_ready && provider_id == "managed";
@@ -132,7 +151,13 @@ pub(super) fn resolve_cached_llm_provider_config(
     config.enabled = true;
     config.provider = provider_id.clone();
     config.api_key = api_key;
-    config.model = params.model.clone();
+    config.model = params
+        .selection
+        .as_ref()
+        .map(|choice| choice.model_id.clone())
+        .or_else(|| params.model.clone());
+    config.selection = params.selection.clone();
+    config.managed_access_token = None;
     config.ollama_url = params.ollama_url.clone();
     config.timeout = params.timeout;
     config.managed_gateway_url = if managed_transport_active {
@@ -160,18 +185,28 @@ pub(crate) fn resolve_one_off_llm_config(
     provider_id: &str,
     params: LlmProviderParams,
 ) -> Result<LlmConfig, PipelineError> {
-    let provider_id = provider_id.trim().to_string();
+    if let Some(error) = &base_config.selection_error {
+        return Err(PipelineError::Config(error.clone()));
+    }
+    let provider_id = match &params.selection {
+        Some(selection) => selected_llm_provider(selection)?,
+        None => provider_id.trim().to_string(),
+    };
     let api_key = if provider_id == "ollama" {
         String::new()
     } else if provider_id == "managed" {
+        let token = base_config
+            .managed_access_token
+            .as_ref()
+            .or_else(|| (base_config.provider == "managed").then_some(&base_config.api_key));
         if base_config.managed_gateway_url.as_deref().is_none()
-            || base_config.api_key.trim().is_empty()
+            || token.is_none_or(|token| token.trim().is_empty())
         {
             return Err(PipelineError::Config(
                 "Managed inference is not available for this session".to_string(),
             ));
         }
-        base_config.api_key.clone()
+        token.cloned().unwrap_or_default()
     } else {
         llm_api_keys.get(&provider_id).cloned().unwrap_or_default()
     };
@@ -185,9 +220,20 @@ pub(crate) fn resolve_one_off_llm_config(
 
     let mut config = base_config.clone();
     config.enabled = true;
+    config.managed_gateway_url = if provider_id == "managed" {
+        base_config.managed_gateway_url.clone()
+    } else {
+        None
+    };
+    config.managed_access_token = None;
     config.provider = provider_id;
     config.api_key = api_key;
-    config.model = params.model;
+    config.model = params
+        .selection
+        .as_ref()
+        .map(|choice| choice.model_id.clone())
+        .or(params.model);
+    config.selection = params.selection;
     config.ollama_url = params.ollama_url;
     config.timeout = params.timeout;
     config.openai_reasoning_effort = params.openai_reasoning_effort;
@@ -201,6 +247,32 @@ pub(crate) fn resolve_one_off_llm_config(
 
     validate_custom_llm(&config)?;
     Ok(config)
+}
+
+fn selected_llm_provider(
+    selection: &crate::model_selection::ModelSelection,
+) -> Result<String, PipelineError> {
+    selection.validate().map_err(PipelineError::Config)?;
+    if selection.source == crate::model_selection::ModelSource::Managed {
+        return Ok("managed".into());
+    }
+    let provider = selection.provider_id.as_str();
+    if !provider.starts_with("custom_")
+        && !matches!(
+            provider,
+            "openai"
+                | "anthropic"
+                | "groq"
+                | "cerebras"
+                | "gemini"
+                | "cohere"
+                | "fireworks"
+                | "ollama"
+        )
+    {
+        return Err(PipelineError::Config("The selected language-model provider is unavailable; your model choice has not changed".into()));
+    }
+    Ok(provider.into())
 }
 
 fn validate_custom_llm(config: &LlmConfig) -> Result<(), PipelineError> {
@@ -307,6 +379,12 @@ fn create_llm_provider_unstructured(
                     config.api_key.clone(),
                     config.model.clone(),
                     api_url,
+                )
+                .with_selected_provider(
+                    config
+                        .selection
+                        .as_ref()
+                        .map(|choice| choice.provider_id.clone()),
                 )
                 .with_timeout(config.timeout),
             )
@@ -416,6 +494,12 @@ fn create_llm_provider_without_timeout(
                     config.api_key.clone(),
                     config.model.clone(),
                     api_url,
+                )
+                .with_selected_provider(
+                    config
+                        .selection
+                        .as_ref()
+                        .map(|choice| choice.provider_id.clone()),
                 )
                 .without_timeout()
                 .with_request_log_store(request_log_store.clone()),
@@ -563,6 +647,12 @@ pub(super) fn create_llm_provider(
                     config.api_key.clone(),
                     config.model.clone(),
                     api_url,
+                )
+                .with_selected_provider(
+                    config
+                        .selection
+                        .as_ref()
+                        .map(|choice| choice.provider_id.clone()),
                 )
                 .with_timeout(config.timeout)
                 .with_request_log_store(request_log_store.clone()),
@@ -717,6 +807,235 @@ pub(super) fn create_llm_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn managed_constructors_pin_atomic_provider_and_model_without_vendor_credentials() {
+        use crate::model_selection::{ModelSelection, ModelSource};
+        use wiremock::{
+            matchers::{method, path},
+            Mock, MockServer, ResponseTemplate,
+        };
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"choices":[{"message":{"content":"synthetic output"}}]}),
+            ))
+            .expect(6)
+            .mount(&server)
+            .await;
+        for selection in [
+            None,
+            Some(ModelSelection {
+                source: ModelSource::Managed,
+                provider_id: "openai".into(),
+                model_id: "raw-model".into(),
+            }),
+        ] {
+            let config = LlmConfig {
+                provider: "managed".into(),
+                api_key: "synthetic-session".into(),
+                model: Some("raw-model".into()),
+                managed_gateway_url: Some(server.uri()),
+                selection: selection.clone(),
+                ..Default::default()
+            };
+            let providers = [
+                create_llm_provider_unstructured(&config, reqwest::Client::new()),
+                create_llm_provider_without_timeout(&config, reqwest::Client::new(), None),
+                create_llm_provider(&config, None, &Default::default()).unwrap(),
+            ];
+            for provider in providers {
+                assert_eq!(
+                    provider.complete("sys", "user").await.unwrap(),
+                    "synthetic output"
+                );
+                assert_eq!(provider.model(), "raw-model");
+            }
+        }
+        for (index, request) in server.received_requests().await.unwrap().iter().enumerate() {
+            assert_eq!(
+                request.headers.get("authorization").unwrap(),
+                "Bearer synthetic-session"
+            );
+            assert_eq!(
+                request
+                    .headers
+                    .get("x-kolboo-model-provider")
+                    .map(|value| value.to_str().unwrap()),
+                (index >= 3).then_some("openai")
+            );
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&request.body).unwrap()["model"],
+                "raw-model"
+            );
+        }
+    }
+
+    fn atomic_params(
+        source: crate::model_selection::ModelSource,
+        provider: &str,
+        model: &str,
+    ) -> LlmProviderParams {
+        LlmProviderParams {
+            selection: Some(crate::model_selection::ModelSelection {
+                source,
+                provider_id: provider.into(),
+                model_id: model.into(),
+            }),
+            model: Some("stale-model".into()),
+            timeout: Duration::from_secs(10),
+            ollama_url: None,
+            openai_reasoning_effort: None,
+            gemini_thinking_budget: None,
+            gemini_thinking_level: None,
+            anthropic_thinking_budget: None,
+        }
+    }
+
+    #[test]
+    fn atomic_routes_do_not_change_model_source_or_reuse_other_credentials() {
+        use crate::model_selection::ModelSource::{Byok, Managed};
+        let mut config = PipelineConfig {
+            managed_inference_enabled: true,
+            managed_inference_gateway_url: Some("https://gateway.example.test".into()),
+            managed_inference_access_token: Some("synthetic-session".into()),
+            ..Default::default()
+        };
+        config.llm_config.managed_gateway_url = config.managed_inference_gateway_url.clone();
+        config.llm_config.managed_access_token = config.managed_inference_access_token.clone();
+        config.llm_config.api_key = "unrelated-key".into();
+        for provider in [
+            "openai",
+            "anthropic",
+            "groq",
+            "cerebras",
+            "gemini",
+            "cohere",
+            "fireworks",
+            "ollama",
+        ] {
+            config
+                .llm_api_keys
+                .insert(provider.into(), format!("synthetic-{provider}"));
+            let params = atomic_params(Byok, provider, " raw::א ");
+            let resolved =
+                resolve_cached_llm_provider_config(&config, "managed", params.clone()).unwrap();
+            assert_eq!(resolved.provider_id, provider);
+            assert!(!resolved.managed_transport_active);
+            assert_eq!(resolved.config.model.as_deref(), Some(" raw::א "));
+            assert!(
+                resolved.config.managed_gateway_url.is_none()
+                    && resolved.config.managed_access_token.is_none()
+            );
+            let oneoff = resolve_one_off_llm_config(
+                &config.llm_config,
+                &config.llm_api_keys,
+                "managed",
+                params,
+            )
+            .unwrap();
+            assert_eq!(oneoff.provider, provider);
+            assert!(oneoff.managed_gateway_url.is_none());
+            assert_eq!(
+                oneoff.api_key,
+                if provider == "ollama" {
+                    String::new()
+                } else {
+                    format!("synthetic-{provider}")
+                }
+            );
+        }
+        let managed = atomic_params(Managed, "openai", "catalog-model");
+        let cached = resolve_cached_llm_provider_config(&config, "groq", managed.clone()).unwrap();
+        assert_eq!(cached.provider_id, "managed");
+        assert_eq!(cached.config.api_key, "synthetic-session");
+        assert_eq!(cached.config.model.as_deref(), Some("catalog-model"));
+        let oneoff = resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "groq",
+            managed.clone(),
+        )
+        .unwrap();
+        assert_eq!(oneoff.api_key, "synthetic-session");
+        assert_eq!(oneoff.model.as_deref(), Some("catalog-model"));
+        assert_ne!(
+            llm_provider_cache_key("managed", &managed),
+            llm_provider_cache_key("openai", &atomic_params(Byok, "openai", "catalog-model"))
+        );
+        for provider in ["missing", "custom_missing"] {
+            assert!(resolve_cached_llm_provider_config(
+                &config,
+                "openai",
+                atomic_params(Byok, provider, "raw")
+            )
+            .is_err());
+            assert!(resolve_one_off_llm_config(
+                &config.llm_config,
+                &config.llm_api_keys,
+                "openai",
+                atomic_params(Byok, provider, "raw")
+            )
+            .is_err());
+        }
+        assert!(resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "openai",
+            atomic_params(Byok, "", "raw")
+        )
+        .is_err());
+        config.model_selection_error = Some("Invalid model settings".into());
+        assert!(resolve_cached_llm_provider_config(&config, "openai", managed.clone()).is_err());
+        config.llm_config.selection_error = config.model_selection_error.take();
+        assert!(resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "openai",
+            managed.clone()
+        )
+        .is_err());
+        config.llm_config.selection_error = None;
+        config.llm_config.managed_access_token = None;
+        // A vendor key must not be interpreted as a Managed session token.
+        assert!(resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "managed",
+            managed.clone()
+        )
+        .is_err());
+        config.llm_config.provider = "managed".into();
+        assert_eq!(
+            resolve_one_off_llm_config(
+                &config.llm_config,
+                &config.llm_api_keys,
+                "managed",
+                managed.clone()
+            )
+            .unwrap()
+            .api_key,
+            "unrelated-key"
+        );
+        config.llm_config.managed_gateway_url = None;
+        assert!(resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "managed",
+            managed.clone()
+        )
+        .is_err());
+        config.llm_config.managed_gateway_url = Some("https://gateway.example.test".into());
+        config.llm_config.api_key = " ".into();
+        assert!(resolve_one_off_llm_config(
+            &config.llm_config,
+            &config.llm_api_keys,
+            "managed",
+            managed
+        )
+        .is_err());
+    }
     use crate::llm::PromptSections;
 
     fn custom_config(base_url: String) -> LlmConfig {
@@ -879,6 +1198,7 @@ mod tests {
     #[test]
     fn llm_provider_cache_key_tracks_provider_identity_knobs() {
         let params_a = LlmProviderParams {
+            selection: None,
             model: Some("gpt-5".to_string()),
             timeout: Duration::from_secs(30),
             ollama_url: None,
@@ -888,6 +1208,7 @@ mod tests {
             anthropic_thinking_budget: None,
         };
         let params_b = LlmProviderParams {
+            selection: None,
             openai_reasoning_effort: Some("high".to_string()),
             ..params_a.clone()
         };
@@ -911,6 +1232,7 @@ mod tests {
             &config,
             "managed",
             LlmProviderParams {
+                selection: None,
                 model: Some("gpt-5".to_string()),
                 timeout: Duration::from_secs(45),
                 ollama_url: None,
@@ -947,6 +1269,7 @@ mod tests {
             &config,
             "openai",
             LlmProviderParams {
+                selection: None,
                 model: Some("gpt-5".to_string()),
                 timeout: Duration::from_secs(45),
                 ollama_url: None,
@@ -970,6 +1293,7 @@ mod tests {
             &PipelineConfig::default(),
             "managed",
             LlmProviderParams {
+                selection: None,
                 model: Some("gpt-5".to_string()),
                 timeout: Duration::from_secs(45),
                 ollama_url: None,
@@ -1006,6 +1330,7 @@ mod tests {
             &llm_api_keys,
             "groq",
             LlmProviderParams {
+                selection: None,
                 model: Some("llama-3.3-70b-versatile".to_string()),
                 timeout: Duration::from_secs(30),
                 ollama_url: None,
@@ -1020,10 +1345,7 @@ mod tests {
         assert_eq!(resolved.provider, "groq");
         assert_eq!(resolved.api_key, "groq-key");
         assert_eq!(resolved.model.as_deref(), Some("llama-3.3-70b-versatile"));
-        assert_eq!(
-            resolved.managed_gateway_url.as_deref(),
-            Some("https://gateway.example.test")
-        );
+        assert!(resolved.managed_gateway_url.is_none());
         assert!(resolved.prompts.system_custom.is_none());
         assert!(resolved.program_prompt_profiles.is_empty());
     }
@@ -1031,7 +1353,8 @@ mod tests {
     #[test]
     fn resolve_one_off_managed_config_uses_session_token() {
         let base = LlmConfig {
-            api_key: "managed-session-token".to_string(),
+            api_key: "unused-user-key".to_string(),
+            managed_access_token: Some("managed-session-token".to_string()),
             managed_gateway_url: Some("https://gateway.example.test".to_string()),
             ..LlmConfig::default()
         };
@@ -1041,6 +1364,7 @@ mod tests {
             &HashMap::new(),
             "managed",
             LlmProviderParams {
+                selection: None,
                 model: Some("gemini-3-flash".to_string()),
                 timeout: Duration::from_secs(30),
                 ollama_url: None,
@@ -1067,6 +1391,7 @@ mod tests {
             &HashMap::new(),
             "managed",
             LlmProviderParams {
+                selection: None,
                 model: None,
                 timeout: Duration::from_secs(30),
                 ollama_url: None,
