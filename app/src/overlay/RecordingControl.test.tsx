@@ -7,6 +7,7 @@ import RecordingControl from "./RecordingControl";
 
 const native = vi.hoisted(() => ({
 	listeners: new Map<string, (payload: unknown) => void>(),
+	handlers: new Map<string, Set<(payload: unknown) => void>>(),
 	invoke: vi.fn(async (_command: string) => null),
 	ocrState: vi.fn(),
 	profile: vi.fn(),
@@ -19,8 +20,20 @@ const native = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 vi.mock("../lib/tauri/events", () => ({
 	listenTyped: async (name: string, handler: (p: unknown) => void) => {
-		native.listeners.set(name, handler);
-		return () => native.listeners.delete(name);
+		const handlers =
+			native.handlers.get(name) ?? new Set<(payload: unknown) => void>();
+		native.handlers.set(name, handlers);
+		handlers.add(handler);
+		native.listeners.set(name, (payload) => {
+			for (const listener of handlers) listener(payload);
+		});
+		return () => {
+			handlers.delete(handler);
+			if (handlers.size === 0) {
+				native.handlers.delete(name);
+				native.listeners.delete(name);
+			}
+		};
 	},
 }));
 vi.mock("../lib/queries", () => ({
@@ -55,6 +68,7 @@ afterEach(async () => {
 	native.profile.mockReset();
 	native.ocrState.mockReset();
 	native.listeners.clear();
+	native.handlers.clear();
 	native.settings.overlay_mode = "recording_only";
 });
 it("keeps Always mode visible without an idle render loop or stale hides", async () => {
@@ -147,6 +161,43 @@ it("cancels an old exit and stays visible across rapid consecutive recording ses
 	expect(animation()).toBe("visible");
 	await act(async () => vi.advanceTimersByTime(500));
 	expect(animation()).toBe("visible");
+});
+
+it("shows provisional RTL text during recording and transcription, not during rewriting", async () => {
+	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+	await act(async () =>
+		root.render(
+			<QueryClientProvider client={client}>
+				<RecordingControl />
+			</QueryClientProvider>,
+		),
+	);
+	const emit = async (name: string, payload: unknown) => {
+		await act(async () => native.listeners.get(name)?.(payload));
+	};
+	await act(async () =>
+		window.dispatchEvent(
+			new MouseEvent("mousemove", { clientX: 1, clientY: 1 }),
+		),
+	);
+	await emit("pipeline-state-changed", "recording");
+	await emit("stt-partial-transcript", { kind: "started", session_epoch: 1 });
+	await emit("stt-partial-transcript", {
+		kind: "partial",
+		session_epoch: 1,
+		text: "א גוטן טאָג",
+	});
+	const preview = () =>
+		host.querySelector('[aria-label="Provisional transcript"]');
+	expect(preview()?.textContent).toBe("א גוטן טאָג");
+	expect(preview()?.getAttribute("dir")).toBe("auto");
+	await emit("pipeline-state-changed", "transcribing");
+	expect(preview()?.textContent).toBe("א גוטן טאָג");
+	await emit("pipeline-state-changed", "rewriting");
+	expect(preview()).toBeNull();
+	await emit("pipeline-transcript-ready", "final");
+	await emit("pipeline-state-changed", "recording");
+	expect(preview()).toBeNull();
 });
 
 it("shows an error indicator but no recording indicator in the expanded overlay", async () => {

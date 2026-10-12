@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
-import { useModelChoices, type ModelPurpose } from "./modelChoices";
+import { type ModelPurpose, useModelChoices } from "./modelChoices";
 
 const fixture = vi.hoisted(() => ({
 	providers: {
@@ -85,6 +85,89 @@ beforeEach(() => {
 	fixture.byok.data = {};
 	fixture.ollama.data = [];
 	fixture.whisper.data = [];
+});
+
+it("uses separate YiddishLabs key readiness and restricts Standard to uploaded files and meetings", () => {
+	fixture.providers.data = {
+		stt: [
+			{
+				value: "yiddishlabs",
+				label: "YiddishLabs",
+				configured: true,
+				model_configured: {
+					"yiddishlabs-3-turbo": true,
+					"yiddishlabs-standard": false,
+				},
+			},
+		],
+	};
+	fixture.enabled = true;
+	fixture.managed.data = [
+		{
+			id: "yiddishlabs-3-turbo",
+			display_name: "Flash Turbo",
+			provider: "yiddishlabs",
+			capabilities: ["transcription"],
+		},
+		{
+			id: "yiddishlabs-standard",
+			display_name: "Standard",
+			provider: "yiddishlabs",
+			capabilities: ["transcription_jobs"],
+		},
+	];
+	const dictation = read("dictation").choices;
+	expect(dictation.map((choice) => choice.selection.model_id)).toEqual([
+		"yiddishlabs-3-turbo",
+		"yiddishlabs-3-turbo",
+	]);
+	for (const purpose of ["file", "meeting"] as const) {
+		const choices = read(purpose).choices;
+		expect(choices).toHaveLength(4);
+		const byokStandard = choices.find(
+			(choice) =>
+				choice.selection.source === "byok" &&
+				choice.selection.model_id === "yiddishlabs-standard",
+		)!;
+		expect(byokStandard.ready).toBe(false);
+		expect(byokStandard.capabilities).toContain("File/meeting job");
+		expect(byokStandard.limitations).toContain(
+			"stores submitted jobs and content",
+		);
+		expect(byokStandard.pricing).toBeUndefined();
+		const managedStandard = choices.find(
+			(choice) =>
+				choice.selection.source === "managed" &&
+				choice.selection.model_id === "yiddishlabs-standard",
+		)!;
+		expect(managedStandard.ready).toBe(true);
+		expect(managedStandard.limitations).toContain(
+			"does not cancel provider processing or charges",
+		);
+		expect(
+			choices
+				.filter((choice) => choice.selection.model_id === "yiddishlabs-3-turbo")
+				.every((choice) =>
+					choice.limitations?.includes("provider's retention description"),
+				),
+		).toBe(true);
+	}
+	fixture.providers.data = {
+		llm: [],
+		stt: [
+			{
+				value: "yiddishlabs",
+				label: "YiddishLabs",
+				configured: true,
+				model_configured: { "yiddishlabs-standard": true },
+			},
+		],
+	};
+	const direct = read("file").choices.filter(
+		(choice) => choice.selection.source === "byok",
+	);
+	expect(direct.map((choice) => choice.ready)).toEqual([false, true]);
+	expect(read("llm").choices).toEqual([]);
 });
 
 it("lists keyless providers with setup guidance and filters only realtime-only models for files/meetings", async () => {
@@ -205,13 +288,17 @@ it("represents local downloads/endpoint readiness independently of Managed and n
 	};
 	fixture.ollama.data = undefined;
 	const unconfigured = read("llm");
-	expect(unconfigured.setupProviders).toEqual([{provider_id:"ollama", label:"Ollama"}]);
+	expect(unconfigured.setupProviders).toEqual([
+		{ provider_id: "ollama", label: "Ollama" },
+	]);
 	expect(unconfigured.choices).toEqual([]);
 	unconfigured.retry();
 	expect(fixture.ollama.refetch).toHaveBeenCalledOnce();
-	fixture.providers.data = { stt: [{value:"whisper",label:"Whisper"}] };
+	fixture.providers.data = { stt: [{ value: "whisper", label: "Whisper" }] };
 	fixture.whisper.data = undefined;
-	expect(read("dictation").setupProviders).toEqual([{provider_id:"local-whisper",label:"Whisper"}]);
+	expect(read("dictation").setupProviders).toEqual([
+		{ provider_id: "local-whisper", label: "Whisper" },
+	]);
 	fixture.providers.data = undefined;
 	fixture.ollama.data = undefined;
 	fixture.whisper.data = undefined;
@@ -274,7 +361,12 @@ it("shows valid price estimates only and limits Managed models to the action's c
 			display_name: "Speech",
 			capabilities: ["transcription"],
 		},
-		{id:"gpt-4o-transcribe-diarize",provider:"openai",display_name:"Speakers",capabilities:["transcription"]},
+		{
+			id: "gpt-4o-transcribe-diarize",
+			provider: "openai",
+			display_name: "Speakers",
+			capabilities: ["transcription"],
+		},
 		{
 			id: "embedding",
 			provider: "openai",

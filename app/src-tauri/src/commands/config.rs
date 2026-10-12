@@ -235,6 +235,8 @@ pub struct ProviderInfo {
     pub models: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_names: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_configured: Option<std::collections::BTreeMap<String, bool>>,
 }
 
 /// OCR provider availability status
@@ -247,6 +249,7 @@ pub struct OcrProviderStatus {
 /// Response listing available providers
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AvailableProvidersResponse {
+    pub live_text_insertion_supported: bool,
     pub stt: Vec<ProviderInfo>,
     pub llm: Vec<ProviderInfo>,
     pub ocr: OcrProviderStatus,
@@ -266,6 +269,7 @@ const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("speechmatics", "Speechmatics", false),
     ("elevenlabs", "ElevenLabs", false),
     ("deepgram", "Deepgram", false),
+    ("yiddishlabs", "YiddishLabs", false),
     // Self-hosted/local network endpoint.
     ("whisper-server", "Whisper Server", true),
     ("whisper", "Local Whisper", true),
@@ -396,9 +400,23 @@ pub fn get_available_providers(
         }
 
         let key_name = format!("{}_api_key", id);
+        let model_configured = (*id == "yiddishlabs").then(|| {
+            std::collections::BTreeMap::from([
+                (
+                    crate::stt::yiddishlabs::FLASH_MODEL.to_owned(),
+                    has_api_key(&app, "yiddishlabs_flash_api_key"),
+                ),
+                (
+                    crate::stt::yiddishlabs::STANDARD_MODEL.to_owned(),
+                    has_api_key(&app, "yiddishlabs_standard_api_key"),
+                ),
+            ])
+        });
         // Local providers don't need API keys, remote ones do
         let configured = if *id == "whisper-server" {
             has_valid_url_setting(&app, "whisper_server_base_url")
+        } else if let Some(models) = &model_configured {
+            models.values().any(|configured| *configured)
         } else {
             *is_local || has_api_key(&app, &key_name)
         };
@@ -410,6 +428,7 @@ pub fn get_available_providers(
                 is_local: *is_local,
                 models: None,
                 model_names: None,
+                model_configured,
             });
         }
     }
@@ -437,6 +456,7 @@ pub fn get_available_providers(
                 is_local: *is_local,
                 models: None,
                 model_names: None,
+                model_configured: None,
             });
         }
     }
@@ -454,6 +474,7 @@ pub fn get_available_providers(
                 is_local: false,
                 models: Some(provider.stt_models),
                 model_names: Some(provider.stt_model_names),
+                model_configured: None,
             });
         }
         if !provider.llm_models.is_empty() {
@@ -464,10 +485,13 @@ pub fn get_available_providers(
                 is_local: false,
                 models: Some(provider.llm_models),
                 model_names: Some(provider.llm_model_names),
+                model_configured: None,
             });
         }
     }
     AvailableProvidersResponse {
+        live_text_insertion_supported:
+            crate::platform_capabilities::automatic_text_injection_supported(),
         stt: stt_providers,
         llm: llm_providers,
         ocr: get_ocr_provider_status(&app),
@@ -482,6 +506,7 @@ pub fn get_available_providers(
     _include_unconfigured: Option<bool>,
 ) -> AvailableProvidersResponse {
     AvailableProvidersResponse {
+        live_text_insertion_supported: false,
         stt: vec![],
         llm: vec![],
         ocr: OcrProviderStatus {
@@ -663,6 +688,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         "assemblyai",
         "speechmatics",
         "deepgram",
+        "yiddishlabs_flash",
+        "yiddishlabs_standard",
     ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_api_key(&app, &key_name);
@@ -1162,6 +1189,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         managed_inference_fallback_llm_provider,
         stt_model: stt_model.clone(),
         stt_language,
+        stt_input_mode: loaded_model_settings.stt_input_mode,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,

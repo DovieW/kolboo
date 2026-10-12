@@ -10,7 +10,7 @@ async fn transcribe_blocks<F, Fut>(
     settings_key: &str,
     cancel: &CancellationToken,
     block_frames: usize,
-    upload: F,
+    mut upload: F,
 ) -> Result<SttResult, PipelineError>
 where
     F: FnMut(Vec<u8>) -> Fut,
@@ -22,7 +22,7 @@ where
         settings_key,
         cancel,
         block_frames,
-        upload,
+        |chunk, _offset| upload(chunk),
     )
     .await
 }
@@ -58,6 +58,55 @@ fn path() -> std::path::PathBuf {
         "kolboo-meeting-{}.transcripts",
         uuid::Uuid::new_v4()
     ))
+}
+
+#[tokio::test]
+async fn chunk_positions_are_stable_and_distinguish_identical_audio_on_resume() {
+    let directory = tempfile::tempdir().unwrap();
+    let checkpoint = directory.path().join("progress.transcripts");
+    let wav = audio(48000);
+    let token = CancellationToken::new();
+    let mut positions = Vec::new();
+    let mut chunks = Vec::new();
+    let first = transcribe_source(
+        wav.clone().into(),
+        Some(&checkpoint),
+        "model",
+        &token,
+        16000,
+        |chunk, position| {
+            positions.push(position);
+            chunks.push(chunk);
+            let failed = position == 16000;
+            async move {
+                if failed {
+                    Err(PipelineError::Cancelled)
+                } else {
+                    Ok(result("first"))
+                }
+            }
+        },
+    )
+    .await;
+    assert!(first.is_err());
+    assert_eq!(positions, [0, 16000]);
+    assert_eq!(chunks[0], chunks[1]);
+    positions.clear();
+    let resumed = transcribe_source(
+        wav.into(),
+        Some(&checkpoint),
+        "model",
+        &token,
+        16000,
+        |_, position| {
+            positions.push(position);
+            async { Ok(result("next")) }
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(positions, [16000, 32000]);
+    assert_eq!(resumed.text, "first\nnext\nnext");
 }
 
 #[test]
@@ -356,7 +405,8 @@ async fn long_meeting_has_small_uploads_no_missing_audio_and_one_result() {
         Some(&path),
         "model",
         &CancellationToken::new(),
-        move |chunk| {
+        move |chunk, offset| {
+            assert_eq!(offset as usize, uploaded.load(Ordering::SeqCst));
             assert!(chunk.len() < 20 * 1024 * 1024);
             let reader = hound::WavReader::new(std::io::Cursor::new(chunk)).unwrap();
             uploaded.fetch_add(reader.duration() as usize, Ordering::SeqCst);
@@ -370,10 +420,16 @@ async fn long_meeting_has_small_uploads_no_missing_audio_and_one_result() {
     assert_eq!(calls.load(Ordering::SeqCst), 4);
     assert_eq!(output.text, "part\npart\npart\npart");
     let mut unexpected_uploads = 0;
-    let replay = transcribe(wav, Some(&path), "model", &CancellationToken::new(), |_| {
-        unexpected_uploads += 1;
-        async { Ok(result("unexpected")) }
-    })
+    let replay = transcribe(
+        wav,
+        Some(&path),
+        "model",
+        &CancellationToken::new(),
+        |_, _| {
+            unexpected_uploads += 1;
+            async { Ok(result("unexpected")) }
+        },
+    )
     .await
     .unwrap();
     assert_eq!(unexpected_uploads, 0);

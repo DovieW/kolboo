@@ -16,6 +16,37 @@ pub(crate) fn native_output_warning(app: &AppHandle) {
         .entries
         .iter()
         .any(|entry| entry.message.starts_with("Output failed:")));
+    let pipeline = app.state::<SharedPipeline>();
+    let session = crate::text::inject::OutputSession {
+        pipeline: (*pipeline).clone(),
+        epoch: pipeline.session_epoch(),
+    };
+    pipeline.force_reset();
+    let intent = crate::core::output_settings::resolve_output_intent(
+        crate::commands::text::OutputMode::Clipboard,
+        false,
+        None,
+        None,
+        false,
+        false,
+    );
+    let result = tauri::async_runtime::block_on(execute_normal_dictation_output(
+        app,
+        NormalDictationOutputRequest {
+            session,
+            output_value: "must not copy",
+            output_intent: intent,
+            live_output_completed: false,
+            quick_replace_failure: None,
+            request_id: Some(&new),
+        },
+    ));
+    assert_eq!(result.decision, NormalDictationOutputDecision::Output);
+    assert!(result.output_error.unwrap().contains("superseded"));
+    assert!(logs.get_logs(None)[0]
+        .entries
+        .iter()
+        .any(|entry| entry.message.contains("superseded")));
 }
 
 #[test]

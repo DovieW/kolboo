@@ -3,15 +3,51 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { useByokLlmModels } from "./providers";
+import { useByokLlmModels, useUpdateSTTInputMode } from "./providers";
+import { tauriAPI } from "../tauri";
 
 const mocks = vi.hoisted(() => ({
 	providers: vi.fn(),
 	catalog: vi.fn(async () => ({})),
 }));
-vi.mock("./shared", () => ({
+vi.mock("./shared", async (original) => ({
+	...(await original<typeof import("./shared")>()),
 	queryFnDeps: { configAPI: { getAvailableProviders: mocks.providers } },
 }));
+
+it("saves input mode and invalidates settings without changing a model selection", async () => {
+	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+	const change = vi
+		.spyOn(tauriAPI, "updateSTTInputMode")
+		.mockResolvedValue(undefined);
+	const host = document.createElement("div");
+	const root = createRoot(host);
+	const client = new QueryClient({
+		defaultOptions: { mutations: { retry: false } },
+	});
+	const invalidations = vi.spyOn(client, "invalidateQueries");
+	let mutation!: ReturnType<typeof useUpdateSTTInputMode>;
+	function Reader() {
+		mutation = useUpdateSTTInputMode();
+		return null;
+	}
+	try {
+		await act(async () =>
+			root.render(
+				<QueryClientProvider client={client}>
+					<Reader />
+				</QueryClientProvider>,
+			),
+		);
+		await act(async () => mutation.mutateAsync("after_recording"));
+		expect(change).toHaveBeenCalledExactlyOnceWith("after_recording");
+		expect(invalidations).toHaveBeenCalledWith({ queryKey: ["settings"] });
+	} finally {
+		await act(async () => root.unmount());
+		client.clear();
+		change.mockRestore();
+	}
+});
 vi.mock("../modelsDev", async (original) => ({
 	...(await original<typeof import("../modelsDev")>()),
 	fetchModelsDevByokLlmCatalog: mocks.catalog,

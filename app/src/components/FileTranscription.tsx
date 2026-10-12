@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import {
 	normalizeSttLanguage,
-	STT_LANGUAGE_OPTIONS,
+	sttLanguageOptionsForModel,
 } from "../lib/sttLanguages";
 import {
 	audioFileName,
@@ -240,7 +240,11 @@ export function FileTranscription({
 								label="Language hint"
 								aria-label="File language hint"
 								description="Auto-detect unless you choose a hint. Retries keep this choice."
-								data={STT_LANGUAGE_OPTIONS}
+								data={sttLanguageOptionsForModel(
+									preferences.meeting_model?.provider,
+									preferences.meeting_model?.model,
+									preferences.language_hint,
+								)}
 								value={preferences.language_hint ?? "auto"}
 								allowDeselect={false}
 								disabled={disabled || !!recoveryId || complete}

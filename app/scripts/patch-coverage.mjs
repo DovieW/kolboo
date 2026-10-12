@@ -335,6 +335,30 @@ export function applyCoverageExceptions(
 				approvedFunctions.add(line);
 			}
 		}
+		// Narrower than a definition-wide duplicate waiver: only the reviewed
+		// compiler records may be uncalled. A new provider/test instantiation
+		// at the same covered source line must still fail until reviewed.
+		for (const { line, names } of entry.functionInstances ?? []) {
+			const records = [...fileCoverage.functions].filter(([key]) =>
+				key.startsWith(`${line}:`),
+			);
+			const approved = new Set(names);
+			if (
+				fileCoverage.lines.get(line) > 0 &&
+				records.length > 1 &&
+				records.every(([key]) => key.startsWith(`${line}:_R`)) &&
+				records.some(([, count]) => count > 0) &&
+				names.every((name) =>
+					records.some(([key]) => key === `${line}:${name}`),
+				) &&
+				records.every(
+					([key, count]) =>
+						count > 0 || approved.has(key.slice(key.indexOf(":") + 1)),
+				)
+			) {
+				approvedFunctions.add(line);
+			}
+		}
 		const lines = failure.uncoveredLines.filter((line) =>
 			approvedLines.has(line),
 		);

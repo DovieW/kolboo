@@ -11,15 +11,25 @@ import {
 } from "@mantine/core";
 import { ActionModelPicker } from "../../ActionModelPicker";
 import { Info, RotateCcw } from "lucide-react";
-import { isRealtimeSttModel } from "../../../lib/modelOptions";
+import {
+	isRealtimeSttModel,
+	isStreamingOnlySttModel,
+} from "../../../lib/modelOptions";
+import type { SttInputMode } from "../../../lib/tauri";
+import { TranscriptionInputModeControl } from "./TranscriptionInputModeControl";
+import { useModelChoices } from "../../../lib/queries/modelChoices";
 import {
 	useSettings,
 	useUpdateSTTLiveOutput,
 	useUpdateSTTSimulatedStreaming,
+	useUpdateSTTInputMode,
+	useAvailableProviders,
 } from "../../../lib/queries";
 
 interface TranscribeSettingsSectionProps {
 	activeProfileId: string;
+	sttInputMode?: SttInputMode | null;
+	onSttInputModeChange?: (mode: SttInputMode | null) => void;
 	isDefaultScope: boolean;
 	inheritTooltip: string;
 	sttLanguageInheriting: boolean;
@@ -51,6 +61,8 @@ interface TranscribeSettingsSectionProps {
 
 export function TranscribeSettingsSection({
 	activeProfileId,
+	sttInputMode = null,
+	onSttInputModeChange,
 	isDefaultScope,
 	inheritTooltip,
 	sttLanguageInheriting,
@@ -80,18 +92,59 @@ export function TranscribeSettingsSection({
 	hasStoredTranscriptionPrompt,
 }: TranscribeSettingsSectionProps) {
 	const { data: globalSettings } = useSettings();
+	const { data: providers } = useAvailableProviders();
+	const { choices } = useModelChoices("dictation");
 	const updateSTTLiveOutput = useUpdateSTTLiveOutput();
 	const updateSTTSimulatedStreaming = useUpdateSTTSimulatedStreaming();
+	const updateSTTInputMode = useUpdateSTTInputMode();
+	const globalInputMode = globalSettings?.stt_input_mode ?? "auto";
+	const effectiveInputMode = isDefaultScope
+		? globalInputMode
+		: (sttInputMode ?? globalInputMode);
 
 	const isNativeRealtime = isRealtimeSttModel(
 		effectiveSttProvider,
 		selectedSttModelForUi,
 	);
+	const profile = globalSettings?.rewrite_program_prompt_profiles?.find(
+		(profile) => profile.id === activeProfileId,
+	);
+	const source = (
+		profile?.model_selections?.transcription ??
+		globalSettings?.model_selections?.transcription
+	)?.source;
+	const legacyManaged =
+		globalSettings?.stt_use_managed_inference === true &&
+		choices.some(
+			(choice) =>
+				choice.ready &&
+				choice.selection.source === "managed" &&
+				choice.selection.provider_id === effectiveSttProvider &&
+				choice.selection.model_id === selectedSttModelForUi,
+		);
+	const byokInput = source ? source === "byok" : !legacyManaged;
 
-	const showSimulatedStreaming = !isNativeRealtime;
+	const showSimulatedStreaming =
+		byokInput && !isNativeRealtime && effectiveInputMode === "auto";
 	const simulatedStreamingEnabled =
 		globalSettings?.stt_simulated_streaming ?? false;
-	const showLiveOutput = isNativeRealtime || simulatedStreamingEnabled;
+	const showLiveOutput =
+		byokInput &&
+		effectiveInputMode === "auto" &&
+		(isNativeRealtime || simulatedStreamingEnabled);
+	const rewritingEnabled =
+		profile?.rewrite_llm_enabled ??
+		(isDefaultScope ? globalSettings?.rewrite_llm_enabled !== false : true);
+	const replacementEnabled =
+		profile?.quick_replace_enabled ??
+		globalSettings?.quick_replace_enabled ??
+		false;
+	const routingEnabled = profile?.router?.enabled === true;
+	const liveOutputAvailable =
+		providers?.live_text_insertion_supported === true &&
+		!rewritingEnabled &&
+		!replacementEnabled &&
+		!routingEnabled;
 
 	return (
 		<>
@@ -99,16 +152,45 @@ export function TranscribeSettingsSection({
 				<span className="settings-mini-header__text">Transcribe</span>
 			</div>
 
-			<div className="settings-row"><ActionModelPicker action="transcription" label="Transcription model" profileId={activeProfileId} /></div>
+			<div className="settings-row">
+				<ActionModelPicker
+					action="transcription"
+					label="Transcription model"
+					profileId={activeProfileId}
+				/>
+			</div>
+			<div className="settings-row">
+				<TranscriptionInputModeControl
+					value={isDefaultScope ? globalInputMode : sttInputMode}
+					inheritedMode={globalInputMode}
+					canInherit={!isDefaultScope}
+					realtimeOnly={isStreamingOnlySttModel(
+						effectiveSttProvider ?? "",
+						selectedSttModelForUi ?? "",
+					)}
+					disabled={updateSTTInputMode.isPending}
+					onChange={(mode) => {
+						if (isDefaultScope && mode) updateSTTInputMode.mutate(mode);
+						else onSttInputModeChange?.(mode);
+					}}
+				/>
+			</div>
 
 			{/* Simulated Streaming — only for non-realtime STT models */}
+			{!byokInput && (
+				<Text size="xs" c="dimmed">
+					Kolboo Managed uploads after recording. Realtime and simulated input
+					are available only for Your models in this phase.
+				</Text>
+			)}
 			{showSimulatedStreaming && (
 				<div className="settings-row">
 					<div>
 						<p className="settings-label">Simulated Streaming (experimental)</p>
 						<p className="settings-description">
 							Periodically transcribe audio chunks during recording for
-							progressive results
+							progressive results. This is not realtime input and can send
+							additional billable requests. Off by default.
 						</p>
 					</div>
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -135,12 +217,23 @@ export function TranscribeSettingsSection({
 							</span>
 						</p>
 						<p className="settings-description">
-							Paste each chunk as it arrives instead of waiting until the end
+							Paste committed chunks as they arrive. Advanced and opt-in; stops
+							if the focused target changes and never replaces text already
+							inserted.
 						</p>
+						{!liveOutputAvailable && (
+							<p className="settings-description">
+								Live output requires rewriting, Quick Replace and routing to be
+								off, and a desktop session that supports safe insertion.
+								Otherwise Kolboo previews the transcript and outputs once after
+								stopping.
+							</p>
+						)}
 					</div>
 					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
 						<Switch
 							checked={globalSettings?.stt_live_output ?? false}
+							disabled={!liveOutputAvailable || updateSTTLiveOutput.isPending}
 							onChange={(e) =>
 								updateSTTLiveOutput.mutate(e.currentTarget.checked)
 							}

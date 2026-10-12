@@ -1,18 +1,8 @@
-import {
-	Accordion,
-	Button,
-	Group,
-	Loader,
-	Select,
-	Text,
-} from "@mantine/core";
+import { Accordion, Button, Group, Loader, Select, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
-import {
-	EMBEDDING_MODELS,
-	type ModelOption,
-} from "../../lib/modelOptions";
+import { EMBEDDING_MODELS, type ModelOption } from "../../lib/modelOptions";
 import {
 	useAvailableProviders,
 	useDefaultSections,
@@ -49,7 +39,7 @@ import {
 } from "../../lib/queries";
 import {
 	DEFAULT_STT_LANGUAGE,
-	STT_LANGUAGE_OPTIONS,
+	sttLanguageOptionsForModel,
 } from "../../lib/sttLanguages";
 import {
 	type ActiveWindowOcrMode,
@@ -525,7 +515,8 @@ export function PromptSettings({
 					!effectiveSttModel?.includes("diarize")))) ||
 		isGroqWhisperModel ||
 		isAquavoiceStt ||
-		isWhisperServerStt;
+		isWhisperServerStt ||
+		effectiveSttProvider === "yiddishlabs";
 
 	const sttPromptDisabledReason = useMemo(() => {
 		if (!effectiveSttProvider) {
@@ -617,9 +608,6 @@ export function PromptSettings({
 		if (!sttProviderIsWhisperServer) return;
 		setWhisperServerModelDraft(selectedSttModelForUi ?? "");
 	}, [sttProviderIsWhisperServer, selectedSttModelForUi]);
-
-
-
 
 	// Thinking options (supports flags, dropdown options, utility functions)
 	const {
@@ -846,10 +834,6 @@ export function PromptSettings({
 		openDisableOverrideDialog,
 	});
 
-
-
-
-
 	const {
 		handleSttLanguageChange,
 		handleSttTimeoutChange,
@@ -886,8 +870,6 @@ export function PromptSettings({
 		saveProfileMetadata,
 		openDisableOverrideDialog,
 	});
-
-
 
 	if (isLoading) {
 		return (
@@ -1073,7 +1055,11 @@ export function PromptSettings({
 				opened={promptLabOpen}
 				onClose={closePromptLab}
 				profileId={activeProfileId}
-				presetId={promptLabApplyTarget?.type === "preset" ? promptLabApplyTarget.presetId : undefined}
+				presetId={
+					promptLabApplyTarget?.type === "preset"
+						? promptLabApplyTarget.presetId
+						: undefined
+				}
 				profileLabel={promptLabContextLabel || activeProfileLabel}
 				initialLlmProvider={effectiveLlmProvider}
 				initialLlmModel={effectiveLlmModel}
@@ -1143,16 +1129,23 @@ export function PromptSettings({
 				}}
 			/>
 
-
 			<TranscribeSettingsSection
 				activeProfileId={activeProfileId}
 				isDefaultScope={isDefaultScope}
 				inheritTooltip={INHERIT_TOOLTIP}
 				sttTimeoutInheriting={sttTimeoutInheriting}
+				sttInputMode={activeProfile?.stt_input_mode ?? null}
+				onSttInputModeChange={(mode) =>
+					saveProfileMetadata({ stt_input_mode: mode })
+				}
 				sttLanguageInheriting={sttLanguageInheriting}
 				effectiveSttProvider={effectiveSttProvider}
 				selectedSttModelForUi={selectedSttModelForUi}
-				sttLanguageOptions={STT_LANGUAGE_OPTIONS}
+				sttLanguageOptions={sttLanguageOptionsForModel(
+					effectiveSttProvider,
+					effectiveSttModel,
+					localProfileSttLanguage,
+				)}
 				localProfileSttLanguage={localProfileSttLanguage}
 				onSttLanguageChange={handleSttLanguageChange}
 				onDisableSttLanguageOverride={handleDisableSttLanguageOverride}

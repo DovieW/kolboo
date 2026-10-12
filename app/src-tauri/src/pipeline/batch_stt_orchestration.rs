@@ -13,6 +13,45 @@ use tokio_util::sync::CancellationToken;
 
 use super::{stt_flow, PipelineError, SharedPipeline};
 
+/// This comparison only prevents account/environment switches; it does not
+/// authenticate JWTs. The gateway still verifies every token and allowance.
+pub(super) fn same_managed_owner(previous: Option<&str>, current: Option<&str>) -> bool {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    fn identity(token: &str) -> Option<(String, String, Option<String>)> {
+        if token.len() > 65536 {
+            return None;
+        }
+        let payload = token.split('.').nth(1)?;
+        let data = URL_SAFE_NO_PAD.decode(payload).ok()?;
+        let claims: serde_json::Value = serde_json::from_slice(&data).ok()?;
+        let subject = claims.get("sub")?.as_str()?.trim();
+        let issuer = claims.get("iss")?.as_str()?.trim();
+        if subject.is_empty() || issuer.is_empty() {
+            return None;
+        }
+        let org = |value: &serde_json::Value| {
+            ["org_id", "organization_id"].iter().find_map(|name| {
+                value
+                    .get(name)?
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|org| !org.is_empty())
+                    .map(str::to_owned)
+            })
+        };
+        let organization = org(&claims).or_else(|| claims.get("app_metadata").and_then(org));
+        Some((subject.into(), issuer.into(), organization))
+    }
+    let (Some(previous), Some(current)) = (previous, current) else {
+        return false;
+    };
+    if previous.is_empty() || current.is_empty() {
+        return false;
+    }
+    previous == current
+        || identity(previous).is_some_and(|old| identity(current).is_some_and(|new| old == new))
+}
+
 pub(super) fn is_managed_auth_token_error(err: &PipelineError) -> bool {
     let message = match err {
         PipelineError::Stt(SttError::Api(msg)) => msg,
@@ -35,20 +74,23 @@ impl SharedPipeline {
         stt_provider_id: &str,
         stt_model: Option<String>,
         stt_language: Option<String>,
+        managed_token: Option<String>,
         wav_bytes: &[u8],
         retry_config: &crate::stt::RetryConfig,
         timeout: Duration,
         cancel_token: &CancellationToken,
         log_prefix: &str,
         stt_complete_reason: &str,
+        upload_context: Option<&crate::stt::SttUploadContext>,
     ) -> Result<stt_flow::SttResult, PipelineError> {
         let stt_result = stt_flow::run_stt_transcription(
-            stt_provider,
+            stt_provider.clone(),
             wav_bytes,
             retry_config,
             Some(timeout),
             cancel_token,
             log_prefix,
+            upload_context,
         )
         .await;
 
@@ -63,26 +105,23 @@ impl SharedPipeline {
                 if cancel_token.is_cancelled() {
                     return Err(PipelineError::Cancelled);
                 }
-                let managed_auth_recovered = {
-                    let managed_enabled = self
-                        .inner
-                        .lock()
-                        .map(|inner| inner.config.managed_inference_enabled)
-                        .unwrap_or(false);
-                    managed_enabled && is_managed_auth_token_error(&error)
-                };
+                let managed_auth_recovered =
+                    { managed_token.is_some() && is_managed_auth_token_error(&error) };
 
                 if managed_auth_recovered {
                     match self
                         .try_refresh_managed_auth_and_retry_stt(
+                            stt_provider,
                             stt_provider_id,
                             stt_model,
                             stt_language,
+                            managed_token.as_deref(),
                             wav_bytes,
                             retry_config,
                             timeout,
                             cancel_token,
                             log_prefix,
+                            upload_context,
                         )
                         .await
                     {
@@ -111,14 +150,17 @@ impl SharedPipeline {
     // rather than hidden behind another broad state bag.
     async fn try_refresh_managed_auth_and_retry_stt(
         &self,
+        original_provider: Arc<dyn SttProvider>,
         stt_provider_id: &str,
         stt_model: Option<String>,
         stt_language: Option<String>,
+        original_token: Option<&str>,
         wav_bytes: &[u8],
         retry_config: &crate::stt::RetryConfig,
         timeout: Duration,
         cancel_token: &CancellationToken,
         log_prefix: &str,
+        upload_context: Option<&crate::stt::SttUploadContext>,
     ) -> Result<stt_flow::SttResult, PipelineError> {
         let app_handle = self
             .app_handle
@@ -146,14 +188,29 @@ impl SharedPipeline {
             })?;
 
         let refreshed_provider = {
-            let mut inner = self
+            let inner = self
                 .inner
                 .lock()
                 .map_err(|e| PipelineError::Lock(e.to_string()))?;
             if cancel_token.is_cancelled() {
                 return Err(PipelineError::Cancelled);
             }
-            inner.get_or_create_stt_provider(stt_provider_id, stt_model, stt_language)?
+            if !same_managed_owner(
+                original_token,
+                inner.config.managed_inference_access_token.as_deref(),
+            ) {
+                return Err(PipelineError::Config("The managed account or organization changed; the recording is retained for an explicit retry".into()));
+            }
+            super::stt_provider_resolver::managed_transport_active(
+                &inner,
+                stt_provider_id,
+                stt_model.as_deref(),
+                Some(crate::model_selection::ModelSource::Managed),
+            )?;
+            let _ = stt_language; // The original adapter owns the frozen hint.
+            original_provider.with_renewed_managed_token(
+                inner.config.managed_inference_access_token.as_deref().unwrap_or_default()
+            ).ok_or_else(|| PipelineError::Config("The original Managed adapter could not renew its credentials; the recording is retained".into()))?
         };
 
         stt_flow::run_stt_transcription(
@@ -163,6 +220,7 @@ impl SharedPipeline {
             Some(timeout),
             cancel_token,
             &format!("{} (post-refresh)", log_prefix),
+            upload_context,
         )
         .await
     }
@@ -171,6 +229,47 @@ impl SharedPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_renewal_cannot_change_account_issuer_or_organization() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let token = |sub, issuer, org, iat| {
+            format!("header.{}.signature", URL_SAFE_NO_PAD.encode(serde_json::to_vec(&serde_json::json!({"sub":sub,"iss":issuer,"app_metadata":{"org_id":org},"iat":iat})).unwrap()))
+        };
+        let old = token("u", "issuer", "org", 1);
+        assert!(same_managed_owner(Some(&old), Some(&old)));
+        assert!(same_managed_owner(
+            Some(&old),
+            Some(&token("u", "issuer", "org", 2))
+        ));
+        for other in [
+            token("other", "issuer", "org", 2),
+            token("u", "other", "org", 2),
+            token("u", "issuer", "other", 2),
+            token("", "issuer", "org", 2),
+            token("u", "", "org", 2),
+            "invalid".into(),
+            "header.%%%%.sig".into(),
+            format!("h.{}.s", URL_SAFE_NO_PAD.encode("not JSON")),
+            "x".repeat(65537),
+        ] {
+            assert!(!same_managed_owner(Some(&old), Some(&other)));
+        }
+        for (old, new) in [
+            (None, None),
+            (Some(""), Some("")),
+            (Some("x"), None),
+            (None, Some("x")),
+            (Some("x"), Some("")),
+        ] {
+            assert!(!same_managed_owner(old, new));
+        }
+        let old = token("u", "issuer", "", 1);
+        assert!(same_managed_owner(
+            Some(&old),
+            Some(&token("u", "issuer", "", 2))
+        ));
+    }
 
     #[test]
     fn managed_auth_error_detection_matches_gateway_token_failures() {

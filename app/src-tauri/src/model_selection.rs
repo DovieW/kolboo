@@ -56,6 +56,7 @@ pub struct LoadedModelSettings {
     #[serde(rename = "model_selections")]
     pub selections: ModelSelections,
     pub profiles: Vec<crate::settings::RewriteProgramPromptProfile>,
+    pub stt_input_mode: crate::settings::SttInputMode,
     pub error: Option<String>,
 }
 
@@ -161,7 +162,12 @@ pub fn load_global_selections(
                 })
         })
         .unwrap_or_else(|| Ok(Vec::new()));
+    let mut stt_input_mode = crate::settings::SttInputMode::default();
     match parsed.and_then(|mut profiles| {
+        if let Some(value) = get("stt_input_mode").filter(|value| !value.is_null()) {
+            stt_input_mode = serde_json::from_value(value)
+                .map_err(|_| "The saved transcription input mode is invalid".to_string())?;
+        }
         for profile in &mut profiles {
             for action in ModelAction::ALL {
                 if let Some(value) = get(&scoped_selection_key(&profile.id, None, action)) {
@@ -221,6 +227,7 @@ pub fn load_global_selections(
         Ok(profiles) => LoadedModelSettings {
             selections,
             profiles,
+            stt_input_mode,
             error: None,
         },
         Err(error) => LoadedModelSettings {

@@ -11,6 +11,9 @@ mod fireworks;
 mod groq;
 mod http;
 pub(crate) mod language;
+#[cfg(test)]
+#[path = "tests/managed_selection.rs"]
+mod managed_selection_tests;
 mod openai;
 mod openai_compat;
 mod retry;
@@ -22,6 +25,7 @@ pub(crate) mod streaming;
 pub(crate) mod streaming_test_support;
 pub(crate) mod websocket_transport;
 mod whisper_server;
+pub(crate) mod yiddishlabs;
 
 #[cfg(feature = "local-whisper")]
 mod whisper;
@@ -39,6 +43,7 @@ pub use retry::{with_retry_report, RetryConfig, RetryTelemetry};
 pub use speechmatics::SpeechmaticsSttProvider;
 pub use streaming::StreamingSttSession;
 pub use whisper_server::WhisperServerSttProvider;
+pub use yiddishlabs::YiddishLabsSttProvider;
 
 #[cfg(feature = "local-whisper")]
 pub use whisper::{LocalWhisperConfig, LocalWhisperProvider, WhisperModel};

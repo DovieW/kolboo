@@ -119,11 +119,20 @@ impl QuickAskProfileConfig {
         let action = crate::model_selection::ModelAction::QuickAsk;
         let selection = crate::model_selection::inherit_model_selection(
             default_profile.and_then(|p| p.model_selections.get(&action)),
-            &[(
-                active_profile.and_then(|p| p.model_selections.get(&action)),
-                active_profile.and_then(|p| p.quick_ask_provider.as_deref()),
-                active_profile.and_then(|p| p.quick_ask_model.as_deref()),
-            )],
+            &[
+                (
+                    active_profile.and_then(|p| p.model_selections.get(&action)),
+                    active_profile.and_then(|p| p.quick_ask_provider.as_deref()),
+                    active_profile.and_then(|p| p.quick_ask_model.as_deref()),
+                ),
+                (
+                    active_profile
+                        .and_then(crate::pipeline::select_effective_preset)
+                        .and_then(|p| p.model_selections.get(&action)),
+                    None,
+                    None,
+                ),
+            ],
         );
         let include_clipboard_context = active_profile
             .and_then(|p| p.quick_ask_include_clipboard_context)
@@ -281,6 +290,13 @@ impl QuickReplaceConfig {
                     active_profile.and_then(|p| p.model_selections.get(&action)),
                     active_profile.and_then(|p| p.quick_replace_provider.as_deref()),
                     active_profile.and_then(|p| p.quick_replace_model.as_deref()),
+                ),
+                (
+                    active_profile
+                        .and_then(crate::pipeline::select_effective_preset)
+                        .and_then(|p| p.model_selections.get(&action)),
+                    None,
+                    None,
                 ),
             ],
         );
@@ -461,6 +477,40 @@ pub(crate) fn is_selection_probe_sentinel(text: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn active_preset_routes_quick_actions_without_changing_rewrite_or_payment_source() {
+        use crate::model_selection::ModelSource;
+        let stored = serde_json::from_value(serde_json::json!({
+            "id":"p", "name":"Profile", "active_preset_id":"q",
+            "presets":[{"id":"q","name":"Preset","model_selections":{
+                "quick_ask":{"source":"byok","provider_id":"ollama","model_id":"ask-id"},
+                "quick_replace":{"source":"managed","provider_id":"groq","model_id":"replace-id"}
+            }}]
+        }))
+        .unwrap();
+        let profiles = crate::llm::profile_conversion::build_program_prompt_profiles(
+            vec![stored],
+            &Default::default(),
+        );
+        let active = &profiles[0];
+        let ask = QuickAskEffectiveConfig::resolve(
+            &QuickAskProfileConfig::from_profiles(Some(active), None),
+            Default::default(),
+        );
+        assert_eq!(
+            (ask.provider.as_str(), ask.model.as_deref()),
+            ("ollama", Some("ask-id"))
+        );
+        assert_eq!(ask.selection.unwrap().source, ModelSource::Byok);
+        let replace =
+            QuickReplaceConfig::resolve(Some(active), None, &Default::default(), false, true);
+        assert_eq!(
+            (replace.provider.as_deref(), replace.model.as_deref()),
+            (Some("groq"), Some("replace-id"))
+        );
+        assert_eq!(replace.selection.unwrap().source, ModelSource::Managed);
+    }
+
     fn probe(
         selection_text: Option<&str>,
         surrounding_text: Option<&str>,
@@ -489,6 +539,7 @@ mod tests {
             stt_provider: None,
             stt_model: None,
             stt_language: None,
+            stt_input_mode: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,

@@ -5,9 +5,53 @@ import {
 	normalizeSttLanguageOverride,
 	STT_LANGUAGE_OPTIONS,
 	STT_LANGUAGE_VALUES,
+	sttLanguageOptionsForModel,
 } from "./sttLanguages";
 
 describe("language hints", () => {
+	it("explains Speechmatics Auto limitations without changing an inherited or saved hint", () => {
+		for (const saved of [undefined, "auto", "lk"]) {
+			expect(sttLanguageOptionsForModel("speechmatics", "enhanced", saved))
+				.toContainEqual({ value: "auto", label: "Auto-detect unavailable — choose a language", disabled: true });
+		}
+		expect(sttLanguageOptionsForModel("speechmatics", "standard", "he"))
+			.toContainEqual({ value: "he", label: "Hebrew" });
+	});
+	it("offers only documented YiddishLabs hints without discarding an existing incompatible hint", () => {
+		expect(
+			sttLanguageOptionsForModel("yiddishlabs", "yiddishlabs-3-turbo").map(
+				(option) => option.value,
+			),
+		).toEqual(["auto", "en", "yi", "he"]);
+		expect(
+			sttLanguageOptionsForModel("yiddishlabs", "yiddishlabs-standard").map(
+				(option) => option.value,
+			),
+		).toEqual(["auto", "en", "yi", "he", "lk"]);
+		expect(
+			sttLanguageOptionsForModel().some((option) => option.value === "lk"),
+		).toBe(false);
+		expect(
+			sttLanguageOptionsForModel("openai", null, "lk").at(-1),
+		).toMatchObject({ value: "lk", disabled: true });
+		expect(
+			sttLanguageOptionsForModel("yiddishlabs", null, "es").at(-1),
+		).toEqual({
+			value: "es",
+			label: "Spanish (not supported by this model)",
+			disabled: true,
+		});
+		expect(
+			sttLanguageOptionsForModel("yiddishlabs", null, "unknown").at(-1),
+		).toEqual({
+			value: "unknown",
+			label: "unknown (not supported by this model)",
+			disabled: true,
+		});
+		expect(sttLanguageOptionsForModel("yiddishlabs", null, "yi")).toHaveLength(
+			4,
+		);
+	});
 	it("defaults missing or invalid hints to auto without changing explicit hints", () => {
 		expect(DEFAULT_STT_LANGUAGE).toBe("auto");
 		for (const input of [undefined, null, 2, "", "not-a-language"])

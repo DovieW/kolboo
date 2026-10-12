@@ -1,5 +1,12 @@
 import { DEFAULT_SETTINGS_VALUES } from "../settingsDefaults";
-import type { AudioCue, PlayingAudioHandling } from "../types";
+import type { AudioCue, PlayingAudioHandling, SttInputMode } from "../types";
+
+/** Null/missing inherits; malformed values must not implicitly enable realtime. */
+export function normalizeSttInputMode(value: unknown): SttInputMode | null {
+	if (value == null) return null;
+	if (value === "auto" || value === "after_recording") return value;
+	throw new Error("The saved transcription input mode is invalid");
+}
 
 export function normalizePlayingAudioHandling(
 	value: unknown,

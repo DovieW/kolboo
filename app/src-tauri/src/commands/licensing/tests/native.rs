@@ -895,6 +895,7 @@ pub(crate) fn email_code_session_lifecycle(
             Some(json!(false))
         );
         assert!(task.await.unwrap()[2].starts_with("GET /v1/managed/models "));
+        owned_stt_refresh_preserves_gateway_and_identity(app, &environment, &pro).await;
         let old_session = load_session_material(app).unwrap();
         // Wallet errors must reject the refresh safely without destroying the
         // previous token pair or granting unverified account access.
@@ -1068,6 +1069,135 @@ pub(crate) fn email_code_session_lifecycle(
         repaired.save().unwrap();
         drop(removed);
     });
+}
+
+async fn owned_stt_refresh_preserves_gateway_and_identity(
+    app: &AppHandle,
+    environment: &Environment,
+    license: &LicenseState,
+) {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use wiremock::{
+        matchers::{header, method},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let token = |subject: &str, issued: u64| {
+        format!(
+            "header.{}.signature",
+            URL_SAFE_NO_PAD
+                .encode(json!({"sub":subject,"iss":"synthetic-issuer","iat":issued}).to_string())
+        )
+    };
+    let previous_session = load_session_material(app).unwrap();
+    let pipeline = app.state::<crate::pipeline::SharedPipeline>();
+    let original_config = pipeline.config();
+    struct CannotRenew(crate::stt::GroqSttProvider);
+    #[async_trait::async_trait]
+    impl crate::stt::SttProvider for CannotRenew {
+        fn name(&self) -> &'static str {
+            "groq"
+        }
+        async fn transcribe(
+            &self,
+            audio: &[u8],
+            format: &crate::stt::AudioFormat,
+        ) -> Result<String, crate::stt::SttError> {
+            crate::stt::SttProvider::transcribe(&self.0, audio, format).await
+        }
+    }
+    for scenario in [
+        "renew",
+        "different-owner",
+        "unavailable",
+        "unsupported-renewal",
+    ] {
+        let subject = if scenario == "different-owner" {
+            "different-user"
+        } else {
+            "synthetic-user"
+        };
+        let original_token = token("synthetic-user", 1);
+        let renewed_token = token(subject, 2);
+        persist_session_material(
+            app,
+            &SessionMaterial {
+                access_token: original_token.clone(),
+                refresh_token: "synthetic-refresh".into(),
+            },
+        )
+        .unwrap();
+        let gateway = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header("authorization", format!("Bearer {original_token}")))
+            .respond_with(
+                ResponseTemplate::new(401).set_body_json(json!({"code":"auth_invalid_token"})),
+            )
+            .expect(1)
+            .mount(&gateway)
+            .await;
+        Mock::given(method("POST"))
+            .and(header("authorization", format!("Bearer {renewed_token}")))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"text":"synthetic renewed transcript"})),
+            )
+            .expect(u64::from(scenario == "renew"))
+            .mount(&gateway)
+            .await;
+        let auth = json!({"access_token":renewed_token,"refresh_token":"synthetic-renewed-refresh","user":{"id":subject}}).to_string();
+        let mut current_license = license.clone();
+        if scenario == "unavailable" {
+            current_license.tier = LicenseTier::Community;
+        }
+        let (base, responses) = server(vec![
+            (200, auth),
+            (200, serde_json::to_string(&current_license).unwrap()),
+        ])
+        .await;
+        environment.configure(&base);
+        let adapter = crate::stt::GroqSttProvider::with_client(
+            reqwest::Client::new(),
+            original_token.clone(),
+            Some("whisper-large-v3-turbo".into()),
+            Some("he".into()),
+            None,
+        )
+        .with_managed_gateway(gateway.uri());
+        let adapter: std::sync::Arc<dyn crate::stt::SttProvider> =
+            if scenario == "unsupported-renewal" {
+                std::sync::Arc::new(CannotRenew(adapter))
+            } else {
+                std::sync::Arc::new(adapter)
+            };
+        let result =
+            crate::pipeline::native_managed_stt_refresh(app, adapter, original_token).await;
+        if scenario == "renew" {
+            assert_eq!(result.unwrap(), "synthetic renewed transcript");
+            assert_ne!(
+                pipeline.config().managed_inference_gateway_url.as_deref(),
+                Some(gateway.uri().as_str()),
+                "settings now point at another gateway, but the recording's adapter stayed pinned"
+            );
+            let requests = gateway.received_requests().await.unwrap();
+            assert_eq!(requests.len(), 2);
+            assert_eq!(requests[1].headers["x-kolboo-model-provider"], "groq");
+            let body = String::from_utf8_lossy(&requests[1].body);
+            assert!(body.contains("whisper-large-v3-turbo"));
+            assert!(body.contains("he"));
+        } else {
+            let expected = match scenario {
+                "different-owner" => "account or organization changed",
+                "unavailable" => "Managed transcription model is unavailable",
+                _ => "adapter could not renew",
+            };
+            assert!(result.unwrap_err().to_string().contains(expected));
+            assert_eq!(gateway.received_requests().await.unwrap().len(), 1);
+        }
+        assert_eq!(responses.await.unwrap().len(), 2);
+        pipeline.force_reset();
+    }
+    persist_session_material(app, &previous_session).unwrap();
+    pipeline.update_config(original_config).unwrap();
 }
 
 fn catalog_for_test() -> String {

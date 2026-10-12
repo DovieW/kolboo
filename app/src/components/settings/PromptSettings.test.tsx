@@ -12,6 +12,7 @@ const fixtures = vi.hoisted(() => ({
 	providers: { stt: [], llm: [] },
 	models: {},
 	empty: [],
+	profileUpdate: vi.fn(),
 }));
 vi.mock("../../lib/queries", async (original) => ({
 	...(await original<typeof import("../../lib/queries")>()),
@@ -24,6 +25,10 @@ vi.mock("../../lib/queries", async (original) => ({
 	useManagedModels: () => ({ data: fixtures.empty }),
 	useFireworksModels: () => ({ data: fixtures.empty }),
 	useOllamaModels: () => ({ data: fixtures.empty }),
+	useUpdateRewriteProgramPromptProfiles: () => ({
+		mutate: fixtures.profileUpdate,
+		isPending: false,
+	}),
 }));
 vi.mock("../../lib/queries/settings", async (original) => ({
 	...(await original<typeof import("../../lib/queries/settings")>()),
@@ -33,7 +38,7 @@ vi.mock("../../lib/queries/modelChoices", () => ({
 	useModelChoices: () => ({ choices: [], loading: false, error: false }),
 }));
 
-it("wires profile controls to the shared picker without exposing old source switches", async () => {
+it.each(["configured", "missing"])("wires profile controls with %s defaults without exposing old source switches", async (defaults) => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	Object.defineProperty(document, "fonts", {
 		configurable: true,
@@ -46,8 +51,7 @@ it("wires profile controls to the shared picker without exposing old source swit
 		defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 	});
 	fixtures.settings = {
-		stt_provider: "groq",
-		stt_model: "whisper-large-v3-turbo",
+        ...(defaults === "configured" ? { stt_provider: "groq", stt_model: "whisper-large-v3-turbo" } : {}),
 		llm_provider: "ollama",
 		llm_model: "saved-model",
 		rewrite_llm_enabled: false,
@@ -83,6 +87,30 @@ it("wires profile controls to the shared picker without exposing old source swit
 		expect(host.textContent).toContain("Transcription model");
 		expect(host.textContent).toContain("Rewrite model");
 		expect(host.textContent).toContain("Quick Ask model");
+		const chooseInputMode = async (
+			container: ParentNode,
+			current: string,
+			next: string,
+		) => {
+			const input = [
+				...container.querySelectorAll<HTMLInputElement>("input"),
+			].find((input) => input.value === current);
+			expect(input).toBeDefined();
+			await act(async () => input?.click());
+			const list = document.getElementById(
+				input?.getAttribute("aria-controls") ?? "",
+			);
+			expect(list).not.toBeNull();
+			const option = [
+				...list!.querySelectorAll<HTMLElement>('[role="option"]'),
+			].find((option) => option.textContent === next);
+			expect(option).toBeDefined();
+			await act(async () => option?.click());
+		};
+		await chooseInputMode(host, "Inherit (Auto)", "After recording");
+		expect(fixtures.profileUpdate).toHaveBeenLastCalledWith([
+			expect.objectContaining({ id: "p", stt_input_mode: "after_recording" }),
+		]);
 		const presets = [
 			...host.querySelectorAll<HTMLButtonElement>("button"),
 		].find(
@@ -108,6 +136,20 @@ it("wires profile controls to the shared picker without exposing old source swit
 		].find((option) => option.textContent === "Preset");
 		expect(option).toBeDefined();
 		await act(async () => option?.click());
+		const dialog = document.querySelector('[role="dialog"]');
+		expect(dialog).not.toBeNull();
+		await chooseInputMode(dialog!, "Inherit (Auto)", "After recording");
+		expect(fixtures.profileUpdate).toHaveBeenLastCalledWith([
+			expect.objectContaining({
+				id: "p",
+				presets: [
+					expect.objectContaining({
+						id: "q",
+						stt_input_mode: "after_recording",
+					}),
+				],
+			}),
+		]);
 		const lab = [
 			...document.querySelectorAll<HTMLButtonElement>("button"),
 		].find((button) => button.textContent === "Prompt Lab");

@@ -40,6 +40,7 @@ export interface AudioSettingsTestWavs {
  * Response listing available providers
  */
 export interface AvailableProvidersResponse {
+  live_text_insertion_supported: boolean;
   llm: ProviderInfo[];
   ocr: OcrProviderStatus;
   stt: ProviderInfo[];
@@ -51,6 +52,9 @@ export interface ProviderInfo {
   configured?: boolean | null;
   is_local: boolean;
   label: string;
+  model_configured?: {
+    [k: string]: boolean | undefined;
+  } | null;
   model_names?: {
     [k: string]: string | undefined;
   } | null;
@@ -554,12 +558,14 @@ export interface SttModelPricing {
 }
 
 // From: model-settings.schema.json
+export type SttInputMode = "auto" | "after_recording";
 export interface LoadedModelSettings {
   error?: string | null;
   model_selections: {
     [k: string]: ModelSelection | undefined;
   };
   profiles: RewriteProgramPromptProfile[];
+  stt_input_mode: SttInputMode;
 }
 export interface RewriteProgramPromptProfile {
   /**
@@ -639,6 +645,7 @@ export interface RewriteProgramPromptProfile {
    */
   router?: IntentRouterSettings | null;
   sound_enabled?: boolean | null;
+  stt_input_mode?: SttInputMode | null;
   stt_language?: string | null;
   stt_model?: string | null;
   stt_provider?: string | null;
@@ -683,6 +690,7 @@ export interface RewritePreset {
    */
   routing_hints?: string[];
   sound_enabled?: boolean | null;
+  stt_input_mode?: SttInputMode | null;
   stt_language?: string | null;
   stt_model?: string | null;
   stt_provider?: string | null;
@@ -1224,6 +1232,23 @@ export interface RouterPresetScore {
 export interface MapOf_AnyValue {
   [k: string]: any | undefined;
 }
+
+// From: stt-input-mode.schema.json
+/**
+ * Input transport is independent of preview and text-insertion preferences.
+ */
+
+// From: stt-partial-transcript.schema.json
+export type SttPartialTranscriptPayload =
+  | {
+      kind: "started";
+      session_epoch: number;
+    }
+  | {
+      kind: "partial";
+      session_epoch: number;
+      text: string;
+    };
 
 // From: system-event.schema.json
 export interface SystemEvent {

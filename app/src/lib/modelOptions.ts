@@ -18,7 +18,7 @@ export function configuredProviderModelOptions(
 	provider:
 		| {
 				models?: string[] | null;
-				model_names?: Record<string, string> | null;
+				model_names?: Record<string, string | undefined> | null;
 		  }
 		| undefined,
 ): ModelOption[] | undefined {
@@ -177,6 +177,10 @@ export const EMBEDDING_MODELS: Record<string, ModelOption[]> = {
 // This is intentionally shared between Settings pickers and History filters so
 // they always list the same models.
 export const STT_MODELS: Record<string, ModelOption[]> = {
+	yiddishlabs: [
+		{ value: "yiddishlabs-3-turbo", label: "Flash Turbo" },
+		{ value: "yiddishlabs-standard", label: "Standard" },
+	],
 	aquavoice: [
 		{ value: "avalon-v1.5", label: "Avalon v1.5" },
 		{ value: "avalon-v1-en", label: "Avalon v1 (legacy)" },
@@ -376,8 +380,16 @@ const REALTIME_STT_MODELS = new Set([
 ]);
 
 /** These protocols cannot perform a batch request for the same selected model. */
-export function isStreamingOnlySttModel(provider: string, model: string): boolean {
-	return (provider === "openai" || provider === "assemblyai" || provider === "fireworks") && isRealtimeSttModel(provider, model);
+export function isStreamingOnlySttModel(
+	provider: string,
+	model: string,
+): boolean {
+	return (
+		(provider === "openai" ||
+			provider === "assemblyai" ||
+			provider === "fireworks") &&
+		isRealtimeSttModel(provider, model)
+	);
 }
 
 export function listAllSttModelKeys(): Array<{ key: string; label: string }> {

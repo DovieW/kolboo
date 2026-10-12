@@ -18,11 +18,11 @@ import {
 import { useModelChoices } from "../lib/queries/modelChoices";
 import {
 	normalizeSttLanguage,
-	STT_LANGUAGE_OPTIONS,
+	sttLanguageOptionsForModel,
 } from "../lib/sttLanguages";
 import type { RecordingPreferences } from "../lib/tauri/types";
-import { ModelPicker } from "./ModelPicker";
 import { useModelNavigation } from "./ModelNavigation";
+import { ModelPicker } from "./ModelPicker";
 
 export function MeetingModelDialog({
 	preferences,
@@ -37,14 +37,23 @@ export function MeetingModelDialog({
 	saving: boolean;
 	error?: string | null;
 }) {
-	const { choices, setupProviders, loading, failedSources, managedMessage, retry } = useModelChoices("meeting");
+	const {
+		choices,
+		setupProviders,
+		loading,
+		failedSources,
+		managedMessage,
+		retry,
+	} = useModelChoices("meeting");
 	const navigation = useModelNavigation();
 	const [selection, setSelection] = useState(
 		recordingModelSelection(preferences.meeting_model),
 	);
 	const [language, setLanguage] = useState(preferences.language_hint ?? "auto");
 	const selectionKey = selection ? modelSelectionKey(selection) : "";
-	const chosen = choices.find(choice => modelSelectionKey(choice.selection) === selectionKey);
+	const chosen = choices.find(
+		(choice) => modelSelectionKey(choice.selection) === selectionKey,
+	);
 	return (
 		<Modal
 			opened
@@ -72,7 +81,9 @@ export function MeetingModelDialog({
 					<Alert color="orange" title="Some models couldn't load">
 						<Text size="sm">
 							Couldn't load {failedSources.map(({ label }) => label).join(", ")}
-							.{choices.some(choice => choice.ready) && " You can still choose an available model."}
+							.
+							{choices.some((choice) => choice.ready) &&
+								" You can still choose an available model."}
 						</Text>
 						<Button
 							variant="subtle"
@@ -104,7 +115,11 @@ export function MeetingModelDialog({
 					label="Language hint"
 					aria-label="Meeting language hint"
 					description="Auto-detect unless you choose a hint. Saved with the recording for retries."
-					data={STT_LANGUAGE_OPTIONS}
+					data={sttLanguageOptionsForModel(
+						selection?.provider_id,
+						selection?.model_id,
+						language,
+					)}
 					value={language}
 					allowDeselect={false}
 					disabled={saving}
@@ -121,12 +136,15 @@ export function MeetingModelDialog({
 						refresh your managed access.
 					</Text>
 				)}
-				{selection && !chosen?.ready && !loading && failedSources.length === 0 && (
-					<Alert color="orange">
-						Your saved model is no longer available. Choose another model to
-						change this setting; your saved choice has not been replaced.
-					</Alert>
-				)}
+				{selection &&
+					!chosen?.ready &&
+					!loading &&
+					failedSources.length === 0 && (
+						<Alert color="orange">
+							Your saved model is no longer available. Choose another model to
+							change this setting; your saved choice has not been replaced.
+						</Alert>
+					)}
 				{error && (
 					<Alert color="red" title="Could not save model">
 						{error}
@@ -140,11 +158,13 @@ export function MeetingModelDialog({
 						disabled={!chosen?.ready}
 						loading={saving}
 						onClick={() => {
-							submitModelChoice(choices, selectionKey, saving, model => onSave({
+							submitModelChoice(choices, selectionKey, saving, (model) =>
+								onSave({
 									...preferences,
 									language_hint: language,
 									meeting_model: recordingModelFromSelection(model),
-								}));
+								}),
+							);
 						}}
 					>
 						Save

@@ -18,6 +18,7 @@ use crate::stats;
 
 /// Inputs needed to decide and perform final normal dictation output.
 pub(crate) struct NormalDictationOutputRequest<'a> {
+    pub(crate) session: crate::text::inject::OutputSession,
     pub(crate) output_value: &'a str,
     pub(crate) output_intent: crate::core::output_settings::ResolvedOutputIntent,
     pub(crate) live_output_completed: bool,
@@ -96,6 +97,7 @@ pub(crate) async fn execute_normal_dictation_output(
                 request.output_value,
                 request.output_intent,
                 request.request_id,
+                &request.session,
             )
             .await;
 
@@ -198,7 +200,11 @@ async fn output_text_for_platform(
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
     request_id: Option<&str>,
+    session: &crate::text::inject::OutputSession,
 ) -> Option<String> {
+    if let Err(error) = session.ensure_current() {
+        return Some(error);
+    }
     if matches!(output_intent.mode(), commands::text::OutputMode::Paste) {
         let snapshot = app
             .state::<crate::state::AppState>()
@@ -207,15 +213,27 @@ async fn output_text_for_platform(
             .ok()
             .and_then(|mut g| g.take());
 
-        if let Err(e) = crate::windows_uia::insert::insert_text_with_snapshot(
-            app,
-            output_value,
-            snapshot,
-            true,
-            true,
-            output_intent.smart_paste_protection(),
-            output_intent.paste_shortcut(),
-        ) {
+        let app_worker = app.clone();
+        let text = output_value.to_owned();
+        let owner = session.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::windows_uia::insert::insert_text_with_snapshot(
+                &app_worker,
+                crate::windows_uia::insert::WindowsInsertRequest {
+                    text: &text,
+                    initial_snapshot: snapshot,
+                    allow_paste: true,
+                    allow_typing: true,
+                    smart_paste_protection: output_intent.smart_paste_protection(),
+                    paste_shortcut: output_intent.paste_shortcut(),
+                    owner: Some(&owner),
+                },
+            )
+        })
+        .await
+        .map_err(|_| "Text output worker failed".to_string())
+        .and_then(|result| result);
+        if let Err(e) = result {
             log::error!("Failed to output transcript (UIA ladder): {}", e);
             record_output_failure(app, request_id, &e);
             return Some(e);
@@ -242,6 +260,9 @@ async fn output_text_for_platform(
     };
 
     if !safe_to_insert {
+        if let Err(error) = session.ensure_current() {
+            return Some(error);
+        }
         if let Err(e) = crate::text::inject::copy_to_clipboard_and_notify(app, output_value) {
             // Preserve current behavior: safe-fallback failure is logged, but it does not add the
             // request-log warning used by normal output-mode failures.
@@ -250,14 +271,14 @@ async fn output_text_for_platform(
         return None;
     }
 
-    if let Err(e) = crate::text::inject::output_text_with_app(
-        app,
-        output_value,
-        output_intent.mode(),
-        output_intent.hit_enter(),
-        !output_intent.clipboard_privacy_mode(),
-        output_intent.paste_shortcut(),
-    ) {
+    if let Err(e) = crate::text::inject::output_text_for_session_async(
+        app.clone(),
+        output_value.to_owned(),
+        output_intent,
+        session,
+    )
+    .await
+    {
         log::error!("Failed to output transcript: {}", e);
         record_output_failure(app, request_id, &e);
         return Some(e);
@@ -272,14 +293,13 @@ async fn output_text_for_platform(
     output_value: &str,
     output_intent: crate::core::output_settings::ResolvedOutputIntent,
     request_id: Option<&str>,
+    session: &crate::text::inject::OutputSession,
 ) -> Option<String> {
-    if let Err(e) = crate::text::inject::output_text_with_app_async(
+    if let Err(e) = crate::text::inject::output_text_for_session_async(
         app.clone(),
         output_value.to_string(),
-        output_intent.mode(),
-        output_intent.hit_enter(),
-        !output_intent.clipboard_privacy_mode(),
-        output_intent.paste_shortcut(),
+        output_intent,
+        session,
     )
     .await
     {

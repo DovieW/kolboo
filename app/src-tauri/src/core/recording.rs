@@ -222,12 +222,9 @@ pub(crate) fn start_recording(
         // NOTE: We use `tauri::async_runtime::spawn` instead of `tokio::spawn`
         // because this function is called from the global-shortcut handler which
         // runs on the main OS thread — outside the Tokio runtime context.
-        let app_handle = app.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Some(pipeline) = app_handle.try_state::<pipeline::SharedPipeline>() {
-                pipeline.try_start_concurrent_streaming(&app_handle).await;
-            }
-        });
+        if let Some(pipeline) = app.try_state::<pipeline::SharedPipeline>() {
+            pipeline.start_concurrent_streaming(app);
+        }
     }
 
     // While recording/transcribing, allow Escape to cancel without triggering transcription.

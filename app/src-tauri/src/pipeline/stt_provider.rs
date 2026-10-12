@@ -76,7 +76,12 @@ pub(crate) fn create_cloud_stt_provider(
 
     let provider: Arc<dyn SttProvider> =
         adapter.build(stt_cloud_adapters::CloudSttProviderBuildContext {
-            client,
+            client: if provider_id == "yiddishlabs" {
+                crate::network::build_custom_provider_client(&proxy_settings)
+                    .map_err(PipelineError::Config)?
+            } else {
+                client
+            },
             model,
             language,
             api_key,

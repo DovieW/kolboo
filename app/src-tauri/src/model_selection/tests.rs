@@ -2,6 +2,41 @@ use super::*;
 use serde_json::json;
 
 #[test]
+fn input_mode_defaults_preserve_inheritance_and_invalid_modes_fail_closed() {
+    use crate::settings::SttInputMode;
+    for (raw, expected) in [
+        (None, SttInputMode::Auto),
+        (Some(json!(null)), SttInputMode::Auto),
+        (Some(json!("auto")), SttInputMode::Auto),
+        (Some(json!("after_recording")), SttInputMode::AfterRecording),
+    ] {
+        let loaded =
+            load_global_selections(&|key| (key == "stt_input_mode").then(|| raw.clone()).flatten());
+        assert!(loaded.error.is_none());
+        assert_eq!(loaded.stt_input_mode, expected);
+    }
+    for raw in [json!("unknown"), json!(false), json!({})] {
+        let loaded = load_global_selections(&|key| (key == "stt_input_mode").then(|| raw.clone()));
+        assert!(loaded.error.is_some());
+        assert!(loaded.selections.is_empty());
+    }
+    let loaded = load_global_selections(&|key| {
+        (key=="rewrite_program_prompt_profiles").then(||json!([
+        {"id":"p","name":"p","stt_input_mode":"after_recording","presets":[{"id":"q","name":"q","stt_input_mode":"auto"},{"id":"inherit","name":"inherit","stt_input_mode":null}]}
+    ]))
+    });
+    assert_eq!(
+        loaded.profiles[0].stt_input_mode,
+        Some(SttInputMode::AfterRecording)
+    );
+    assert_eq!(
+        loaded.profiles[0].presets[0].stt_input_mode,
+        Some(SttInputMode::Auto)
+    );
+    assert_eq!(loaded.profiles[0].presets[1].stt_input_mode, None);
+}
+
+#[test]
 fn enforced_policy_rejects_conflicting_atomic_routes_without_rewriting_the_source() {
     let saved = choice(ModelSource::Byok, "chosen", "model");
     for action in ModelAction::ALL {

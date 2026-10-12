@@ -71,6 +71,10 @@ pub(super) fn adapter_for(provider_id: &str) -> Option<CloudSttProviderAdapter> 
             id: "deepgram",
             build: build_deepgram,
         },
+        "yiddishlabs" => CloudSttProviderAdapter {
+            id: "yiddishlabs",
+            build: build_yiddishlabs,
+        },
         _ => return None,
     };
 
@@ -88,7 +92,19 @@ fn supported_provider_ids() -> &'static [&'static str] {
         "assemblyai",
         "speechmatics",
         "deepgram",
+        "yiddishlabs",
     ]
+}
+
+fn build_yiddishlabs(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
+    Arc::new(crate::stt::YiddishLabsSttProvider::with_client(
+        ctx.client,
+        ctx.api_key,
+        ctx.model,
+        ctx.language,
+        ctx.transcription_prompt,
+        ctx.managed_gateway_url,
+    ))
 }
 
 fn build_openai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {

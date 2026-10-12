@@ -24,7 +24,14 @@ import {
 	TELEMETRY_DISCLOSURE_VERSION_KEY,
 } from "../settings/telemetryDisclosure";
 import { DEFAULT_STT_LANGUAGE, normalizeSttLanguage } from "../sttLanguages";
-import { MODEL_ACTIONS, modelSelectionSettingKey, modelSelectionPolicyKey, scopedModelSelectionKey, normalizeModelSelection, normalizeModelSelections } from "../modelSelection";
+import {
+	MODEL_ACTIONS,
+	modelSelectionSettingKey,
+	modelSelectionPolicyKey,
+	scopedModelSelectionKey,
+	normalizeModelSelection,
+	normalizeModelSelections,
+} from "../modelSelection";
 import { emitTyped } from "./events";
 import { DEFAULT_SETTINGS_VALUES } from "./settingsDefaults";
 import {
@@ -55,6 +62,7 @@ import {
 	normalizeOverlayMonitorTarget,
 	normalizePasteShortcut,
 	normalizePlayingAudioHandling,
+	normalizeSttInputMode,
 	normalizePolicyEnforcedFields,
 	normalizePolicySource,
 	normalizePolicyState,
@@ -254,11 +262,22 @@ export type PolicyPathEnforcement = {
 };
 
 const POLICY_PATH_ALIASES: Readonly<Record<string, string[]>> = {
-	model_selection_transcription: ["stt_provider", "stt_model", "stt_use_managed_inference"],
+	model_selection_transcription: [
+		"stt_provider",
+		"stt_model",
+		"stt_use_managed_inference",
+	],
 	model_selection_rewrite: ["llm_provider", "llm_model"],
 	model_selection_quick_ask: ["quick_ask_provider", "quick_ask_model"],
-	model_selection_quick_replace: ["quick_replace_provider", "quick_replace_model"],
-	model_selection_intent_router: ["llm_provider", "llm_model", "rewrite_program_prompt_profiles"],
+	model_selection_quick_replace: [
+		"quick_replace_provider",
+		"quick_replace_model",
+	],
+	model_selection_intent_router: [
+		"llm_provider",
+		"llm_model",
+		"rewrite_program_prompt_profiles",
+	],
 	model_selection_history_analysis: ["llm_provider", "llm_model"],
 	model_selection_prompt_tools: ["llm_provider", "llm_model"],
 	quick_ask_hotkey: ["quick_ask_hold_hotkey"],
@@ -286,7 +305,11 @@ function canonicalPolicyPath(path: string): string {
 function policyAliases(path: string): Set<string> {
 	const scopeKey = modelSelectionPolicyKey(path);
 	const canonical = scopeKey ?? path;
-	const aliases = new Set([path, canonical, ...(POLICY_PATH_ALIASES[canonical] ?? [])]);
+	const aliases = new Set([
+		path,
+		canonical,
+		...(POLICY_PATH_ALIASES[canonical] ?? []),
+	]);
 	if (scopeKey) aliases.add("rewrite_program_prompt_profiles");
 	for (const [key, linked] of Object.entries(POLICY_PATH_ALIASES)) {
 		if (linked.includes(canonical)) {
@@ -344,7 +367,9 @@ function patchTouchesPolicyPath(
 	deleteKeys: string[],
 	path: string,
 ): boolean {
-	return [...Object.keys(patch), ...deleteKeys].some(key => policyAliases(key).has(path));
+	return [...Object.keys(patch), ...deleteKeys].some((key) =>
+		policyAliases(key).has(path),
+	);
 }
 
 /** Pure policy projection shared by patch preparation and its contract tests. */
@@ -353,7 +378,8 @@ export function removePolicyPathFromPatch(
 	deleteKeys: string[],
 	path: string,
 ): void {
-	for (const key of Object.keys(patch)) if (policyAliases(key).has(path)) delete patch[key];
+	for (const key of Object.keys(patch))
+		if (policyAliases(key).has(path)) delete patch[key];
 	for (const [i, key] of [...deleteKeys.entries()].reverse()) {
 		if (policyAliases(key).has(path)) {
 			deleteKeys.splice(i, 1);
@@ -495,12 +521,22 @@ async function applySettingsPatch(params: {
 }
 
 export const tauriSettingsAPI = {
-	async updateModelSelection(action: ModelAction, selection: ModelSelection | null, scope?: {profileId: string; presetId?: string | null}): Promise<void> {
-		if (!MODEL_ACTIONS.includes(action)) throw new Error("Invalid model action");
-		const key = scope ? scopedModelSelectionKey(scope.profileId, scope.presetId ?? null, action) : modelSelectionSettingKey(action);
+	async updateModelSelection(
+		action: ModelAction,
+		selection: ModelSelection | null,
+		scope?: { profileId: string; presetId?: string | null },
+	): Promise<void> {
+		if (!MODEL_ACTIONS.includes(action))
+			throw new Error("Invalid model action");
+		const key = scope
+			? scopedModelSelectionKey(scope.profileId, scope.presetId ?? null, action)
+			: modelSelectionSettingKey(action);
 		if (scope) modelSelectionPolicyKey(key);
 		const choice = normalizeModelSelection(selection);
-		await applySettingsPatch({patch: {[key]: choice},rejectPolicyChanges:true});
+		await applySettingsPatch({
+			patch: { [key]: choice },
+			rejectPolicyChanges: true,
+		});
 	},
 	async getSettings(): Promise<AppSettings> {
 		const store = await getStore();
@@ -545,12 +581,9 @@ export const tauriSettingsAPI = {
 
 		const rawProfiles =
 			(await store.get<unknown>("rewrite_program_prompt_profiles")) ?? [];
-		const rewrite_program_prompt_profiles =
-			Array.isArray(rawProfiles)
-				? rawProfiles
-						.map(normalizeRewriteProfile)
-						.filter((p) => p !== null)
-				: [];
+		const rewrite_program_prompt_profiles = Array.isArray(rawProfiles)
+			? rawProfiles.map(normalizeRewriteProfile).filter((p) => p !== null)
+			: [];
 
 		// Backward compatibility:
 		// - Legacy key: quick_ask_hotkey (hold-to-record)
@@ -624,15 +657,33 @@ export const tauriSettingsAPI = {
 
 		const model_selections: ModelSelections = {};
 		for (const action of MODEL_ACTIONS) {
-			const selection = normalizeModelSelection(await store.get(modelSelectionSettingKey(action)));
+			const selection = normalizeModelSelection(
+				await store.get(modelSelectionSettingKey(action)),
+			);
 			if (selection) model_selections[action] = selection;
 		}
 		let effective_profiles = rewrite_program_prompt_profiles;
-		if (await store.get("model_selection_scopes_enabled") === true || rewrite_program_prompt_profiles.some(profile => Object.keys(profile.model_selections).length > 0 || (profile.presets ?? []).some(preset => Object.keys(preset.model_selections).length > 0))) {
-			const loaded = await invoke<import("./types.generated").LoadedModelSettings>("get_model_selection_settings");
+		if (
+			(await store.get("model_selection_scopes_enabled")) === true ||
+			rewrite_program_prompt_profiles.some(
+				(profile) =>
+					Object.keys(profile.model_selections).length > 0 ||
+					(profile.presets ?? []).some(
+						(preset) => Object.keys(preset.model_selections).length > 0,
+					),
+			)
+		) {
+			const loaded = await invoke<
+				import("./types.generated").LoadedModelSettings
+			>("get_model_selection_settings");
 			if (loaded.error) throw new Error(loaded.error);
-			Object.assign(model_selections, normalizeModelSelections(loaded.model_selections));
-			effective_profiles = loaded.profiles.map(normalizeRewriteProfile).filter((profile) => profile !== null);
+			Object.assign(
+				model_selections,
+				normalizeModelSelections(loaded.model_selections),
+			);
+			effective_profiles = loaded.profiles
+				.map(normalizeRewriteProfile)
+				.filter((profile) => profile !== null);
 		}
 		const settings: AppSettings = {
 			model_selections,
@@ -703,6 +754,8 @@ export const tauriSettingsAPI = {
 				normalizeNonEmptyStringSetting,
 			),
 			stt_model: (await store.get<string | null>("stt_model")) ?? null,
+			stt_input_mode:
+				normalizeSttInputMode(await store.get("stt_input_mode")) ?? "auto",
 			stt_language: normalizeSttLanguage(
 				await store.get("stt_language"),
 				DEFAULT_STT_LANGUAGE,
@@ -1102,7 +1155,9 @@ export const tauriSettingsAPI = {
 	},
 
 	async updateMainWindowShowOnLaunch(enabled: boolean): Promise<void> {
-		await applySettingsPatch({ patch: { main_window_show_on_launch: enabled } });
+		await applySettingsPatch({
+			patch: { main_window_show_on_launch: enabled },
+		});
 	},
 
 	async updateMainWindowCloseBehavior(
@@ -1399,6 +1454,17 @@ export const tauriSettingsAPI = {
 
 	async updateSTTLiveOutput(enabled: boolean): Promise<void> {
 		await applySettingsPatch({ patch: { stt_live_output: !!enabled } });
+	},
+
+	async updateSTTInputMode(
+		mode: import("./types").SttInputMode,
+	): Promise<void> {
+		const normalized = normalizeSttInputMode(mode);
+		if (!normalized) throw new Error("Choose a transcription input mode");
+		await applySettingsPatch({
+			patch: { stt_input_mode: normalized },
+			rejectPolicyChanges: true,
+		});
 	},
 
 	async updateSTTSimulatedStreaming(enabled: boolean): Promise<void> {

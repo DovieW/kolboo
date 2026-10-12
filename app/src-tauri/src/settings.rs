@@ -31,6 +31,15 @@ pub const WINDOWS_CLIPBOARD_FALLBACK_FOR_CONTEXT_CAPTURE_KEY: &str =
 // Network / proxy settings (stored in settings.json)
 // ============================================================================
 
+/// Input transport is independent of preview and text-insertion preferences.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SttInputMode {
+    #[default]
+    Auto,
+    AfterRecording,
+}
+
 /// Proxy mode for outgoing HTTP requests.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -439,6 +448,8 @@ pub struct RewriteProgramPromptProfile {
     #[serde(default)]
     pub stt_language: Option<String>,
     #[serde(default)]
+    pub stt_input_mode: Option<SttInputMode>,
+    #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]
     pub llm_provider: Option<String>,
@@ -586,6 +597,8 @@ pub struct RewritePreset {
     pub stt_model: Option<String>,
     #[serde(default)]
     pub stt_language: Option<String>,
+    #[serde(default)]
+    pub stt_input_mode: Option<SttInputMode>,
     #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]

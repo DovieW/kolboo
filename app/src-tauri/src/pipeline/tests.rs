@@ -17,6 +17,338 @@ use tokio_util::sync::CancellationToken;
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
 
+#[tokio::test]
+async fn meeting_uploads_receive_owned_job_context_and_completed_chunks_are_not_resubmitted() {
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+    use crate::stt::{SttTranscript, SttUploadContext, UploadPurpose};
+    struct UploadedJob {
+        paths: Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>,
+    }
+    #[async_trait]
+    impl SttProvider for UploadedJob {
+        fn name(&self) -> &'static str {
+            "yiddishlabs"
+        }
+        async fn transcribe(
+            &self,
+            _: &[u8],
+            _: &AudioFormat,
+        ) -> Result<String, crate::stt::SttError> {
+            Err(crate::stt::SttError::Config(
+                "Dictation must not submit an asynchronous job".into(),
+            ))
+        }
+        async fn transcribe_upload(
+            &self,
+            audio: &[u8],
+            _: &AudioFormat,
+            context: &SttUploadContext,
+        ) -> Result<SttTranscript, crate::stt::SttError> {
+            assert_eq!(context.purpose, UploadPurpose::Meeting);
+            assert!(audio.starts_with(b"RIFF"));
+            assert!(context.checkpoint_path.parent().unwrap().is_dir());
+            self.paths
+                .lock()
+                .unwrap()
+                .push(context.checkpoint_path.clone());
+            Ok(SttTranscript {
+                text: "שלום — hello".into(),
+                segments: Vec::new(),
+            })
+        }
+    }
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let paths = Arc::new(std::sync::Mutex::new(Vec::new()));
+    pipeline.inject_stt_provider_for_tests(
+        "yiddishlabs",
+        Some(crate::stt::yiddishlabs::STANDARD_MODEL),
+        None,
+        Arc::new(UploadedJob {
+            paths: paths.clone(),
+        }),
+    );
+    let mut buffer = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+    buffer.append(&vec![0.25; 16000]);
+    let wav = buffer.to_wav_bytes().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let checkpoint = directory.path().join("meeting.transcripts");
+    let options = RecordingPreferences {
+        mode: RecordingMode::Meeting,
+        meeting_model: Some(MeetingModel {
+            provider: "yiddishlabs".into(),
+            model: crate::stt::yiddishlabs::STANDARD_MODEL.into(),
+            use_managed: false,
+        }),
+        language_hint: None,
+    };
+    for _ in 0..2 {
+        pipeline.begin_recovery().unwrap();
+        let result = pipeline
+            .transcribe_journal_wav(wav.clone(), None, Some(&checkpoint), &options)
+            .await
+            .unwrap();
+        assert_eq!(result.final_text, "שלום — hello");
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        pipeline.end_recovery();
+    }
+    let bad_directory = tempfile::tempdir().unwrap();
+    let bad_checkpoint = bad_directory.path().join("meeting.transcripts");
+    std::fs::write(
+        bad_checkpoint.with_extension("yiddish-jobs"),
+        b"not a job directory",
+    )
+    .unwrap();
+    pipeline.begin_recovery().unwrap();
+    let error = pipeline
+        .transcribe_journal_wav(wav, None, Some(&bad_checkpoint), &options)
+        .await
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("checkpoint could not be verified"));
+    pipeline.end_recovery();
+    let paths = paths.lock().unwrap();
+    assert_eq!(paths.len(), 1);
+    assert_eq!(
+        paths[0].parent(),
+        Some(checkpoint.with_extension("yiddish-jobs").as_path())
+    );
+    assert_eq!(
+        checkpoint
+            .with_extension("yiddish-jobs")
+            .read_dir()
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn rewrite_renews_only_the_same_owners_token_and_keeps_the_recorded_gateway() {
+    use crate::model_selection::{ModelSelection, ModelSource};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+    use wiremock::{
+        matchers::{method, path},
+        Mock, MockServer, ResponseTemplate,
+    };
+    let token = |subject, issued| {
+        format!(
+            "header.{}.signature",
+            URL_SAFE_NO_PAD.encode(
+                serde_json::to_vec(
+                    &serde_json::json!({"sub":subject,"iss":"synthetic-issuer","iat":issued})
+                )
+                .unwrap()
+            )
+        )
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            serde_json::json!({"choices":[{"message":{"content":"synthetic rewrite"}}]}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let old_token = token("original-owner", 1);
+    let renewed_token = token("original-owner", 2);
+    let mut config = test_config_for_transcription();
+    config.managed_inference_enabled = true;
+    config.managed_inference_gateway_url = Some(server.uri());
+    config.managed_inference_access_token = Some(old_token);
+    let store = crate::request_log::RequestLogStore::new();
+    store.start_request("synthetic recording".into(), None);
+    config.request_log_store = Some(store.clone());
+    let pipeline = SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+    let params = LlmProviderParams {
+        selection: Some(ModelSelection {
+            source: ModelSource::Managed,
+            provider_id: "groq".into(),
+            model_id: "synthetic-model".into(),
+        }),
+        model: None,
+        timeout: Duration::from_secs(1),
+        ollama_url: None,
+        openai_reasoning_effort: None,
+        gemini_thinking_budget: None,
+        gemini_thinking_level: None,
+        anthropic_thinking_budget: None,
+    };
+    {
+        let mut inner = pipeline.inner.lock().unwrap();
+        inner.recording_config = Some(config.clone());
+        inner.config.managed_inference_access_token = Some(renewed_token.clone());
+        inner.config.managed_inference_gateway_url = Some("http://must-not-be-used.invalid".into());
+    }
+    let provider = pipeline
+        .inner
+        .lock()
+        .unwrap()
+        .get_or_create_llm_provider("managed", params.clone())
+        .unwrap();
+    assert_eq!(
+        provider
+            .complete("synthetic system", "synthetic input")
+            .await
+            .unwrap(),
+        "synthetic rewrite"
+    );
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].headers["authorization"],
+        format!("Bearer {renewed_token}")
+    );
+    assert_eq!(requests[0].headers["x-kolboo-model-provider"], "groq");
+    assert_eq!(
+        requests[0].body_json::<serde_json::Value>().unwrap()["model"],
+        "synthetic-model"
+    );
+    assert!(store.get_logs(None)[0].managed_inference);
+    for current in [None, Some(token("different-owner", 3))] {
+        let mut inner = pipeline.inner.lock().unwrap();
+        inner.config.managed_inference_access_token = current;
+        assert!(
+            matches!(inner.get_or_create_llm_provider("managed", params.clone()), Err(PipelineError::Config(message)) if message.contains("session changed"))
+        );
+    }
+    let mut inner = pipeline.inner.lock().unwrap();
+    inner.config.managed_inference_access_token = Some(renewed_token);
+    inner.config.managed_inference_enabled = false;
+    assert!(inner.get_or_create_llm_provider("managed", params).is_err());
+}
+
+#[tokio::test]
+async fn byok_auth_failure_never_enters_managed_session_refresh() {
+    let mut config = test_config_for_transcription();
+    config.managed_inference_enabled = true;
+    let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let mut provider = MockSttProvider::new("must not succeed");
+    provider.behavior.error = Some("401 auth_invalid_token".into());
+    let result = p
+        .run_batch_stt_request(
+            Arc::new(provider),
+            MOCK_PROVIDER,
+            None,
+            None,
+            None,
+            &[1, 2, 3],
+            &crate::stt::RetryConfig::default(),
+            Duration::from_secs(1),
+            &CancellationToken::new(),
+            "test",
+            "retry",
+            None,
+        )
+        .await;
+    assert!(
+        matches!(result, Err(PipelineError::Stt(crate::stt::SttError::Api(message))) if message == "401 auth_invalid_token")
+    );
+    assert_eq!(p.state(), PipelineState::Error);
+}
+
+#[tokio::test]
+async fn changing_managed_login_never_blocks_byok_or_sends_with_another_accounts_session() {
+    use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+    for source in [ModelSource::Byok, ModelSource::Managed] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        config.managed_inference_enabled = true;
+        config.managed_stt_preferred = true;
+        config.managed_inference_gateway_url = Some("https://gateway.example.test".into());
+        config.managed_inference_access_token = Some("old-session".into());
+        config.model_selections.insert(
+            ModelAction::Transcription,
+            ModelSelection {
+                source,
+                provider_id: "groq".into(),
+                model_id: "whisper-large-v3-turbo".into(),
+            },
+        );
+        let p = SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut provider = MockSttProvider::new("original model");
+        provider.batch_calls = calls.clone();
+        p.inner.lock().unwrap().stt_provider_cache.insert(
+            serde_json::json!(["groq", "whisper-large-v3-turbo", null, false, source]).to_string(),
+            Arc::new(provider),
+        );
+        p.start_recording().unwrap();
+        config.managed_inference_access_token = Some("different-session".into());
+        p.update_config(config).unwrap();
+        let result = p.stop_and_transcribe_detailed().await;
+        if source == ModelSource::Byok {
+            assert_eq!(result.unwrap().final_text, "original model");
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        } else {
+            assert!(
+                matches!(result, Err(PipelineError::Config(message)) if message.contains("login session changed"))
+            );
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert!(p.clone_last_wav_bytes().is_some());
+        }
+    }
+}
+
+#[tokio::test]
+async fn deferred_adapters_keep_the_original_configuration_and_failures_clean_up() {
+    for available in [true, false] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        let pipeline =
+            SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+        pipeline.inject_stt_provider_for_tests(
+            MOCK_PROVIDER,
+            None,
+            None,
+            Arc::new(MockSttProvider::new("original source")),
+        );
+        pipeline.start_recording().unwrap();
+        config.stt_provider = "different-provider".into();
+        pipeline.update_config(config.clone()).unwrap();
+        pipeline.inner.lock().unwrap().recording_provider = None;
+        if available {
+            pipeline.inject_stt_provider_for_tests(
+                MOCK_PROVIDER,
+                None,
+                None,
+                Arc::new(MockSttProvider::new("original source")),
+            );
+        }
+        let result = pipeline.stop_and_transcribe_detailed().await;
+        if available {
+            assert_eq!(result.unwrap().final_text, "original source");
+            assert_eq!(pipeline.state(), PipelineState::Idle);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(pipeline.state(), PipelineState::Error);
+            assert!(pipeline.clone_last_wav_bytes().is_some());
+        }
+        assert_eq!(pipeline.config().stt_provider, "different-provider");
+    }
+}
+
+#[tokio::test]
+async fn incomplete_capture_retains_audio_and_never_submits_a_partial_batch() {
+    let mut capture = FakeAudioCapture::new();
+    capture.incomplete = true;
+    let p = SharedPipeline::new_for_tests(test_config_for_transcription(), Box::new(capture));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut provider = MockSttProvider::new("must not upload");
+    provider.batch_calls = calls.clone();
+    p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+    p.start_recording().unwrap();
+    assert!(matches!(
+        p.stop_and_transcribe_detailed().await,
+        Err(PipelineError::AudioCapture(_))
+    ));
+    assert_eq!(p.state(), PipelineState::Error);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(p.clone_last_wav_bytes().is_some());
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
     use serde_json::json;
@@ -534,6 +866,7 @@ pub(super) struct FakeAudioCapture {
     recovery_path: Option<std::path::PathBuf>,
     cancellation_calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
     fail_recovery_finish: bool,
+    incomplete: bool,
 }
 
 impl FakeAudioCapture {
@@ -550,6 +883,7 @@ impl FakeAudioCapture {
             recovery_path: None,
             cancellation_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
             fail_recovery_finish: false,
+            incomplete: false,
         }
     }
 
@@ -651,6 +985,9 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
 }
 
 impl AudioCaptureBackend for FakeAudioCapture {
+    fn recording_progress(&self) -> (f64, bool) {
+        (0.5, self.incomplete)
+    }
     fn recovery_path(&self) -> Option<std::path::PathBuf> {
         self.recovery_path.clone()
     }
@@ -974,6 +1311,115 @@ fn test_shared_pipeline_creation() {
 }
 
 #[tokio::test]
+async fn deferred_provider_resolution_uses_frozen_settings_and_restores_current_settings() {
+    let mut config = test_config_for_transcription();
+    config.stt_model = Some("captured".into());
+    config.stt_language = Some("yi".into());
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+    let provider = Arc::new(MockSttProvider::new("captured provider result"));
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        Some("captured"),
+        Some("yi"),
+        provider.clone(),
+    );
+    pipeline.start_recording().unwrap();
+    config.stt_model = Some("later".into());
+    config.stt_language = Some("he".into());
+    pipeline.update_config(config).unwrap();
+    // Deferred native/local initialization has no constructed provider or
+    // request context yet. Its captured configuration still owns resolution.
+    {
+        let mut inner = pipeline.inner.lock().unwrap();
+        inner.recording_provider = None;
+        inner.recording_profile_context = None;
+    }
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        Some("captured"),
+        Some("yi"),
+        provider.clone(),
+    );
+    assert_eq!(
+        pipeline
+            .stop_and_transcribe_detailed()
+            .await
+            .unwrap()
+            .stt_text,
+        "captured provider result"
+    );
+    assert_eq!(
+        provider
+            .batch_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert_eq!(pipeline.config().stt_model.as_deref(), Some("later"));
+    assert_eq!(pipeline.config().stt_language.as_deref(), Some("he"));
+}
+
+#[tokio::test]
+async fn recording_keeps_its_original_model_hint_and_provider_across_config_updates() {
+    let mut config = test_config_for_transcription();
+    config.stt_model = Some("first".into());
+    config.stt_language = Some("yi".into());
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config.clone(), Box::new(FakeAudioCapture::new()));
+    let first = Arc::new(MockSttProvider::new("first result"));
+    let first_calls = first.batch_calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, Some("first"), Some("yi"), first);
+    pipeline.start_recording().unwrap();
+    config.stt_model = Some("second".into());
+    config.stt_language = Some("he".into());
+    config.stt_input_mode = crate::settings::SttInputMode::AfterRecording;
+    pipeline.update_config(config).unwrap();
+    let second = Arc::new(MockSttProvider::new("second result"));
+    let second_calls = second.batch_calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, Some("second"), Some("he"), second);
+    assert_eq!(
+        pipeline
+            .stop_and_transcribe_detailed()
+            .await
+            .unwrap()
+            .stt_text,
+        "first result"
+    );
+    assert_eq!(first_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(second_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(pipeline.inner.lock().unwrap().recording_config.is_none());
+    pipeline.start_recording().unwrap();
+    assert_eq!(
+        pipeline
+            .stop_and_transcribe_detailed()
+            .await
+            .unwrap()
+            .stt_text,
+        "second result"
+    );
+    assert_eq!(second_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn incompatible_realtime_only_input_mode_retains_audio_without_submitting() {
+    let mut config = test_config_for_transcription();
+    config.stt_input_mode = crate::settings::SttInputMode::AfterRecording;
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let mut provider = MockSttProvider::new("must not upload");
+    provider.realtime_only = true;
+    let calls = provider.batch_calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+    pipeline.start_recording().unwrap();
+    assert!(matches!(
+        pipeline.stop_and_transcribe_detailed().await,
+        Err(PipelineError::Config(_))
+    ));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert!(pipeline.clone_last_wav_bytes().is_some());
+    assert_eq!(pipeline.state(), PipelineState::Error);
+}
+
+#[tokio::test]
 async fn streaming_finalize_handles_success_fallback_and_realtime_failure() {
     for (success, realtime, live_started) in [
         (true, false, false),
@@ -1073,13 +1519,14 @@ async fn failed_stream_with_a_poisoned_state_lock_cannot_upload_again() {
 
 #[tokio::test]
 async fn streaming_handoff_owns_or_aborts_both_tasks() {
-    for outcome in ["recording", "stopped", "cancelled", "poisoned"] {
+    for outcome in ["recording", "stopped", "cancelled", "error", "poisoned"] {
         let p = SharedPipeline::new_for_tests(
             test_config_for_transcription(),
             Box::new(FakeAudioCapture::new()),
         );
         p.start_recording().unwrap();
         let cancel = p.get_cancel_token().unwrap();
+        let epoch = p.session_epoch().unwrap();
         let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(1);
         let (_partial_tx, partial_rx) = tokio::sync::mpsc::channel(1);
         let (provider_alive, mut provider_dropped) = tokio::sync::oneshot::channel::<()>();
@@ -1101,6 +1548,7 @@ async fn streaming_handoff_owns_or_aborts_both_tasks() {
         });
         match outcome {
             "stopped" => p.inner.lock().unwrap().state = PipelineState::Transcribing,
+            "error" => p.inner.lock().unwrap().state = PipelineState::Error,
             "cancelled" => cancel.cancel(),
             "poisoned" => {
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1110,8 +1558,8 @@ async fn streaming_handoff_owns_or_aborts_both_tasks() {
             }
             _ => {}
         }
-        p.install_concurrent_streaming_session(&cancel, session);
-        if outcome == "recording" {
+        p.install_concurrent_streaming_session(&cancel, epoch, session);
+        if outcome == "recording" || outcome == "stopped" {
             started.await.unwrap();
             assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
             assert!(matches!(
@@ -1137,8 +1585,252 @@ async fn streaming_handoff_owns_or_aborts_both_tasks() {
     }
 }
 
+#[tokio::test]
+async fn state_lock_failure_after_connection_completion_cannot_trigger_a_batch_upload() {
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+    let provider = MockSttProvider::new("must not upload");
+    let batch_calls = provider.batch_calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+    pipeline.start_recording().unwrap();
+    let inner = pipeline.inner.clone();
+    pipeline.inner.lock().unwrap().pending_connection = Some(
+        crate::stt::streaming::OwnedStreamingTask(tokio::spawn(async move {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = inner.lock().unwrap();
+                panic!("synthetic lock failure during connection completion");
+            }));
+        })),
+    );
+    assert!(matches!(
+        pipeline.stop_and_transcribe_detailed().await,
+        Err(PipelineError::Lock(_))
+    ));
+    assert_eq!(batch_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
 /// Exercise the concrete event-forwarding path with real Wry, but synthetic
 /// provider/capture tasks. No recording device, external service or insertion.
+#[cfg(target_os = "linux")]
+pub(crate) fn native_recording_output(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    use tauri_plugin_store::StoreExt;
+    let pipeline = app.state::<SharedPipeline>();
+    let original_config = pipeline.config();
+    let original_capture = {
+        let mut inner = pipeline.inner.lock().unwrap();
+        assert_eq!(inner.state, PipelineState::Idle);
+        std::mem::replace(&mut inner.audio_capture, Box::new(FakeAudioCapture::new()))
+    };
+    let store = app.store("settings.json").unwrap();
+    let settings = [
+        "output_mode",
+        "quick_replace_enabled",
+        "quick_ask_enabled",
+        "clipboard_privacy_mode",
+    ];
+    let previous: Vec<_> = settings.iter().map(|key| store.get(*key)).collect();
+    store.set("output_mode", serde_json::json!("clipboard"));
+    for key in &settings[1..] {
+        store.set(*key, serde_json::json!(false));
+    }
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    pipeline.update_config(config).unwrap();
+    pipeline.inject_stt_provider_for_tests(
+        MOCK_PROVIDER,
+        None,
+        None,
+        Arc::new(MockSttProvider::new("Synthetic native output")),
+    );
+    let state = app.state::<crate::state::AppState>();
+    crate::core::recording::start_recording(
+        app,
+        &state,
+        false,
+        crate::audio::AudioCue::Kolboo,
+        &None,
+        crate::core::recording::PlayingAudioHandling::None,
+        "native fixture",
+    );
+    assert_eq!(pipeline.state(), PipelineState::Recording);
+    let request_id = app
+        .state::<crate::request_log::RequestLogStore>()
+        .with_current(|log| log.id.clone())
+        .unwrap();
+    crate::stop_recording(
+        app,
+        &state,
+        false,
+        crate::audio::AudioCue::Kolboo,
+        &None,
+        crate::core::recording::PlayingAudioHandling::None,
+        "native fixture",
+    );
+    let history = app.state::<crate::history::HistoryStorage>();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(entry) = history.get_by_id(&request_id).unwrap() {
+            if entry.status == crate::history::HistoryStatus::Success {
+                assert_eq!(entry.text, "Synthetic native output");
+                break;
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "native output did not complete its history row"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(pipeline.state(), PipelineState::Idle);
+    assert_eq!(
+        arboard::Clipboard::new().unwrap().get_text().unwrap(),
+        "Synthetic native output"
+    );
+    let delivered =
+        tauri::async_runtime::block_on(crate::text::inject::output_text_with_app_async(
+            app.clone(),
+            "Synthetic explicit output".into(),
+            crate::text::inject::OutputMode::Clipboard,
+            false,
+            false,
+            crate::text::key_inject::PasteShortcut::CtrlV,
+        ))
+        .unwrap();
+    assert_eq!(
+        delivered,
+        crate::text::inject::OutputDelivery::RequestedMode
+    );
+    assert_eq!(
+        arboard::Clipboard::new().unwrap().get_text().unwrap(),
+        "Synthetic explicit output"
+    );
+    pipeline.inner.lock().unwrap().audio_capture = original_capture;
+    pipeline.update_config(original_config).unwrap();
+    for (key, value) in settings.into_iter().zip(previous) {
+        if let Some(value) = value {
+            store.set(key, value);
+        } else {
+            store.delete(key);
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn native_managed_stt_refresh(
+    app: &tauri::AppHandle,
+    provider: Arc<dyn SttProvider>,
+    original_token: String,
+) -> Result<String, PipelineError> {
+    use tauri::Manager;
+    let pipeline = app.state::<SharedPipeline>();
+    pipeline.set_app_handle(app.clone());
+    pipeline
+        .run_batch_stt_request(
+            provider,
+            "groq",
+            Some("whisper-large-v3-turbo".into()),
+            Some("he".into()),
+            Some(original_token),
+            b"synthetic audio",
+            &Default::default(),
+            std::time::Duration::from_secs(5),
+            &CancellationToken::new(),
+            "native owned refresh",
+            "meeting_upload",
+            None,
+        )
+        .await
+        .map(|result| result.text)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn native_completed_upload_retry(app: &tauri::AppHandle) {
+    use crate::recordings::options::{MeetingModel, RecordingMode, RecordingPreferences};
+    use crate::stt::{SttTranscript, SttUploadContext};
+    use tauri::Manager;
+    struct Job(Arc<std::sync::atomic::AtomicUsize>);
+    #[async_trait]
+    impl SttProvider for Job {
+        fn name(&self) -> &'static str {
+            "yiddishlabs"
+        }
+        async fn transcribe(
+            &self,
+            _: &[u8],
+            _: &AudioFormat,
+        ) -> Result<String, crate::stt::SttError> {
+            panic!("Standard retry must use an owned upload, not dictation");
+        }
+        async fn transcribe_upload(
+            &self,
+            audio: &[u8],
+            _: &AudioFormat,
+            context: &SttUploadContext,
+        ) -> Result<SttTranscript, crate::stt::SttError> {
+            assert!(audio.starts_with(b"RIFF"));
+            assert_eq!(context.purpose, crate::stt::UploadPurpose::Meeting);
+            assert!(context.checkpoint_path.parent().unwrap().is_dir());
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(SttTranscript {
+                text: "שלום — synthetic retry".into(),
+                segments: Vec::new(),
+            })
+        }
+    }
+    let pipeline = app.state::<SharedPipeline>();
+    let original = pipeline.config();
+    let mut config = test_config_for_transcription();
+    config.llm_config.enabled = false;
+    pipeline.update_config(config).unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    pipeline.inject_stt_provider_for_tests(
+        "yiddishlabs",
+        Some(crate::stt::yiddishlabs::STANDARD_MODEL),
+        None,
+        Arc::new(Job(calls.clone())),
+    );
+    let store = app.state::<crate::recordings::RecordingStore>();
+    let source = format!("{}-final", uuid::Uuid::new_v4());
+    let mut buffer = crate::audio_capture::AudioBuffer::new(16000, 1, 1.0);
+    buffer.append(&vec![0.25; 16000]);
+    store
+        .save_wav(&source, &buffer.to_wav_bytes().unwrap())
+        .unwrap();
+    store
+        .save_options(
+            &source,
+            &RecordingPreferences {
+                mode: RecordingMode::Meeting,
+                meeting_model: Some(MeetingModel {
+                    provider: "yiddishlabs".into(),
+                    model: crate::stt::yiddishlabs::STANDARD_MODEL.into(),
+                    use_managed: false,
+                }),
+                language_hint: None,
+            },
+        )
+        .unwrap();
+    for _ in 0..2 {
+        let result = tauri::async_runtime::block_on(
+            crate::commands::recording::pipeline_retry_transcription_impl(
+                app.clone(),
+                pipeline.inner().clone(),
+                source.clone(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(result, "שלום — synthetic retry");
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert!(!pipeline.is_recovering());
+    }
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(store.transcription_checkpoint(&source).unwrap().exists());
+    assert!(store.delete_wav_if_exists(&source).unwrap());
+    pipeline.update_config(original).unwrap();
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn native_streaming_consumer(app: &tauri::AppHandle) {
     use tauri::Listener;
@@ -1213,15 +1905,30 @@ pub(crate) fn native_streaming_consumer(app: &tauri::AppHandle) {
                 );
             }
             p.start_recording().unwrap();
-            p.try_start_concurrent_streaming(app).await;
-            assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
+            if atomic {
+                p.start_concurrent_streaming(app);
+                p.start_concurrent_streaming(app);
+            } else {
+                p.try_start_concurrent_streaming(app).await;
+                assert!(p.inner.lock().unwrap().active_streaming_session.is_some());
+            }
             let result = p.stop_and_transcribe_detailed().await.unwrap();
             assert_eq!(result.final_text, "א גוטן טאָג");
             // Finalization guarantees all queued preview events have been emitted.
             let event = received.try_recv().unwrap();
             assert_eq!(
                 serde_json::from_str::<serde_json::Value>(&event).unwrap(),
-                serde_json::json!({"text": "א גוטן טאָג"})
+                serde_json::json!({"kind": "started", "session_epoch": p.session_epoch().unwrap()})
+            );
+            let event = received.try_recv().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+                serde_json::json!({"kind": "started", "session_epoch": p.session_epoch().unwrap()})
+            );
+            let event = received.try_recv().unwrap();
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&event).unwrap(),
+                serde_json::json!({"kind": "partial", "session_epoch": p.session_epoch().unwrap(), "text": "א גוטן טאָג"})
             );
             assert!(received.try_recv().is_err());
             assert!(!result.live_output_completed);
@@ -1229,6 +1936,165 @@ pub(crate) fn native_streaming_consumer(app: &tauri::AppHandle) {
         }
     });
     app.unlisten(listener);
+    tauri::async_runtime::block_on(native_streaming_input_policy(app));
+}
+
+#[cfg(target_os = "linux")]
+async fn native_streaming_input_policy(app: &tauri::AppHandle) {
+    use crate::model_selection::{ModelAction, ModelSelection, ModelSource};
+    for case in ["idle", "after", "managed", "missing", "stale", "poison"] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        if case == "after" {
+            config.stt_input_mode = crate::settings::SttInputMode::AfterRecording;
+        }
+        if case == "managed" {
+            config.stt_simulated_streaming = true;
+            config.managed_inference_enabled = true;
+            config.managed_inference_gateway_url = Some("http://must-not-be-used.invalid".into());
+            config.managed_inference_access_token = Some("synthetic-session".into());
+            config.model_selections.insert(
+                ModelAction::Transcription,
+                ModelSelection {
+                    source: ModelSource::Managed,
+                    provider_id: "groq".into(),
+                    model_id: "whisper-large-v3-turbo".into(),
+                },
+            );
+        }
+        let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut provider = MockSttProvider::new("must not upload");
+        provider.batch_calls = calls.clone();
+        if case == "managed" {
+            pipeline.inner.lock().unwrap().stt_provider_cache.insert(
+                serde_json::json!(["groq", "whisper-large-v3-turbo", null, false, "managed"])
+                    .to_string(),
+                Arc::new(provider),
+            );
+        } else {
+            pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        }
+        pipeline.start_concurrent_streaming(app); // Idle never starts a connection task.
+        assert!(pipeline.inner.lock().unwrap().pending_connection.is_none());
+        if case != "idle" {
+            pipeline.start_recording().unwrap();
+        }
+        if case == "missing" {
+            pipeline.inner.lock().unwrap().recording_provider = None;
+        }
+        if case == "poison" {
+            let inner = pipeline.inner.clone();
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _guard = inner.lock().unwrap();
+                panic!("synthetic pipeline lock failure");
+            }));
+            pipeline.start_concurrent_streaming(app);
+            pipeline.try_start_concurrent_streaming(app).await;
+            pipeline.connect_concurrent_streaming(app, 0).await;
+        } else {
+            if case == "stale" {
+                pipeline.connect_concurrent_streaming(app, u64::MAX).await;
+            } else {
+                pipeline.try_start_concurrent_streaming(app).await;
+            }
+            let inner = pipeline.inner.lock().unwrap();
+            assert!(inner.pending_connection.is_none());
+            assert!(inner.active_streaming_session.is_none());
+            drop(inner);
+            pipeline.force_reset();
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) async fn native_live_output(app: &tauri::AppHandle, focus: &dyn Fn(bool)) {
+    use tauri_plugin_store::StoreExt;
+    struct Provider;
+    #[async_trait]
+    impl SttProvider for Provider {
+        fn name(&self) -> &'static str {
+            "mock"
+        }
+        fn supports_streaming(&self) -> bool {
+            true
+        }
+        async fn transcribe(
+            &self,
+            _: &[u8],
+            _: &AudioFormat,
+        ) -> Result<String, crate::stt::SttError> {
+            panic!("live output cannot use batch fallback");
+        }
+        async fn start_streaming(
+            &self,
+            _: u32,
+        ) -> Result<StreamingSttSession, crate::stt::SttError> {
+            let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel(4);
+            let (partial_tx, partial_rx) = tokio::sync::mpsc::channel(4);
+            let task = tokio::spawn(async move {
+                while audio_rx.recv().await.is_some() {}
+                partial_tx
+                    .send(crate::stt::streaming::PartialTranscript {
+                        text: "Synthetic committed text".into(),
+                        committed_text: Some("Synthetic committed text".into()),
+                    })
+                    .await
+                    .unwrap();
+                Ok("Synthetic committed text".into())
+            });
+            Ok(StreamingSttSession::new(audio_tx, partial_rx, task))
+        }
+    }
+    let store = app.store("settings.json").unwrap();
+    let keys = ["output_mode", "quick_replace_enabled"];
+    let old: Vec<_> = keys.iter().map(|key| store.get(*key)).collect();
+    store.set(keys[0], serde_json::json!("clipboard"));
+    store.set(keys[1], serde_json::json!(false));
+    for mode in 0..3 {
+        focus(mode != 1);
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        config.stt_live_output = true;
+        let pipeline = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
+        pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(Provider));
+        pipeline.start_recording().unwrap();
+        pipeline.try_start_concurrent_streaming(app).await;
+        assert!(pipeline
+            .inner
+            .lock()
+            .unwrap()
+            .active_streaming_session
+            .is_some());
+        if mode == 2 {
+            focus(false);
+        }
+        let result = pipeline.stop_and_transcribe_detailed().await;
+        if mode == 2 {
+            assert!(matches!(result, Err(PipelineError::Stt(_))));
+            assert_eq!(pipeline.state(), PipelineState::Error);
+            assert!(pipeline.clone_last_wav_bytes().is_some());
+        } else {
+            let result = result.unwrap();
+            assert_eq!(result.final_text, "Synthetic committed text");
+            assert_eq!(result.live_output_completed, mode == 0);
+            if mode == 0 {
+                assert_eq!(
+                    arboard::Clipboard::new().unwrap().get_text().unwrap(),
+                    "Synthetic committed text"
+                );
+            }
+        }
+    }
+    focus(true);
+    for (key, value) in keys.into_iter().zip(old) {
+        if let Some(value) = value {
+            store.set(key, value);
+        } else {
+            store.delete(key);
+        }
+    }
 }
 
 #[tokio::test]
@@ -1258,6 +2124,12 @@ async fn cancelling_streaming_connection_or_finalize_leaves_the_new_session_owne
                         Ok("old result".into())
                     }),
                 ));
+        } else {
+            pipeline.inner.lock().unwrap().pending_connection = Some(
+                crate::stt::streaming::OwnedStreamingTask(tokio::spawn(async move {
+                    let _ = wait.await;
+                })),
+            );
         }
         let mut old = Box::pin(pipeline.stop_and_transcribe_detailed());
         assert!(matches!(
@@ -1291,6 +2163,12 @@ async fn realtime_connection_can_arrive_late_or_time_out_without_batch_upload() 
         provider.realtime_only = true;
         p.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
         p.start_recording().unwrap();
+        let (connected, wait) = tokio::sync::oneshot::channel::<()>();
+        p.inner.lock().unwrap().pending_connection = Some(
+            crate::stt::streaming::OwnedStreamingTask(tokio::spawn(async move {
+                let _ = wait.await;
+            })),
+        );
         let mut pending = Box::pin(p.stop_and_transcribe_detailed());
         assert!(matches!(
             pending
@@ -1307,6 +2185,7 @@ async fn realtime_connection_can_arrive_late_or_time_out_without_batch_upload() 
                     rx,
                     tokio::spawn(async { Ok("late result".into()) }),
                 ));
+            connected.send(()).unwrap();
         }
         let result = pending.await;
         if connects {
@@ -2188,12 +3067,14 @@ async fn managed_auth_failure_without_a_desktop_session_releases_transcription()
             MOCK_PROVIDER,
             None,
             None,
+            Some("synthetic-managed-token".into()),
             &[1, 2, 3],
             &crate::stt::RetryConfig::default(),
             Duration::from_secs(1),
             &CancellationToken::new(),
             "test",
             "retry_transcription",
+            None,
         )
         .await;
     assert!(
@@ -2565,6 +3446,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
             stt_provider: None,
             stt_model: None,
             stt_language: None,
+            stt_input_mode: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,
@@ -2585,6 +3467,7 @@ fn create_routing_test_profile(presets: Vec<(&str, &str, Vec<&str>)>) -> Program
         stt_provider: None,
         stt_model: None,
         stt_language: None,
+        stt_input_mode: None,
         stt_timeout_seconds: None,
         llm_provider: None,
         llm_model: None,

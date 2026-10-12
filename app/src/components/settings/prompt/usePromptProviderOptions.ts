@@ -28,7 +28,7 @@ type ProviderOption = {
 	label: string;
 	is_local: boolean;
 	models?: string[] | null;
-	model_names?: Record<string, string> | null;
+	model_names?: Record<string, string | undefined> | null;
 };
 
 type AvailableProviders = {
@@ -222,15 +222,31 @@ export function usePromptProviderOptions({
 		activeProfileId === "default"
 			? (settings?.stt_provider ?? null)
 			: (localProfileSttProvider ?? settings?.stt_provider ?? null);
-	const profile = profiles.find(profile => profile.id === activeProfileId && profile.id !== "default");
-	const sttPreference = resolveModelPreference("transcription", settings, profile);
-	const rewritePreference = resolveModelPreference("rewrite", settings, profile);
+	const profile = profiles.find(
+		(profile) => profile.id === activeProfileId && profile.id !== "default",
+	);
+	const sttPreference = resolveModelPreference(
+		"transcription",
+		settings,
+		profile,
+	);
+	const rewritePreference = resolveModelPreference(
+		"rewrite",
+		settings,
+		profile,
+	);
 	const askPreference = resolveModelPreference("quick_ask", settings, profile);
-	const replacePreference = resolveModelPreference("quick_replace", settings, profiles.find(profile => profile.id === activeProfileId));
-	const effectiveSttProvider = sttPreference.selection?.provider_id ?? rawSttProvider;
+	const replacePreference = resolveModelPreference(
+		"quick_replace",
+		settings,
+		profiles.find((profile) => profile.id === activeProfileId),
+	);
+	const effectiveSttProvider =
+		sttPreference.selection?.provider_id ?? rawSttProvider;
 
-	const effectiveSttModel = sttPreference.selection?.model_id ?? (
-		effectiveSttProvider === null
+	const effectiveSttModel =
+		sttPreference.selection?.model_id ??
+		(effectiveSttProvider === null
 			? null
 			: activeProfileId === "default"
 				? (settings?.stt_model ?? null)
@@ -240,7 +256,8 @@ export function usePromptProviderOptions({
 		activeProfileId === "default"
 			? (settings?.llm_provider ?? null)
 			: (localProfileLlmProvider ?? settings?.llm_provider ?? null);
-	const effectiveLlmProvider = rewritePreference.selection?.provider_id ?? rawLlmProvider;
+	const effectiveLlmProvider =
+		rewritePreference.selection?.provider_id ?? rawLlmProvider;
 
 	const rawQuickAskProvider =
 		activeProfileId === "default"
@@ -249,7 +266,8 @@ export function usePromptProviderOptions({
 				settings?.quick_ask_provider ??
 				settings?.llm_provider ??
 				null);
-	const effectiveQuickAskProvider = askPreference.selection?.provider_id ?? rawQuickAskProvider;
+	const effectiveQuickAskProvider =
+		askPreference.selection?.provider_id ?? rawQuickAskProvider;
 
 	const defaultProfile = profiles.find((p) => p.id === "default") ?? null;
 	const {
@@ -283,10 +301,12 @@ export function usePromptProviderOptions({
 		activeProfileId === "default"
 			? (localProfileQuickReplaceProvider ?? settings?.llm_provider ?? null)
 			: (localProfileQuickReplaceProvider ?? defaultQuickReplaceProvider);
-	const effectiveQuickReplaceProvider = replacePreference.selection?.provider_id ?? rawQuickReplaceProvider;
+	const effectiveQuickReplaceProvider =
+		replacePreference.selection?.provider_id ?? rawQuickReplaceProvider;
 
-	const effectiveQuickAskModel = askPreference.selection?.model_id ?? (
-		effectiveQuickAskProvider === null
+	const effectiveQuickAskModel =
+		askPreference.selection?.model_id ??
+		(effectiveQuickAskProvider === null
 			? null
 			: activeProfileId === "default"
 				? (settings?.quick_ask_model ?? settings?.llm_model ?? null)
@@ -386,15 +406,17 @@ export function usePromptProviderOptions({
 			: localProfileQuickReplaceModel,
 	);
 
-	const selectedSttModelForUi = sttPreference.selection?.model_id ?? (
-		sttModelOptions.length === 0
+	const selectedSttModelForUi =
+		sttPreference.selection?.model_id ??
+		(sttModelOptions.length === 0
 			? null
 			: isDefaultScope
 				? (settings?.stt_model ?? null)
 				: localProfileSttModel);
 
-	const selectedQuickAskModelForUi = askPreference.selection?.model_id ?? (
-		quickAskModelOptions.length === 0
+	const selectedQuickAskModelForUi =
+		askPreference.selection?.model_id ??
+		(quickAskModelOptions.length === 0
 			? null
 			: isDefaultScope
 				? (settings?.quick_ask_model ??
@@ -404,8 +426,9 @@ export function usePromptProviderOptions({
 					null)
 				: localProfileQuickAskModel);
 
-	const selectedQuickReplaceModelForUi = replacePreference.selection?.model_id ?? (
-		quickReplaceModelOptions.length === 0
+	const selectedQuickReplaceModelForUi =
+		replacePreference.selection?.model_id ??
+		(quickReplaceModelOptions.length === 0
 			? null
 			: isDefaultScope
 				? (localProfileQuickReplaceModel ??
@@ -415,15 +438,17 @@ export function usePromptProviderOptions({
 					null)
 				: localProfileQuickReplaceModel);
 
-	const effectiveLlmModel = rewritePreference.selection?.model_id ?? (
-		effectiveLlmProvider === null
+	const effectiveLlmModel =
+		rewritePreference.selection?.model_id ??
+		(effectiveLlmProvider === null
 			? null
 			: activeProfileId === "default"
 				? (settings?.llm_model ?? null)
 				: (localProfileLlmModel ?? settings?.llm_model ?? null));
 
-	const selectedLlmModelForUi = rewritePreference.selection?.model_id ?? (
-		llmModelOptions.length === 0
+	const selectedLlmModelForUi =
+		rewritePreference.selection?.model_id ??
+		(llmModelOptions.length === 0
 			? null
 			: isDefaultScope
 				? (settings?.llm_model ?? null)

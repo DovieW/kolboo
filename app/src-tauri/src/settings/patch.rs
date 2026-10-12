@@ -174,6 +174,7 @@ pub fn apply_settings_patch(
     }
 
     if scoped
+        || patch.contains_key("stt_input_mode")
         || patch.contains_key("rewrite_program_prompt_profiles")
         || crate::model_selection::ModelAction::ALL
             .iter()

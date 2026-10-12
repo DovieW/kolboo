@@ -85,7 +85,7 @@ pub use event_payloads::{
     OverlayAudioLevelPayload, OverlayOcrContextUnavailablePayload, PipelineErrorPayload,
     PipelineStateEvent, PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload,
     QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload,
-    SystemEvent,
+    SttPartialTranscriptPayload, SystemEvent,
 };
 
 pub use audio_capture::AudioCaptureDiagnostics;
@@ -141,6 +141,7 @@ pub use settings::IntentRouterSettings;
 pub use settings::ProxySettings;
 pub use settings::RewritePreset;
 pub use settings::RewriteProgramPromptProfile;
+pub use settings::SttInputMode;
 pub use windows_apps::OpenWindowInfo;
 
 #[cfg(target_os = "windows")]
@@ -801,6 +802,7 @@ pub(crate) fn stop_recording(
                                 sessions::normal_dictation_output::execute_normal_dictation_output(
                                     &app_clone,
                                     sessions::normal_dictation_output::NormalDictationOutputRequest {
+                                        session: crate::text::inject::OutputSession { pipeline: pipeline_clone.clone(), epoch },
                                         output_value: output_value.as_str(),
                                         output_intent,
                                         live_output_completed: result.live_output_completed,

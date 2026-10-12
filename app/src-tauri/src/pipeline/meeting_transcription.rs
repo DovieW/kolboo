@@ -41,7 +41,7 @@ pub(super) async fn transcribe<F, Fut>(
     upload: F,
 ) -> Result<SttResult, PipelineError>
 where
-    F: FnMut(Vec<u8>) -> Fut,
+    F: FnMut(Vec<u8>, u64) -> Fut,
     Fut: std::future::Future<Output = Result<SttResult, PipelineError>>,
 {
     transcribe_source(audio, path, settings_key, cancel, UPLOAD_FRAMES, upload).await
@@ -153,7 +153,7 @@ async fn transcribe_source<F, Fut>(
     mut upload: F,
 ) -> Result<SttResult, PipelineError>
 where
-    F: FnMut(Vec<u8>) -> Fut,
+    F: FnMut(Vec<u8>, u64) -> Fut,
     Fut: std::future::Future<Output = Result<SttResult, PipelineError>>,
 {
     if cancel.is_cancelled() {
@@ -232,7 +232,7 @@ where
             if cancel.is_cancelled() {
                 return Err(PipelineError::Cancelled);
             }
-            let result = upload(wav).await?;
+            let result = upload(wav, u64::from(start)).await?;
             output.retry.attempts += result.retry.attempts;
             output.retry.retries += result.retry.retries;
             output.retry.total_delay_ms += result.retry.total_delay_ms;

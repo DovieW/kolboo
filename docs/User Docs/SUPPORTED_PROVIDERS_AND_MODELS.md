@@ -126,6 +126,41 @@ extend its language support.
 - `enhanced` — Enhanced
 - `standard` — Standard
 
+### `yiddishlabs` (YiddishLabs)
+
+- `yiddishlabs-3-turbo` — Flash Turbo, uploaded after recording; not realtime.
+- `yiddishlabs-standard` — Standard, asynchronous jobs for imported files and
+  meetings only; not offered for dictation.
+
+In **Settings → API keys**, Flash and Standard have separate secure key fields.
+Saving one key does not make the other model ready. Managed models appear only
+when Kolboo has configured and published their server-side routes; a BYOK key
+does not grant Managed access.
+
+Both APIs receive an explicit `auto` language hint unless you select an override.
+Flash accepts Auto, Yiddish, English and Hebrew; Standard additionally accepts
+Lashon Kodesh (`lk`). Incompatible saved hints stay visible rather than being
+changed to Auto. These are the provider's documented hints, not an accuracy
+guarantee for Yiddish, Hebrew or mixed-language speech.
+
+YiddishLabs says Flash does not store submitted audio or transcripts. Standard
+stores submitted jobs/content. Standard's local upload receipt contains no audio,
+transcript or plaintext key. Retrying a known job resumes polling rather than
+uploading again. An uncertain submission stays pending; do not create another
+upload to work around it. Cancelling Kolboo's local work does not cancel vendor
+processing or charges. Failed recordings remain available for recovery.
+
+Long uploads use the file/meeting chunking and completed-chunk checkpoints.
+Each chunk's receipt includes its recording position, so identical audio in two
+different chunks cannot accidentally share a paid job or allowance reservation.
+On Unix, receipt bytes and their directory entries are synced before submission.
+Windows filesystem recovery and native recording/paste behavior still require a
+Windows smoke test; Linux test fixtures do not establish that platform evidence.
+Unknown vendor pricing is not displayed as free, and Managed allowance is
+measured in audio seconds rather than estimated vendor credits.
+
+Protocol and retention descriptions: [YiddishLabs API documentation](https://app.yiddishlabs.com/app/developer/api-docs).
+
 ### `deepgram` (Deepgram)
 
 - `nova-3` — Nova 3

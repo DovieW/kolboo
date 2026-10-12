@@ -57,6 +57,7 @@ pub struct PipelineConfig {
     pub stt_model: Option<String>,
     /// Optional language hint for STT (None = auto-detect)
     pub stt_language: Option<String>,
+    pub stt_input_mode: crate::settings::SttInputMode,
 
     /// Optional global transcription prompt.
     ///
@@ -211,6 +212,7 @@ impl Default for PipelineConfig {
             managed_inference_fallback_llm_provider: None,
             stt_model: None,
             stt_language: Some(default_values::DEFAULT_STT_LANGUAGE.to_string()),
+            stt_input_mode: crate::settings::SttInputMode::Auto,
             stt_transcription_prompt: None,
             whisper_server_base_url: None,
             retry_config: RetryConfig::default(),

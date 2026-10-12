@@ -150,6 +150,13 @@ export function useUpdateSTTLiveOutput() {
 	);
 }
 
+export function useUpdateSTTInputMode() {
+	return useSettingsInvalidatingMutation(
+		(mode: import("../tauri").SttInputMode) =>
+			tauriAPI.updateSTTInputMode(mode),
+	);
+}
+
 export function useUpdateSTTSimulatedStreaming() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateSTTSimulatedStreaming(enabled),

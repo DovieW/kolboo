@@ -8,6 +8,8 @@ import {
 	closeSync,
 	writeFileSync,
 	readFileSync,
+	readlinkSync,
+	existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -34,21 +36,47 @@ if (!inside) {
 		"dbus-run-session",
 		"xprop",
 		"unshare",
+		"keyctl",
 		"python3",
 	]) {
 		if (!commandExists(tool, env)) {
 			console.error(
-				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils",
+				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils",
 			);
 			process.exit(1);
 		}
 	}
 	const directory = mkdtempSync(path.join(tmpdir(), "kolboo-window-test-"));
-	for (const folder of ["data", "config", "cache"])
-		mkdirSync(path.join(directory, folder));
+	for (const folder of ["data", "config", "cache", "runtime"])
+		mkdirSync(path.join(directory, folder), { mode: 0o700 });
+	// Native callback tests use ALSA's null PCM, never the operator's microphone.
+	writeFileSync(
+		path.join(directory, "asound.conf"),
+		"pcm.!default { type null }\n",
+	);
+	let namespaceRunner = ["unshare", "--user", "--map-current-user", "--"];
+	if (env.KOLBOO_NATIVE_USER_NAMESPACE_RUNNER) {
+		try {
+			namespaceRunner = JSON.parse(env.KOLBOO_NATIVE_USER_NAMESPACE_RUNNER);
+		} catch {
+			throw new Error("Invalid trusted native user-namespace launcher");
+		}
+	}
+	if (
+		!Array.isArray(namespaceRunner) ||
+		namespaceRunner.length === 0 ||
+		!namespaceRunner.every(
+			(argument) => typeof argument === "string" && argument.length > 0,
+		)
+	)
+		throw new Error("Invalid trusted native user-namespace launcher");
 	const result = spawnSync(
-		"xvfb-run",
+		"keyctl",
 		[
+			"session",
+			"-",
+			...namespaceRunner,
+			"xvfb-run",
 			"-a",
 			"-s",
 			"-screen 0 2880x1800x24 -nolisten tcp",
@@ -63,11 +91,18 @@ if (!inside) {
 			stdio: "inherit",
 			env: {
 				...env,
+				KOLBOO_NATIVE_PARENT_USER_NAMESPACE: readlinkSync("/proc/self/ns/user"),
+				KOLBOO_NATIVE_EXPECTED_UID: String(process.getuid()),
+				KOLBOO_NATIVE_EXPECTED_GID: String(process.getgid()),
 				XDG_DATA_HOME: path.join(directory, "data"),
 				XDG_CONFIG_HOME: path.join(directory, "config"),
 				XDG_CACHE_HOME: path.join(directory, "cache"),
+				XDG_RUNTIME_DIR: path.join(directory, "runtime"),
+				GNOME_KEYRING_CONTROL: path.join(directory, "runtime", "keyring"),
 				KOLBOO_NATIVE_WINDOW_TEST: "1",
 				KOLBOO_NATIVE_WINDOW_DIRECTORY: directory,
+				ALSA_CONFIG_PATH: path.join(directory, "asound.conf"),
+				NO_AT_BRIDGE: "1",
 				GDK_BACKEND: "x11",
 				WINIT_UNIX_BACKEND: "x11",
 				GDK_SCALE: "1",
@@ -79,8 +114,30 @@ if (!inside) {
 		},
 	);
 	console.log(`Native window test artifacts: ${directory}`);
+	if (
+		result.status === 0 &&
+		!existsSync(path.join(directory, "namespace-ready"))
+	)
+		throw new Error(
+			"The native launcher did not enter the isolated test fixture",
+		);
 	process.exit(result.status ?? 1);
 }
+
+if (
+	readlinkSync("/proc/self/ns/user") ===
+		env.KOLBOO_NATIVE_PARENT_USER_NAMESPACE ||
+	String(process.getuid()) !== env.KOLBOO_NATIVE_EXPECTED_UID ||
+	String(process.getgid()) !== env.KOLBOO_NATIVE_EXPECTED_GID
+)
+	throw new Error(
+		"Native tests require a private user namespace and the original runner UID/GID",
+	);
+writeFileSync(
+	path.join(env.KOLBOO_NATIVE_WINDOW_DIRECTORY, "namespace-ready"),
+	"verified\n",
+	{ mode: 0o600 },
+);
 
 const manager = spawn("openbox", ["--sm-disable"], {
 	env,

@@ -11,7 +11,7 @@ import {
 	normalizeOverlayModeValue,
 	normalizeWidgetPosition,
 } from "./appBehavior";
-import { normalizePlayingAudioHandling } from "./audio";
+import { normalizePlayingAudioHandling, normalizeSttInputMode } from "./audio";
 import {
 	normalizeAnthropicThinkingBudget,
 	normalizeGeminiThinkingBudget,
@@ -63,6 +63,7 @@ export function normalizeRawRewritePreset(
 		stt_provider: typeof p.stt_provider === "string" ? p.stt_provider : null,
 		stt_model: typeof p.stt_model === "string" ? p.stt_model : null,
 		stt_language: normalizeSttLanguageOverride(p.stt_language),
+		stt_input_mode: normalizeSttInputMode(p.stt_input_mode),
 		stt_timeout_seconds:
 			typeof p.stt_timeout_seconds === "number" &&
 			Number.isFinite(p.stt_timeout_seconds)

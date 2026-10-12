@@ -29,7 +29,9 @@ export interface ManagedModel {
 	id: string;
 	display_name: string;
 	provider: string;
-	capabilities: Array<"chat_completions" | "responses" | "transcription">;
+	capabilities: Array<
+		"chat_completions" | "responses" | "transcription" | "transcription_jobs"
+	>;
 	default_for_provider: boolean;
 }
 

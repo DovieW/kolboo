@@ -16,7 +16,7 @@ import {
 	normalizeQuickAskDismissModeOverride,
 	normalizeWidgetPosition,
 } from "./appBehavior";
-import { normalizePlayingAudioHandling } from "./audio";
+import { normalizePlayingAudioHandling, normalizeSttInputMode } from "./audio";
 import { normalizeActiveWindowOcrModeOverride } from "./ocr";
 import { normalizeRawRewritePreset } from "./presets";
 import {
@@ -97,9 +97,12 @@ export function normalizeCleanupPromptSectionsOverride(
 	return out;
 }
 
-export type NormalizedRewriteProgramPromptProfile = Omit<RewriteProgramPromptProfile, "model_selections" | "presets"> & {
-	model_selections:ModelSelections;
-	presets:NormalizedRewritePreset[] | null;
+export type NormalizedRewriteProgramPromptProfile = Omit<
+	RewriteProgramPromptProfile,
+	"model_selections" | "presets"
+> & {
+	model_selections: ModelSelections;
+	presets: NormalizedRewritePreset[] | null;
 };
 
 export function normalizeRewriteProfile(
@@ -240,9 +243,7 @@ export function normalizeRewriteProfile(
 
 	const presets_raw = p.presets;
 	const presets: NormalizedRewritePreset[] | null = Array.isArray(presets_raw)
-		? presets_raw
-				.map(normalizeRawRewritePreset)
-				.filter((x) => x !== null)
+		? presets_raw.map(normalizeRawRewritePreset).filter((x) => x !== null)
 		: null;
 
 	const default_preset_id =
@@ -273,6 +274,7 @@ export function normalizeRewriteProfile(
 		stt_provider,
 		stt_model,
 		stt_language,
+		stt_input_mode: normalizeSttInputMode(p.stt_input_mode),
 		stt_timeout_seconds,
 		llm_provider,
 		llm_model,

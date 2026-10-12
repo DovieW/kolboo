@@ -50,6 +50,9 @@ fn native_window_manager_integration() {
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
+        .manage(crate::recordings::RecordingStore::new(
+            history_directory.path().into(),
+        ))
         .manage(crate::history::HistoryStorage::new(
             history_directory.path().into(),
         ))
@@ -95,6 +98,10 @@ fn native_window_manager_integration() {
     crate::pipeline::native_model_actions(app.handle());
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::pipeline::native_streaming_consumer(app.handle());
+    crate::text::live_target::native_test(app.handle());
+    crate::audio_capture::native_null_pcm_callbacks();
+    crate::pipeline::native_recording_output(app.handle());
+    crate::pipeline::native_completed_upload_retry(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
     // A real GTK screen with controlled fractional DPI, not a fake Window.

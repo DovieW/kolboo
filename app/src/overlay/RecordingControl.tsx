@@ -38,6 +38,7 @@ import { useOverlayHotkeyEvents } from "./useOverlayHotkeyEvents";
 import { useOverlayHoverGating } from "./useOverlayHoverGating";
 import { useOverlayPipelineEvents } from "./useOverlayPipelineEvents";
 import { useOverlayPipelineStatePolling } from "./useOverlayPipelineStatePolling";
+import { useTranscriptPreview } from "./useTranscriptPreview";
 
 type CommandErrorExtract = {
 	message: string;
@@ -247,6 +248,7 @@ export default function RecordingControl() {
 		clearError,
 		setError,
 	} = useOverlayUiReducer();
+	const transcriptPreview = useTranscriptPreview();
 	const {
 		state: {
 			expanded,
@@ -1336,6 +1338,17 @@ export default function RecordingControl() {
 										{lastError.message}
 									</button>
 								</div>
+							) : transcriptPreview &&
+								(pipelineState === "recording" ||
+									pipelineState === "transcribing") ? (
+                                <section
+									className="overlay-phase-text"
+									dir="auto"
+									aria-label="Provisional transcript"
+									title={transcriptPreview}
+								>
+									{transcriptPreview}
+                                </section>
 							) : centerPhaseText && showDetailedLoading ? (
 								<div className="overlay-phase-text" aria-live="polite">
 									{centerPhaseText}

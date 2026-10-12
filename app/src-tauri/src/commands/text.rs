@@ -38,12 +38,15 @@ pub async fn type_text(app: AppHandle, text: String) -> CommandResult<()> {
 
     crate::windows_uia::insert::insert_text_with_snapshot(
         &app,
-        &text,
-        snapshot,
-        true,
-        true,
-        smart_paste_protection,
-        crate::core::output_settings::foreground_paste_shortcut(&app),
+        crate::windows_uia::insert::WindowsInsertRequest {
+            text: &text,
+            initial_snapshot: snapshot,
+            allow_paste: true,
+            allow_typing: true,
+            smart_paste_protection,
+            paste_shortcut: crate::core::output_settings::foreground_paste_shortcut(&app),
+            owner: None,
+        },
     )
     .map_err(CommandError::from)?;
 

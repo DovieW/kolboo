@@ -17,6 +17,7 @@ fn delayed_approval_cannot_insert_into_new_or_unknown_session() {
 fn output_lease_tracks_real_pipeline_ownership_without_starting_capture() {
     let pipeline = crate::pipeline::SharedPipeline::new(crate::pipeline::PipelineConfig::default());
     let lease = OutputLease {
+        target: None,
         epoch: pipeline.session_epoch(),
         pipeline: Some(pipeline.clone()),
     };
@@ -25,11 +26,13 @@ fn output_lease_tracks_real_pipeline_ownership_without_starting_capture() {
     assert!(!recovery.is_cancelled());
     assert!(lease.ensure_current().is_err());
     let current = OutputLease {
+        target: None,
         epoch: pipeline.session_epoch(),
         pipeline: Some(pipeline.clone()),
     };
     assert_eq!(current.ensure_current(), Ok(()));
     let unknown = OutputLease {
+        target: None,
         epoch: None,
         pipeline: Some(pipeline),
     };
@@ -38,6 +41,7 @@ fn output_lease_tracks_real_pipeline_ownership_without_starting_capture() {
     // don't claim a recording session and still use the input controller.
     assert_eq!(
         OutputLease {
+            target: None,
             epoch: None,
             pipeline: None
         }

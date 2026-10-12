@@ -53,6 +53,7 @@ const PIPELINE_SETTING_KEYS = new Set([
 	"stt_model",
 	"stt_use_managed_inference",
 	"stt_language",
+	"stt_input_mode",
 	"stt_transcription_prompt",
 	"stt_live_output",
 	"stt_simulated_streaming",
@@ -139,7 +140,8 @@ function changedKeys(params: {
 		...Object.keys(params.patch ?? {}),
 		...(params.deleteKeys ?? []),
 	]);
-	if ([...keys].some(key => key.startsWith("model_selection_scope:"))) keys.add("rewrite_program_prompt_profiles");
+	if ([...keys].some((key) => key.startsWith("model_selection_scope:")))
+		keys.add("rewrite_program_prompt_profiles");
 	return keys;
 }
 

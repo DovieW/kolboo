@@ -62,7 +62,15 @@ mod stt_provider_resolver;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_completed_upload_retry;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_live_output;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_managed_stt_refresh;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::native_model_actions;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_recording_output;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::native_streaming_consumer;
 mod transcription_flow;
@@ -93,7 +101,8 @@ pub use types::{LlmNotAttemptedReason, LlmOutcome, PipelineError, TranscriptionR
 
 use profile_matcher::select_profile_for_program_path;
 pub(crate) use profile_resolution::{
-    resolve_request_profile_context, ActiveWindowOcrModeFallbacks, DefaultProfileSelectionPolicy,
+    resolve_request_profile_context, select_effective_preset, ActiveWindowOcrModeFallbacks,
+    DefaultProfileSelectionPolicy,
 };
 
 pub(crate) fn select_profile_for_foreground_app(
@@ -227,6 +236,12 @@ struct PipelineInner {
     injected_embeddings_provider: Option<Arc<dyn crate::embeddings::EmbeddingsProvider>>,
     state: PipelineState,
     config: PipelineConfig,
+    config_revision: u64,
+    recording_revision: u64,
+    recording_config: Option<PipelineConfig>,
+    recording_profile_context: Option<profile_resolution::RequestProfileContext>,
+    recording_provider: Option<Result<stt_provider_resolver::ResolvedSttProvider, PipelineError>>,
+    pending_connection: Option<crate::stt::streaming::OwnedStreamingTask<()>>,
     /// Cancellation token for the current operation
     cancel_token: Option<CancellationToken>,
 
@@ -267,6 +282,7 @@ struct EffectiveSttSettings {
     provider_id: String,
     model: Option<String>,
     language: Option<String>,
+    input_mode: crate::settings::SttInputMode,
     timeout: Duration,
 }
 
@@ -324,6 +340,10 @@ impl PipelineInner {
             provider_id,
             model,
             language,
+            input_mode: active_preset
+                .and_then(|p| p.stt_input_mode)
+                .or_else(|| active_profile.and_then(|p| p.stt_input_mode))
+                .unwrap_or(self.config.stt_input_mode),
             timeout,
         }
     }
@@ -441,6 +461,12 @@ impl PipelineInner {
             injected_embeddings_provider: None,
             state: PipelineState::Idle,
             config: config.clone(),
+            config_revision: 0,
+            recording_revision: 0,
+            recording_config: None,
+            recording_profile_context: None,
+            recording_provider: None,
+            pending_connection: None,
             cancel_token: None,
             ocr: OcrSessionState::default(),
             stt_complete: false,
@@ -474,9 +500,27 @@ impl PipelineInner {
         provider_id: &str,
         params: LlmProviderParams,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
-        let resolved = resolve_cached_llm_provider_config(&self.config, provider_id, params)?;
+        let config = self.recording_config.as_ref().unwrap_or(&self.config);
+        let mut resolved = resolve_cached_llm_provider_config(config, provider_id, params)?;
 
         if resolved.managed_transport_active {
+            if !self.config.managed_inference_enabled
+                || !batch_stt_orchestration::same_managed_owner(
+                    config.managed_inference_access_token.as_deref(),
+                    self.config.managed_inference_access_token.as_deref(),
+                )
+            {
+                return Err(PipelineError::Config("The managed login session changed during recording. Your recording is retained; retry after refreshing access".into()));
+            }
+            // Credentials may renew for the same owner, but the selected model,
+            // gateway and payment source remain frozen for this recording.
+            resolved.config.managed_access_token =
+                self.config.managed_inference_access_token.clone();
+            resolved.config.api_key = self
+                .config
+                .managed_inference_access_token
+                .clone()
+                .unwrap_or_default();
             if let Some(store) = &self.config.request_log_store {
                 let _ = store.with_current(|log| {
                     log.managed_inference = true;
@@ -490,8 +534,8 @@ impl PipelineInner {
 
         let provider = create_llm_provider(
             &resolved.config,
-            self.config.request_log_store.clone(),
-            &self.config.proxy_settings,
+            config.request_log_store.clone(),
+            &config.proxy_settings,
         )?;
         self.llm_provider_cache
             .insert(resolved.cache_key, provider.clone());
@@ -543,8 +587,19 @@ impl PipelineInner {
         // Note: LLM providers are created on-demand per transcription based on the active profile.
     }
 
+    fn clear_recording_snapshot(&mut self) {
+        if self.recording_config.is_some() && self.recording_revision != self.config_revision {
+            self.llm_provider_cache.clear();
+        }
+        self.recording_config = None;
+        self.recording_profile_context = None;
+        self.recording_provider = None;
+        self.pending_connection.take();
+    }
+
     /// Reset to idle state, clearing any error condition
     fn reset_to_idle(&mut self) {
+        self.clear_recording_snapshot();
         self.transition_to(PipelineState::Idle, "reset_to_idle");
         if let Some(token) = self.cancel_token.take() {
             token.cancel();
@@ -566,6 +621,7 @@ impl PipelineInner {
 
     /// Transition to error state
     fn set_error(&mut self, msg: &str) {
+        self.clear_recording_snapshot();
         log::error!("Pipeline error: {}", msg);
         self.state = PipelineState::Error;
         if let Some(token) = self.cancel_token.take() {
@@ -1082,6 +1138,8 @@ impl SharedPipeline {
         // The overlay/hotkey path can still set the lock again while recording.
         let _ = self.set_session_preset_lock(None, None);
 
+        let profile_override = self.peek_session_profile_override();
+
         let mut inner = self
             .inner
             .lock()
@@ -1091,6 +1149,46 @@ impl SharedPipeline {
         if inner.recovery_job.is_some() || !recording::can_start_recording(inner.state) {
             return Err(PipelineError::AlreadyRecording);
         }
+
+        // Resolve before capture/overlay work and retain the concrete adapter.
+        // A later settings refresh cannot change this upload's model or source.
+        let context = resolve_request_profile_context(
+            &inner.config.llm_config,
+            profile_override.as_deref(),
+            select_profile_for_foreground_app(&inner.config.llm_config),
+            ActiveWindowOcrModeFallbacks {
+                rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+            },
+            DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+        );
+        let deferred_local = canonicalize_stt_provider_id(
+            &inner
+                .resolve_effective_stt_settings(
+                    context.active_profile(),
+                    context.effective_preset(),
+                )
+                .provider_id,
+        ) == "local-whisper";
+        // Local model loading may take seconds. Freeze its configuration now,
+        // but keep heavyweight initialization off the recording-start GUI path.
+        let provider = if history_only || deferred_local {
+            None
+        } else {
+            Some(
+                stt_provider_resolver::resolve_stt_provider_for_transcription(
+                    &mut inner,
+                    SttProviderResolutionRequest {
+                        active_profile: context.active_profile(),
+                        active_preset: context.effective_preset(),
+                        forced_provider: None,
+                        forced_model: None,
+                        forced_language: None,
+                    },
+                ),
+            )
+        };
 
         // Create a new cancellation token for this session
         inner
@@ -1120,6 +1218,10 @@ impl SharedPipeline {
             input_device_name.as_deref(),
         ) {
             Ok(()) => {
+                inner.recording_config = Some(inner.config.clone());
+                inner.recording_revision = inner.config_revision;
+                inner.recording_profile_context = Some(context);
+                inner.recording_provider = provider;
                 inner.stt_complete = false;
                 inner.history_only = history_only;
                 inner.recording_paused = false;
@@ -1142,9 +1244,33 @@ impl SharedPipeline {
     /// chunks in real-time. When recording stops, the transcript will be
     /// near-instant instead of waiting for a full batch upload.
     ///
-    /// This is fire-and-forget: if streaming setup fails, the pipeline will fall
-    /// back to the normal batch path in `stop_and_transcribe_detailed`.
+    /// Connection work belongs to this recording. Stop waits for it with a
+    /// deadline; cancellation/reset aborts it rather than detaching it.
+    pub fn start_concurrent_streaming(&self, app_handle: &AppHandle) {
+        let Ok(mut inner) = self.inner.lock() else {
+            return;
+        };
+        if inner.state != PipelineState::Recording || inner.pending_connection.is_some() {
+            return;
+        }
+        let epoch = inner.session_epoch;
+        let pipeline = self.clone();
+        let app = app_handle.clone();
+        let task = tauri::async_runtime::handle().inner().spawn(async move {
+            pipeline.connect_concurrent_streaming(&app, epoch).await;
+        });
+        inner.pending_connection = Some(crate::stt::streaming::OwnedStreamingTask(task));
+    }
+
+    #[cfg(test)]
     pub async fn try_start_concurrent_streaming(&self, app_handle: &AppHandle) {
+        let Some(epoch) = self.session_epoch() else {
+            return;
+        };
+        self.connect_concurrent_streaming(app_handle, epoch).await;
+    }
+
+    async fn connect_concurrent_streaming(&self, app_handle: &AppHandle, epoch: u64) {
         // Home recordings must not feed the live dictation/insertion path.
         if self.is_history_only_recording() {
             return;
@@ -1162,8 +1288,16 @@ impl SharedPipeline {
         };
 
         // 1. Resolve STT provider under the lock (brief).
-        let (stt_provider, sample_rate, use_simulated, proxy_settings, cancel) = {
-            let mut inner = match self.inner.lock() {
+        let (
+            stt_provider,
+            sample_rate,
+            use_simulated,
+            proxy_settings,
+            cancel,
+            configured_live_output,
+            live_output_flag,
+        ) = {
+            let inner = match self.inner.lock() {
                 Ok(inner) => inner,
                 Err(e) => {
                     log::warn!("Concurrent streaming: lock failed: {}", e);
@@ -1171,47 +1305,56 @@ impl SharedPipeline {
                 }
             };
 
-            if inner.state != PipelineState::Recording {
+            if inner.session_epoch != epoch
+                || !matches!(
+                    inner.state,
+                    PipelineState::Recording | PipelineState::Transcribing
+                )
+            {
                 log::debug!("Concurrent streaming: not recording, skipping");
                 return;
             }
 
-            let effective = inner.resolve_effective_stt_settings(None, None);
+            let context = inner.recording_profile_context.as_ref();
+            let _ = app_handle.emit(
+                crate::events::EVENT_STT_PARTIAL_TRANSCRIPT,
+                crate::SttPartialTranscriptPayload::Started {
+                    session_epoch: epoch,
+                },
+            );
+            let config = inner.recording_config.as_ref().unwrap_or(&inner.config);
+            let input_mode = context
+                .and_then(|c| c.effective_preset())
+                .and_then(|p| p.stt_input_mode)
+                .or_else(|| {
+                    context
+                        .and_then(|c| c.active_profile())
+                        .and_then(|p| p.stt_input_mode)
+                })
+                .unwrap_or(config.stt_input_mode);
+            if input_mode == crate::settings::SttInputMode::AfterRecording {
+                return;
+            }
 
             // Create the provider on-demand if it's not cached yet (e.g. first
             // recording after app start, or after a config sync that cleared the cache).
-            let provider_result = if let Some(choice) = &effective.selection {
-                stt_provider_resolver::get_or_create_selected_stt_provider(
-                    &mut inner,
-                    choice,
-                    effective.language.clone(),
-                )
-            } else {
-                inner.get_or_create_stt_provider(
-                    &effective.provider_id,
-                    effective.model.clone(),
-                    effective.language.clone(),
-                )
+            let Some(Ok(resolved)) = inner.recording_provider.as_ref() else {
+                return;
             };
-            let provider = match provider_result {
-                Ok(p) => p,
-                Err(e) => {
-                    log::warn!(
-                        "Concurrent streaming: failed to create STT provider '{}': {}",
-                        effective.provider_id,
-                        e
-                    );
-                    return;
-                }
-            };
+            // Managed realtime and repeated simulated uploads are outside this
+            // phase. A BYOK-only advanced flag cannot start managed paid calls.
+            if resolved.managed {
+                return;
+            }
+            let provider = resolved.provider.clone();
+            let config = inner.recording_config.as_ref().unwrap_or(&inner.config);
 
-            let use_simulated =
-                !provider.supports_streaming() && inner.config.stt_simulated_streaming;
+            let use_simulated = !provider.supports_streaming() && config.stt_simulated_streaming;
 
             if !provider.supports_streaming() && !use_simulated {
                 log::debug!(
                     "Concurrent streaming: provider '{}' does not support streaming",
-                    effective.provider_id
+                    resolved.provider_id
                 );
                 return;
             }
@@ -1224,10 +1367,51 @@ impl SharedPipeline {
                 provider,
                 sr,
                 use_simulated,
-                inner.config.proxy_settings.clone(),
+                config.proxy_settings.clone(),
                 cancel,
+                config.stt_live_output
+                    && context.is_some_and(|context| {
+                        context.live_insertion_compatible(
+                            config.llm_config.enabled,
+                            crate::get_setting_from_store(
+                                app_handle,
+                                "quick_replace_enabled",
+                                false,
+                            ),
+                        )
+                    })
+                    && !app_handle
+                        .try_state::<crate::state::AppState>()
+                        .is_some_and(|state| {
+                            state
+                                .quick_ask_session_active
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                        }),
+                inner.live_output_active.clone(),
             )
         };
+
+        let live_lease = if configured_live_output
+            && crate::platform_capabilities::automatic_text_injection_supported()
+        {
+            crate::text::inject::capture_live_output_target(app_handle)
+                .await
+                .map(|target| crate::text::inject::LiveOutputLease {
+                    pipeline: self.clone(),
+                    epoch,
+                    target,
+                })
+        } else {
+            None
+        };
+        if configured_live_output && live_lease.is_none() {
+            crate::emit_system_event(
+                app_handle,
+                "warning",
+                "Live insertion is unavailable for this focused target",
+                Some("Kolboo will preview the transcript and paste once after stopping."),
+            );
+        }
 
         // 2. Start the streaming session (async, outside the lock).
         let mut session = if use_simulated {
@@ -1291,41 +1475,7 @@ impl SharedPipeline {
         if let Some(mut partial_rx) = partial_rx {
             let app = app_handle.clone();
 
-            // Read live output config under a brief lock.
-            let (configured_live_output, live_output_flag) = {
-                let inner = match self.inner.lock() {
-                    Ok(inner) => inner,
-                    Err(_) => {
-                        log::warn!("Concurrent streaming: lock failed reading live output config");
-                        return;
-                    }
-                };
-                if cancel.is_cancelled() {
-                    return;
-                }
-                (
-                    inner.config.stt_live_output,
-                    inner.live_output_active.clone(),
-                )
-            };
-
-            // Read output settings once (won't change mid-recording).
-            let stt_live_output = configured_live_output
-                && crate::platform_capabilities::automatic_text_injection_supported();
-            if configured_live_output && !stt_live_output {
-                log::warn!(
-                    "Live output disabled: {}",
-                    crate::text::inject::WAYLAND_CLIPBOARD_FALLBACK_MESSAGE
-                );
-                crate::emit_system_event(
-                    &app,
-                    "warning",
-                    "Live output is unavailable in this Wayland session",
-                    Some("The completed transcript will be copied to the clipboard."),
-                );
-            }
-
-            let (output_mode, output_hit_enter) = if stt_live_output {
+            let (output_mode, output_hit_enter) = if live_lease.is_some() {
                 let view = settings_view::read_output_settings_view(&app, SettingsReadMode::Cached);
                 (view.mode, view.hit_enter)
             } else {
@@ -1335,6 +1485,7 @@ impl SharedPipeline {
                 &app,
                 self.peek_session_profile_override().as_deref(),
             );
+            let output_failed = session.partial_consumer_failure_flag();
 
             session.defer_partial_consumer(async move {
                 let mut is_first_chunk = true;
@@ -1347,14 +1498,28 @@ impl SharedPipeline {
                             None => break,
                         },
                     };
+                    if cancel.is_cancelled() {
+                        break;
+                    }
+                    // Repeat the idempotent marker for overlays mounted after
+                    // connection setup; duplicate markers never clear a preview.
+                    let _ = app.emit(
+                        crate::events::EVENT_STT_PARTIAL_TRANSCRIPT,
+                        crate::SttPartialTranscriptPayload::Started {
+                            session_epoch: epoch,
+                        },
+                    );
                     // Always emit the partial transcript event for overlay display.
-                    let payload = serde_json::json!({ "text": partial.text });
+                    let payload = crate::SttPartialTranscriptPayload::Partial {
+                        session_epoch: epoch,
+                        text: partial.text,
+                    };
                     if let Err(e) = app.emit(crate::events::EVENT_STT_PARTIAL_TRANSCRIPT, payload) {
                         log::warn!("Failed to emit partial transcript event: {}", e);
                     }
 
                     // Live output: paste committed chunks immediately.
-                    if stt_live_output {
+                    if let Some(lease) = &live_lease {
                         if let Some(committed) = partial.committed_text {
                             live_output_flag.store(true, std::sync::atomic::Ordering::SeqCst);
 
@@ -1374,17 +1539,19 @@ impl SharedPipeline {
                             if cancel.is_cancelled() {
                                 break;
                             }
-                            if let Err(e) = crate::text::inject::output_text_with_app_async(
+                            if let Err(e) = crate::text::inject::output_live_text_with_app_async(
                                 app.clone(),
                                 output_text,
                                 output_mode,
                                 output_hit_enter,
-                                false,
                                 output_paste_shortcut,
+                                lease,
                             )
                             .await
                             {
                                 log::error!("Live output: failed to paste chunk: {}", e);
+                                output_failed.store(true, std::sync::atomic::Ordering::SeqCst);
+                                break;
                             }
                         }
                     }
@@ -1393,7 +1560,7 @@ impl SharedPipeline {
             });
         }
 
-        self.install_concurrent_streaming_session(&session_cancel, session);
+        self.install_concurrent_streaming_session(&session_cancel, epoch, session);
     }
 
     /// Publish only after the session owns its consumer. Stop/finalize must
@@ -1401,6 +1568,7 @@ impl SharedPipeline {
     fn install_concurrent_streaming_session(
         &self,
         cancel: &CancellationToken,
+        epoch: u64,
         mut session: StreamingSttSession,
     ) {
         let mut inner = match self.inner.lock() {
@@ -1410,13 +1578,24 @@ impl SharedPipeline {
                 return;
             }
         };
-        if cancel.is_cancelled() || inner.state != PipelineState::Recording {
+        if cancel.is_cancelled()
+            || inner.session_epoch != epoch
+            || !matches!(
+                inner.state,
+                PipelineState::Recording | PipelineState::Transcribing
+            )
+        {
             log::info!("Concurrent streaming: recording stopped before session ready, aborting");
             return;
         }
         inner
             .audio_capture
             .set_live_audio_tx(Some(session.audio_tx.clone()));
+        // A late connection replays the complete retained prefix, then ends
+        // input immediately if stop already flushed capture.
+        if inner.state == PipelineState::Transcribing {
+            inner.audio_capture.set_live_audio_tx(None);
+        }
         // Stop/cancel cannot acquire this lock until the accepted session is
         // published. Rejected sessions never activate their consumer.
         session.activate_partial_consumer();
@@ -1591,6 +1770,7 @@ impl SharedPipeline {
             None, // no timeout for test endpoint
             &cancel_token,
             "Pipeline (test)",
+            None,
         )
         .await?;
 
@@ -1618,6 +1798,7 @@ impl SharedPipeline {
             stt_provider_id,
             stt_model,
             stt_language,
+            stt_managed_token,
             retry_config,
             timeout,
             cancel_token,
@@ -1626,6 +1807,8 @@ impl SharedPipeline {
             ocr_config,
             ocr_modes,
             mut streaming_session,
+            recording_config,
+            pending_connection,
         ) = {
             let mut inner = self
                 .inner
@@ -1636,7 +1819,12 @@ impl SharedPipeline {
                 return Err(PipelineError::NotRecording);
             }
 
-            let encode_cfg = inner.config.audio_encode_config();
+            let recording_config = inner
+                .recording_config
+                .as_ref()
+                .unwrap_or(&inner.config)
+                .clone();
+            let encode_cfg = recording_config.audio_encode_config();
             let outcome =
                 match recording::stop_recording_session(inner.audio_capture.as_mut(), encode_cfg) {
                     Ok(out) => out,
@@ -1657,7 +1845,7 @@ impl SharedPipeline {
             inner.last_recording_diagnostics = Some(outcome.diagnostics);
 
             // Check size limit before cloning/storing debug audio.
-            let max_bytes = inner.config.max_recording_bytes;
+            let max_bytes = recording_config.max_recording_bytes;
             if let Err(e) = recording::validate_recording_size(outcome.wav_bytes.len(), max_bytes) {
                 inner.set_error(&format!(
                     "Recording too large: {} bytes",
@@ -1670,13 +1858,22 @@ impl SharedPipeline {
             let wav_bytes = Arc::new(outcome.wav_bytes);
             inner.last_wav_bytes = Some(wav_bytes.clone());
 
+            if inner.audio_capture.recording_progress().1 {
+                inner.set_error("Audio capture was incomplete; the retained recording needs recovery before another attempt");
+                return Err(PipelineError::AudioCapture(
+                    crate::audio_capture::AudioCaptureError::Encoding(
+                        "Audio capture lost samples; incomplete audio was not submitted".into(),
+                    ),
+                ));
+            }
+
             // Evaluate quiet audio gate (VAD-based speech detection + amplitude thresholds).
             let gate_config = recording::QuietAudioGateConfig {
-                enabled: inner.config.quiet_audio_gate_enabled,
-                require_speech: inner.config.quiet_audio_require_speech,
-                min_duration_secs: inner.config.quiet_audio_min_duration_secs,
-                rms_dbfs_threshold: inner.config.quiet_audio_rms_dbfs_threshold,
-                peak_dbfs_threshold: inner.config.quiet_audio_peak_dbfs_threshold,
+                enabled: recording_config.quiet_audio_gate_enabled,
+                require_speech: recording_config.quiet_audio_require_speech,
+                min_duration_secs: recording_config.quiet_audio_min_duration_secs,
+                rms_dbfs_threshold: recording_config.quiet_audio_rms_dbfs_threshold,
+                peak_dbfs_threshold: recording_config.quiet_audio_peak_dbfs_threshold,
             };
             match recording::evaluate_quiet_audio_gate(&outcome.diagnostics, gate_config) {
                 recording::QuietAudioGateResult::NoSpeechDetected => {
@@ -1718,18 +1915,21 @@ impl SharedPipeline {
 
             inner.transition_to(PipelineState::Transcribing, "stop_and_transcribe_detailed");
 
-            let llm_config = inner.config.llm_config.clone();
-            let request_profile_context = resolve_request_profile_context(
-                &llm_config,
-                session_profile_override.as_deref(),
-                select_profile_for_foreground_app(&llm_config),
-                ActiveWindowOcrModeFallbacks {
-                    rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
-                    quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
-                    quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
-                },
-                DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
-            );
+            let llm_config = recording_config.llm_config.clone();
+            let request_profile_context =
+                inner.recording_profile_context.clone().unwrap_or_else(|| {
+                    resolve_request_profile_context(
+                        &llm_config,
+                        session_profile_override.as_deref(),
+                        select_profile_for_foreground_app(&llm_config),
+                        ActiveWindowOcrModeFallbacks {
+                            rewrite: inner.config.ocr_config.rewrite_mode.as_str(),
+                            quick_ask: inner.config.ocr_config.quick_ask_mode.as_str(),
+                            quick_replace: inner.config.ocr_config.quick_replace_mode.as_str(),
+                        },
+                        DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+                    )
+                });
             let active_profile = request_profile_context.active_profile().cloned();
             let default_profile = request_profile_context.default_profile().cloned();
 
@@ -1754,18 +1954,53 @@ impl SharedPipeline {
                 });
             }
             // Resolve effective STT settings (profile overrides -> global defaults, with safe fallback)
-            let resolved_stt = stt_provider_resolver::resolve_stt_provider_for_transcription(
-                &mut inner,
-                SttProviderResolutionRequest {
-                    active_profile: active_profile.as_ref(),
-                    active_preset: active_preset.as_ref(),
-                    forced_provider: None,
-                    forced_model: None,
-                    forced_language: None,
-                },
-            )?;
+            // The owned connection may not have started yet. Keep its immutable
+            // provider snapshot alive until it has connected or been cancelled.
+            let resolved_stt = match inner.recording_provider.take() {
+                Some(Ok(resolved)) => {
+                    inner.recording_provider = Some(Ok(resolved.clone()));
+                    resolved
+                }
+                Some(Err(error)) => {
+                    inner.set_error(&error.to_string());
+                    return Err(error);
+                }
+                None => {
+                    // Legacy/deferred adapters resolve against the captured
+                    // configuration, never settings changed during recording.
+                    let current = std::mem::replace(&mut inner.config, recording_config.clone());
+                    let resolved = stt_provider_resolver::resolve_stt_provider_for_transcription(
+                        &mut inner,
+                        SttProviderResolutionRequest {
+                            active_profile: active_profile.as_ref(),
+                            active_preset: active_preset.as_ref(),
+                            forced_provider: None,
+                            forced_model: None,
+                            forced_language: None,
+                        },
+                    );
+                    inner.config = current;
+                    match resolved {
+                        Ok(resolved) => resolved,
+                        Err(error) => {
+                            inner.set_error(&error.to_string());
+                            return Err(error);
+                        }
+                    }
+                }
+            };
 
-            let retry_config = inner.config.retry_config.clone();
+            if resolved_stt.managed
+                && !batch_stt_orchestration::same_managed_owner(
+                    resolved_stt.managed_token.as_deref(),
+                    inner.config.managed_inference_access_token.as_deref(),
+                )
+            {
+                inner.set_error("The managed login session changed during recording");
+                return Err(PipelineError::Config("Your managed login session changed. The recording is retained; refresh access and retry".into()));
+            }
+
+            let retry_config = recording_config.retry_config.clone();
             let cancel_token = inner
                 .cancel_token
                 .clone()
@@ -1788,55 +2023,41 @@ impl SharedPipeline {
                 resolved_stt.provider_id,
                 resolved_stt.model,
                 resolved_stt.language,
+                resolved_stt.managed_token,
                 retry_config,
                 resolved_stt.timeout,
                 cancel_token,
                 active_profile,
                 default_rewrite_include_clipboard_context,
-                inner.config.ocr_config.clone(),
+                recording_config.ocr_config.clone(),
                 ocr_modes,
                 streaming_session,
+                recording_config,
+                inner.pending_connection.take(),
             )
         };
 
         self.start_ocr_task_if_auto(&ocr_config, ocr_modes.should_auto_start(false));
 
-        // If the current model is realtime-only but the streaming session hasn't
-        // been stored yet (WebSocket still connecting in the spawned task), wait
-        // for it rather than immediately failing.
-        if streaming_session.is_none() && stt_provider.requires_streaming() {
-            log::info!(
-                "Pipeline: Realtime model with no streaming session yet — waiting for connection"
-            );
-            const MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
-            const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
-            // Use the runtime clock consistently with the polling timer.
-            let wait_start = tokio::time::Instant::now();
-            while wait_start.elapsed() < MAX_WAIT {
-                tokio::select! {
-                    biased;
-                    _ = cancel_token.cancelled() => return Err(PipelineError::Cancelled),
-                    _ = tokio::time::sleep(POLL_INTERVAL) => {},
-                }
-                if let Ok(mut inner) = self.inner.lock() {
-                    if cancel_token.is_cancelled() {
-                        return Err(PipelineError::Cancelled);
-                    }
-                    if inner.active_streaming_session.is_some() {
-                        streaming_session = inner.active_streaming_session.take();
-                        log::info!(
-                            "Pipeline: Streaming session became available after {}ms",
-                            wait_start.elapsed().as_millis()
-                        );
-                        break;
-                    }
-                }
+        // Drain the owned connection before choosing batch fallback. A slow
+        // connection may still deliver the complete buffered recording.
+        if let Some(mut connection) = pending_connection {
+            tokio::select! {
+                biased;
+                _ = cancel_token.cancelled() => return Err(PipelineError::Cancelled),
+                _ = tokio::time::timeout(std::time::Duration::from_secs(10), &mut connection.0) => {},
+            }
+            // Dropping the guard aborts a connection that exceeded its bound.
+            drop(connection);
+            let mut inner = self
+                .inner
+                .lock()
+                .map_err(|e| PipelineError::Lock(e.to_string()))?;
+            if cancel_token.is_cancelled() {
+                return Err(PipelineError::Cancelled);
             }
             if streaming_session.is_none() {
-                log::warn!(
-                    "Pipeline: Timed out after {}ms waiting for streaming connection",
-                    wait_start.elapsed().as_millis()
-                );
+                streaming_session = inner.active_streaming_session.take();
             }
         }
 
@@ -1901,12 +2122,14 @@ impl SharedPipeline {
                             &stt_provider_id,
                             stt_model.clone(),
                             stt_language.clone(),
+                            stt_managed_token.clone(),
                             &wav_bytes,
                             &retry_config,
                             timeout,
                             &cancel_token,
                             "Pipeline (streaming-fallback)",
                             "streaming fallback",
+                            None,
                         )
                         .await?;
                     (result.text, result.duration_ms, Some(result.retry))
@@ -1946,31 +2169,27 @@ impl SharedPipeline {
                     &stt_provider_id,
                     stt_model.clone(),
                     stt_language.clone(),
+                    stt_managed_token.clone(),
                     &wav_bytes,
                     &retry_config,
                     timeout,
                     &cancel_token,
                     "Pipeline",
                     "stop_and_transcribe_detailed",
+                    None,
                 )
                 .await?;
             (result.text, result.duration_ms, Some(result.retry))
         };
 
         // Phase 3-4: Routing and LLM rewrite via transcription_flow module
-        let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global, llm_config) = {
-            let inner = self
-                .inner
-                .lock()
-                .map_err(|e| PipelineError::Lock(e.to_string()))?;
-            (
-                inner.config.proxy_settings.clone(),
-                inner.config.llm_api_keys.clone(),
-                inner.config.request_log_store.clone(),
-                inner.config.llm_config.enabled,
-                inner.config.llm_config.clone(),
-            )
-        };
+        let (proxy_settings, llm_api_keys, request_log_store, llm_enabled_global, llm_config) = (
+            recording_config.proxy_settings,
+            recording_config.llm_api_keys,
+            recording_config.request_log_store,
+            recording_config.llm_config.enabled,
+            recording_config.llm_config,
+        );
 
         // OCR modes:
         // - auto: start + wait
@@ -2188,6 +2407,7 @@ impl SharedPipeline {
             stt_provider_id,
             stt_model,
             stt_language,
+            stt_managed_token,
             retry_config,
             timeout,
             cancel_token,
@@ -2337,6 +2557,7 @@ impl SharedPipeline {
                 resolved_stt.provider_id,
                 resolved_stt.model,
                 resolved_stt.language,
+                resolved_stt.managed_token,
                 retry_config,
                 resolved_stt.timeout,
                 cancel_token,
@@ -2384,25 +2605,51 @@ impl SharedPipeline {
                 checkpoint,
                 &settings_key,
                 &cancel_token,
-                |chunk| {
+                |chunk, chunk_offset| {
                     let provider = stt_provider.clone();
                     let model = stt_model.clone();
                     let language = stt_language.clone();
+                    let managed_token = stt_managed_token.clone();
                     let token = &cancel_token;
                     let retry = &retry_config;
                     let provider_id = &stt_provider_id;
+                    let upload_context = if is_meeting
+                        && provider_id == "yiddishlabs"
+                        && model.as_deref() == Some(crate::stt::yiddishlabs::STANDARD_MODEL)
+                    {
+                        checkpoint
+                            .map(|base| {
+                                Ok(crate::stt::SttUploadContext {
+                                    purpose: crate::stt::UploadPurpose::Meeting,
+                                    chunk_offset,
+                                    checkpoint_path: crate::stt::yiddishlabs::checkpoint_path(
+                                        base,
+                                        managed_token.is_some(),
+                                        &chunk,
+                                        chunk_offset,
+                                    )?,
+                                })
+                            })
+                            .transpose()
+                    } else {
+                        Ok(None)
+                    };
                     async move {
+                        let upload_context: Option<crate::stt::SttUploadContext> =
+                            upload_context.map_err(PipelineError::Stt)?;
                         self.run_batch_stt_request(
                             provider,
                             provider_id,
                             model,
                             language,
+                            managed_token,
                             &chunk,
                             retry,
                             timeout,
                             token,
                             "Meeting",
                             "meeting_upload",
+                            upload_context.as_ref(),
                         )
                         .await
                     }
@@ -2431,12 +2678,14 @@ impl SharedPipeline {
                 &stt_provider_id,
                 stt_model.clone(),
                 stt_language.clone(),
+                stt_managed_token,
                 memory.as_slice(),
                 &retry_config,
                 timeout,
                 &cancel_token,
                 "Pipeline (retry)",
                 "retry_transcription",
+                None,
             )
             .await?
         };
@@ -2614,6 +2863,7 @@ impl SharedPipeline {
             log::warn!("Pipeline: Config update requested while recording, will take effect after current session");
         }
 
+        inner.config_revision = inner.config_revision.wrapping_add(1);
         inner.config = config.clone();
 
         // If OCR was enabled and is now disabled (URL cleared or modes all off), cancel any
@@ -2773,6 +3023,9 @@ impl SharedPipeline {
     /// - Reset the pipeline to Idle state
     pub fn cancel(&self) {
         if let Ok(mut inner) = self.inner.lock() {
+            // Final output may still be queued after transcription returned to
+            // Idle. Explicit cancellation invalidates that output lease too.
+            inner.session_epoch = inner.session_epoch.wrapping_add(1);
             if let Some(job) = &inner.recovery_job {
                 job.cancel();
             }
@@ -2783,7 +3036,6 @@ impl SharedPipeline {
                 );
                 return;
             }
-
             // Signal cancellation to any async tasks
             if let Some(token) = inner.cancel_token.take() {
                 token.cancel();
@@ -2813,6 +3065,7 @@ impl SharedPipeline {
     /// Use this to recover from stuck states. Cancels any in-progress operations.
     pub fn force_reset(&self) {
         if let Ok(mut inner) = self.inner.lock() {
+            inner.session_epoch = inner.session_epoch.wrapping_add(1);
             if let Some(job) = &inner.recovery_job {
                 job.cancel();
             }

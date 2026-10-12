@@ -1,6 +1,6 @@
 use arboard::Clipboard;
 use enigo::{Direction, Enigo, Key, Keyboard};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -38,6 +38,7 @@ pub(crate) enum OutputDelivery {
 struct OutputLease {
     pipeline: Option<crate::pipeline::SharedPipeline>,
     epoch: Option<u64>,
+    target: Option<Arc<super::live_target::LiveOutputTarget>>,
 }
 
 #[cfg(desktop)]
@@ -49,10 +50,24 @@ impl OutputLease {
         let epoch = pipeline
             .as_ref()
             .and_then(|pipeline| pipeline.session_epoch());
-        Self { pipeline, epoch }
+        Self {
+            pipeline,
+            epoch,
+            target: None,
+        }
     }
 
     fn ensure_current(&self) -> Result<(), String> {
+        if self
+            .target
+            .as_ref()
+            .is_some_and(|target| !target.is_current())
+        {
+            return Err(
+                "Live text output stopped because its focused target changed or became unavailable"
+                    .into(),
+            );
+        }
         match &self.pipeline {
             Some(pipeline) => validate_output_epoch(self.epoch, pipeline.session_epoch()),
             None => Ok(()),
@@ -231,6 +246,122 @@ pub(crate) async fn output_text_with_app_async(
     shortcut: PasteShortcut,
 ) -> Result<OutputDelivery, String> {
     let lease = OutputLease::capture(&app);
+    dispatch_output(
+        app,
+        text,
+        mode,
+        hit_enter,
+        preserve_clipboard,
+        shortcut,
+        lease,
+    )
+    .await
+}
+
+#[cfg(desktop)]
+pub(crate) async fn capture_live_output_target(
+    app: &AppHandle,
+) -> Option<Arc<super::live_target::LiveOutputTarget>> {
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        app.run_on_main_thread(move || {
+            let _ = tx.send(super::live_target::LiveOutputTarget::capture().map(Arc::new));
+        })
+        .ok()?;
+        rx.await.ok().flatten()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(|| {
+            super::live_target::LiveOutputTarget::capture().map(Arc::new)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+}
+
+#[cfg(desktop)]
+pub(crate) struct LiveOutputLease {
+    pub(crate) pipeline: crate::pipeline::SharedPipeline,
+    pub(crate) epoch: u64,
+    pub(crate) target: Arc<super::live_target::LiveOutputTarget>,
+}
+
+#[cfg(desktop)]
+#[derive(Clone)]
+pub(crate) struct OutputSession {
+    pub(crate) pipeline: crate::pipeline::SharedPipeline,
+    pub(crate) epoch: Option<u64>,
+}
+
+#[cfg(desktop)]
+impl OutputSession {
+    pub(crate) fn ensure_current(&self) -> Result<(), String> {
+        validate_output_epoch(self.epoch, self.pipeline.session_epoch())
+    }
+}
+
+#[cfg(desktop)]
+pub(crate) async fn output_text_for_session_async(
+    app: AppHandle,
+    text: String,
+    intent: crate::core::output_settings::ResolvedOutputIntent,
+    session: &OutputSession,
+) -> Result<OutputDelivery, String> {
+    dispatch_output(
+        app,
+        text,
+        intent.mode(),
+        intent.hit_enter(),
+        !intent.clipboard_privacy_mode(),
+        intent.paste_shortcut(),
+        OutputLease {
+            pipeline: Some(session.pipeline.clone()),
+            epoch: session.epoch,
+            target: None,
+        },
+    )
+    .await
+}
+
+#[cfg(desktop)]
+pub(crate) async fn output_live_text_with_app_async(
+    app: AppHandle,
+    text: String,
+    mode: OutputMode,
+    hit_enter: bool,
+    shortcut: PasteShortcut,
+    lease: &LiveOutputLease,
+) -> Result<OutputDelivery, String> {
+    dispatch_output(
+        app,
+        text,
+        mode,
+        hit_enter,
+        false,
+        shortcut,
+        OutputLease {
+            pipeline: Some(lease.pipeline.clone()),
+            epoch: Some(lease.epoch),
+            target: Some(lease.target.clone()),
+        },
+    )
+    .await
+}
+
+#[cfg(desktop)]
+async fn dispatch_output(
+    app: AppHandle,
+    text: String,
+    mode: OutputMode,
+    hit_enter: bool,
+    preserve_clipboard: bool,
+    shortcut: PasteShortcut,
+    lease: OutputLease,
+) -> Result<OutputDelivery, String> {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         tauri::async_runtime::spawn_blocking(move || {

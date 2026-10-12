@@ -33,17 +33,20 @@ pub(super) struct SttProviderResolutionRequest<'a> {
 }
 
 /// Fully-resolved STT provider details for a transcription attempt.
+#[derive(Clone)]
 pub(super) struct ResolvedSttProvider {
     pub provider: Arc<dyn SttProvider>,
     pub provider_id: String,
     pub model: Option<String>,
     pub language: Option<String>,
     pub timeout: Duration,
+    pub managed: bool,
+    pub managed_token: Option<String>,
 }
 
 /// Resolve effective STT settings, apply per-run overrides, update request-log
-/// provider/model fields, create the provider, and fall back to the global STT
-/// provider if a profile/override provider is unavailable.
+/// provider/model fields and create the exact selected provider. An unavailable
+/// profile/override never silently falls back to the dictation model.
 pub(super) fn resolve_stt_provider_for_transcription(
     inner: &mut PipelineInner,
     request: SttProviderResolutionRequest<'_>,
@@ -70,8 +73,7 @@ pub(super) fn resolve_stt_provider_for_transcription(
         effective.language = super::normalize_stt_language_setting(Some(language.to_string()));
     }
 
-    let mut provider_id_used = if request.forced_provider.is_some() || effective.selection.is_some()
-    {
+    let provider_id_used = if request.forced_provider.is_some() || effective.selection.is_some() {
         effective.provider_id.clone()
     } else {
         resolve_stt_provider_for_runtime(
@@ -80,15 +82,15 @@ pub(super) fn resolve_stt_provider_for_transcription(
             effective.model.as_deref(),
         )
     };
-    let mut model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
-    let mut language_used = effective.language.clone();
+    let model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
+    let language_used = effective.language.clone();
 
     log_stt_provider_selection(inner, provider_id_used.as_str(), model_used.clone());
 
     // A meeting's explicitly selected local model must not follow later changes
     // to the dictation model. Use the existing model directory, never a UI path.
     #[cfg(feature = "local-whisper")]
-    if request.forced_provider.is_some()
+    if (request.forced_provider.is_some() || effective.selection.is_some())
         && provider_id_used == local_provider::LOCAL_WHISPER_PROVIDER_ID
     {
         let normalize = |value: &str| {
@@ -146,68 +148,45 @@ pub(super) fn resolve_stt_provider_for_transcription(
             model: effective.model,
             language: effective.language,
             timeout: effective.timeout,
+            managed: false,
+            managed_token: None,
         });
     }
 
-    let provider = match get_or_create_resolved_stt_provider(
+    let (provider, managed) = get_or_create_resolved_stt_provider(
         inner,
         &provider_id_used,
         effective.model.clone(),
         effective.language.clone(),
         effective.selection.as_ref().map(|choice| choice.source),
-    ) {
-        Ok(provider) => provider,
-        Err(err) => {
-            // Explicit per-recording/model selections must not silently use the
-            // dictation provider if their credentials/model are unavailable.
-            if request.forced_provider.is_some()
-                || effective.selection.is_some()
-                || provider_id_used.starts_with("custom_")
-            {
-                inner.set_error("The selected transcription provider is unavailable");
-                return Err(err);
-            }
-            let global_provider = canonicalize_stt_provider_id(&inner.config.stt_provider);
-            let global_provider = resolve_stt_provider_for_runtime(
-                &inner.config,
-                &global_provider,
-                inner.config.stt_model.as_deref(),
-            );
-            if global_provider == provider_id_used {
-                inner.set_error(&format!("STT provider init failed: {}", err));
-                return Err(err);
-            }
+    )
+    .map_err(|error| {
+        inner.set_error(
+            "The selected transcription provider is unavailable; the model choice has not changed",
+        );
+        error
+    })?;
 
-            log::warn!(
-                "Pipeline: Effective STT provider '{}' unavailable ({}), falling back to '{}'",
-                effective.provider_id,
-                err,
-                global_provider
-            );
-
-            let global_model = inner.config.stt_model.clone();
-            let global_language = inner.config.stt_language.clone();
-
-            provider_id_used = global_provider.clone();
-            model_used = model_for_log(inner, provider_id_used.as_str(), global_model.clone());
-            language_used = global_language.clone();
-
-            log_stt_provider_selection(inner, provider_id_used.as_str(), model_used.clone());
-
-            get_or_create_stt_provider(inner, &global_provider, global_model, global_language)
-                .map_err(|fallback_err| {
-                    inner.set_error(&format!("No STT provider configured: {}", fallback_err));
-                    fallback_err
-                })?
-        }
-    };
-
+    if effective.input_mode == crate::settings::SttInputMode::AfterRecording
+        && provider.requires_streaming()
+    {
+        inner.set_error("This model requires realtime input; choose Auto or a batch-capable model");
+        return Err(PipelineError::Config(
+            "After recording is unavailable for this realtime-only model".into(),
+        ));
+    }
     Ok(ResolvedSttProvider {
         provider,
         provider_id: provider_id_used,
         model: model_used,
         language: language_used,
         timeout: effective.timeout,
+        managed,
+        managed_token: if managed {
+            inner.config.managed_inference_access_token.clone()
+        } else {
+            None
+        },
     })
 }
 
@@ -261,6 +240,12 @@ fn log_stt_provider_selection(inner: &PipelineInner, provider_id: &str, model: O
 }
 
 pub(super) fn managed_stt_model_supported(provider_id: &str, model: Option<&str>) -> bool {
+    if provider_id == "yiddishlabs" {
+        return matches!(
+            model,
+            Some(crate::stt::yiddishlabs::FLASH_MODEL | crate::stt::yiddishlabs::STANDARD_MODEL)
+        );
+    }
     // Transport support is not entitlement: Edge still validates its live catalog.
     if provider_id == "openai" && model == Some("gpt-4o-transcribe-diarize") {
         return true;
@@ -310,6 +295,7 @@ pub(super) fn get_or_create_stt_provider(
     let provider_id =
         resolve_stt_provider_for_runtime(&inner.config, provider_id, model.as_deref());
     get_or_create_resolved_stt_provider(inner, &provider_id, model, language, None)
+        .map(|(provider, _)| provider)
 }
 
 pub(super) fn get_or_create_selected_stt_provider(
@@ -325,35 +311,41 @@ pub(super) fn get_or_create_selected_stt_provider(
         language,
         Some(choice.source),
     )
+    .map(|(provider, _)| provider)
 }
 
-fn get_or_create_resolved_stt_provider(
+pub(super) fn managed_transport_active(
+    inner: &PipelineInner,
+    provider_id: &str,
+    model: Option<&str>,
+    source: Option<crate::model_selection::ModelSource>,
+) -> Result<bool, PipelineError> {
+    let ready = inner.config.managed_inference_enabled && managed_gateway_ready(&inner.config);
+    let supported = managed_stt_model_supported(provider_id, model)
+        && !local_provider::bypasses_managed_transport(provider_id);
+    match source {
+        Some(crate::model_selection::ModelSource::Byok) => Ok(false),
+        Some(crate::model_selection::ModelSource::Managed) if !ready || !supported => Err(
+            PipelineError::Config("The selected Managed transcription model is unavailable. Sign in or refresh access; your model choice has not changed".into()),
+        ),
+        Some(crate::model_selection::ModelSource::Managed) => Ok(true),
+        None => Ok(ready && inner.config.managed_stt_preferred && supported),
+    }
+}
+
+pub(super) fn get_or_create_resolved_stt_provider(
     inner: &mut PipelineInner,
     provider_id: &str,
     model: Option<String>,
     language: Option<String>,
     source: Option<crate::model_selection::ModelSource>,
-) -> Result<Arc<dyn SttProvider>, PipelineError> {
+) -> Result<(Arc<dyn SttProvider>, bool), PipelineError> {
     if let Some(error) = &inner.config.model_selection_error {
         return Err(PipelineError::Config(error.clone()));
     }
     let provider_id = canonicalize_stt_provider_id(provider_id);
-    let managed_ready =
-        inner.config.managed_inference_enabled && managed_gateway_ready(&inner.config);
-    let legacy_managed_transport = managed_ready
-        && inner.config.managed_stt_preferred
-        && managed_stt_model_supported(provider_id.as_str(), model.as_deref())
-        && !local_provider::bypasses_managed_transport(provider_id.as_str());
-    let managed_transport_active = match source {
-        Some(crate::model_selection::ModelSource::Byok) => false,
-        Some(crate::model_selection::ModelSource::Managed) => {
-            if !managed_ready || !managed_stt_model_supported(&provider_id, model.as_deref()) {
-                return Err(PipelineError::Config("The selected Managed transcription model is unavailable. Sign in or refresh access; your model choice has not changed".into()));
-            }
-            true
-        }
-        None => legacy_managed_transport,
-    };
+    let managed_transport_active =
+        managed_transport_active(inner, &provider_id, model.as_deref(), source)?;
 
     if managed_transport_active {
         if let Some(store) = &inner.config.request_log_store {
@@ -376,9 +368,8 @@ fn get_or_create_resolved_stt_provider(
             stt_provider_cache_key(inner, provider_id.as_str(), model.clone(), language.clone())
         }
     };
-
     if let Some(provider) = inner.stt_provider_cache.get(&cache_key) {
-        return Ok(provider.clone());
+        return Ok((provider.clone(), managed_transport_active));
     }
 
     // Manual local-whisper mode: require explicit preload to avoid surprise UI stalls
@@ -412,7 +403,7 @@ fn get_or_create_resolved_stt_provider(
                 .map_err(|e| PipelineError::Config(format!("Local Whisper init failed: {}", e)))?;
             let provider = Arc::new(provider);
             inner.stt_provider_cache.insert(cache_key, provider.clone());
-            return Ok(provider);
+            return Ok((provider, managed_transport_active));
         }
 
         return Err(PipelineError::Config(
@@ -439,7 +430,7 @@ fn get_or_create_resolved_stt_provider(
 
         let provider = Arc::new(provider);
         inner.stt_provider_cache.insert(cache_key, provider.clone());
-        return Ok(provider);
+        return Ok((provider, managed_transport_active));
     }
 
     if provider_id.starts_with("custom_") {
@@ -478,7 +469,7 @@ fn get_or_create_resolved_stt_provider(
         .with_request_log_store(inner.config.request_log_store.clone());
         let provider: Arc<dyn SttProvider> = Arc::new(provider);
         inner.stt_provider_cache.insert(cache_key, provider.clone());
-        return Ok(provider);
+        return Ok((provider, managed_transport_active));
     }
 
     // Cloud providers use the common factory.
@@ -492,7 +483,15 @@ fn get_or_create_resolved_stt_provider(
         inner
             .config
             .stt_api_keys
-            .get(&provider_id)
+            .get(if provider_id == "yiddishlabs" {
+                if model.as_deref() == Some(crate::stt::yiddishlabs::STANDARD_MODEL) {
+                    crate::stt::yiddishlabs::STANDARD_KEY_SLOT
+                } else {
+                    crate::stt::yiddishlabs::FLASH_KEY_SLOT
+                }
+            } else {
+                &provider_id
+            })
             .cloned()
             .unwrap_or_default()
     };
@@ -519,7 +518,7 @@ fn get_or_create_resolved_stt_provider(
     )?;
 
     inner.stt_provider_cache.insert(cache_key, provider.clone());
-    Ok(provider)
+    Ok((provider, managed_transport_active))
 }
 
 #[cfg(test)]
@@ -531,6 +530,91 @@ mod tests {
     use crate::settings::{IntentRouterSettings, IntentRouterStrategy};
     use crate::stt::{AudioFormat, SttError};
     use async_trait::async_trait;
+
+    #[test]
+    fn yiddishlabs_requires_the_key_slot_for_the_exact_selected_model() {
+        let mut inner = PipelineInner::new(PipelineConfig::default());
+        inner.config.stt_api_keys.insert(
+            crate::stt::yiddishlabs::FLASH_KEY_SLOT.into(),
+            "synthetic-flash-key".into(),
+        );
+        let source = Some(crate::model_selection::ModelSource::Byok);
+        assert!(get_or_create_resolved_stt_provider(
+            &mut inner,
+            "yiddishlabs",
+            Some(crate::stt::yiddishlabs::STANDARD_MODEL.into()),
+            None,
+            source
+        )
+        .is_err());
+        let (flash, managed) = get_or_create_resolved_stt_provider(
+            &mut inner,
+            "yiddishlabs",
+            Some(crate::stt::yiddishlabs::FLASH_MODEL.into()),
+            None,
+            source,
+        )
+        .unwrap();
+        assert_eq!(flash.name(), "yiddishlabs");
+        assert!(!managed);
+        assert!(!flash.supports_streaming());
+        inner.config.stt_api_keys.insert(
+            crate::stt::yiddishlabs::STANDARD_KEY_SLOT.into(),
+            "synthetic-standard-key".into(),
+        );
+        let (standard, managed) = get_or_create_resolved_stt_provider(
+            &mut inner,
+            "yiddishlabs",
+            Some(crate::stt::yiddishlabs::STANDARD_MODEL.into()),
+            None,
+            source,
+        )
+        .unwrap();
+        assert_eq!(standard.name(), "yiddishlabs");
+        assert!(!managed);
+        assert!(!standard.supports_streaming());
+    }
+
+    #[test]
+    fn custom_transcription_requires_a_saved_raw_id_and_its_own_key() {
+        let mut inner = PipelineInner::new(PipelineConfig::default());
+        let source = Some(crate::model_selection::ModelSource::Byok);
+        assert!(get_or_create_resolved_stt_provider(
+            &mut inner,
+            "custom_fixture",
+            Some("speech".into()),
+            None,
+            source
+        )
+        .is_err());
+        inner.config.llm_config.custom_providers.push(serde_json::from_value(serde_json::json!({
+            "id":"custom_fixture", "name":"Synthetic provider", "base_url":"http://127.0.0.1:1", "stt_models":["speech"], "llm_models":[], "stt_model_names":{"speech":"Friendly name"}
+        })).unwrap());
+        for model in [None, Some("Friendly name".into()), Some("speech".into())] {
+            assert!(get_or_create_resolved_stt_provider(
+                &mut inner,
+                "custom_fixture",
+                model,
+                None,
+                source
+            )
+            .is_err());
+        }
+        inner
+            .config
+            .stt_api_keys
+            .insert("custom_fixture".into(), "synthetic-key".into());
+        let (provider, managed) = get_or_create_resolved_stt_provider(
+            &mut inner,
+            "custom_fixture",
+            Some("speech".into()),
+            None,
+            source,
+        )
+        .unwrap();
+        assert_eq!(provider.name(), "custom");
+        assert!(!managed);
+    }
 
     struct FakeSttProvider;
 
@@ -577,6 +661,7 @@ mod tests {
             stt_provider: provider.map(str::to_string),
             stt_model: model.map(str::to_string),
             stt_language: language.map(str::to_string),
+            stt_input_mode: None,
             stt_timeout_seconds: timeout_seconds,
             llm_provider: None,
             llm_model: None,
@@ -642,6 +727,7 @@ mod tests {
             stt_provider: provider.map(str::to_string),
             stt_model: model.map(str::to_string),
             stt_language: language.map(str::to_string),
+            stt_input_mode: None,
             stt_timeout_seconds: timeout_seconds,
             llm_provider: None,
             llm_model: None,
@@ -661,6 +747,36 @@ mod tests {
 
         assert_eq!(provider_id, "groq");
         assert_eq!(model.as_deref(), Some("base"));
+    }
+
+    #[test]
+    fn invalid_local_endpoint_fails_without_substituting_or_caching_a_provider() {
+        let mut inner = PipelineInner::new(PipelineConfig::default());
+        inner.config.whisper_server_base_url = Some("not-an-endpoint".into());
+        let error = get_or_create_resolved_stt_provider(
+            &mut inner,
+            local_provider::WHISPER_SERVER_PROVIDER_ID,
+            Some("whisper-1".into()),
+            None,
+            Some(crate::model_selection::ModelSource::Byok),
+        )
+        .err()
+        .unwrap();
+        assert!(matches!(error, PipelineError::Config(_)));
+        assert!(error.to_string().contains("Whisper server init failed"));
+        assert!(inner.stt_provider_cache.is_empty());
+        inner.config.whisper_server_base_url = Some("http://127.0.0.1:9/v1".into());
+        let (provider, managed) = get_or_create_resolved_stt_provider(
+            &mut inner,
+            local_provider::WHISPER_SERVER_PROVIDER_ID,
+            Some("whisper-1".into()),
+            None,
+            Some(crate::model_selection::ModelSource::Byok),
+        )
+        .unwrap();
+        assert_eq!(provider.name(), "whisper-server");
+        assert!(!managed);
+        assert_eq!(inner.stt_provider_cache.len(), 1);
     }
 
     #[test]
@@ -856,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_provider_failure_falls_back_to_global_provider() {
+    fn profile_provider_failure_preserves_selection_instead_of_using_global_provider() {
         let store = RequestLogStore::new();
         store.start_request("initial".to_string(), None);
 
@@ -869,7 +985,7 @@ mod tests {
         insert_cached_fake_provider(&mut inner, "groq", None, Some("en".to_string()));
 
         let profile = profile_with_stt(Some("openai"), None, Some("en"), None);
-        let resolved = resolve_stt_provider_for_transcription(
+        let result = resolve_stt_provider_for_transcription(
             &mut inner,
             SttProviderResolutionRequest {
                 active_profile: Some(&profile),
@@ -878,12 +994,10 @@ mod tests {
                 forced_model: None,
                 forced_language: None,
             },
-        )
-        .expect("global provider should resolve from cache");
-
-        assert_eq!(resolved.provider_id, "groq");
+        );
+        assert!(result.is_err());
         let logged_provider = store.with_current(|log| log.stt_provider.clone());
-        assert_eq!(logged_provider.as_deref(), Some("groq"));
+        assert_eq!(logged_provider.as_deref(), Some("openai"));
     }
 
     #[test]

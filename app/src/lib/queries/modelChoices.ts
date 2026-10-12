@@ -57,9 +57,15 @@ export function useModelChoices(purpose: ModelPurpose) {
 						(llm ? byok.data[provider.value] : STT_MODELS[provider.value]) ??
 						[]);
 		if (models.length === 0)
-			setupProviders.push({ provider_id: isWhisper ? "local-whisper" : provider.value, label: provider.label });
+			setupProviders.push({
+				provider_id: isWhisper ? "local-whisper" : provider.value,
+				label: provider.label,
+			});
 		for (const model of models) {
 			const providerId = isWhisper ? "local-whisper" : provider.value;
+			const standardJob =
+				providerId === "yiddishlabs" && model.value === "yiddishlabs-standard";
+			if (standardJob && purpose === "dictation") continue;
 			if (
 				!llm &&
 				purpose !== "dictation" &&
@@ -71,7 +77,10 @@ export function useModelChoices(purpose: ModelPurpose) {
 				whisper.data?.some(
 					(local) => local.id === model.value && local.is_downloaded,
 				) === true;
-			const ready = provider.configured !== false && downloaded;
+			const ready =
+				(provider.model_configured
+					? provider.model_configured[model.value] === true
+					: provider.configured !== false) && downloaded;
 			const realtime = !llm && isRealtimeSttModel(providerId, model.value);
 			const batch = llm || !isStreamingOnlySttModel(providerId, model.value);
 			const price = "pricing" in model ? model.pricing : undefined;
@@ -89,6 +98,7 @@ export function useModelChoices(purpose: ModelPurpose) {
 					: [
 							...(realtime ? ["Realtime input"] : []),
 							...(batch ? ["After recording"] : []),
+							...(standardJob ? ["File/meeting job"] : []),
 							...(model.value === "gpt-4o-transcribe-diarize"
 								? ["Speaker labels"]
 								: []),
@@ -99,9 +109,13 @@ export function useModelChoices(purpose: ModelPurpose) {
 						? "Download this model in provider settings"
 						: "The provider key or endpoint is unavailable. Open secure provider setup",
 				limitations:
-					!llm && !batch
-						? "Realtime-only: After recording is unavailable"
-						: undefined,
+					providerId === "yiddishlabs"
+						? standardJob
+							? "YiddishLabs stores submitted jobs and content. Files and meetings only. Local cancellation does not cancel provider processing or charges."
+							: "YiddishLabs says Flash does not store audio or transcripts. This is the provider's retention description, not an independent audit."
+						: !llm && !batch
+							? "Realtime-only: After recording is unavailable"
+							: undefined,
 				pricing:
 					price &&
 					typeof price === "object" &&
@@ -120,10 +134,16 @@ export function useModelChoices(purpose: ModelPurpose) {
 	}
 	if (managedEnabled && managed.isSuccess)
 		for (const model of managed.data ?? []) {
+			const standardJob =
+				model.provider === "yiddishlabs" && model.id === "yiddishlabs-standard";
 			if (
 				llm
 					? !model.capabilities.includes("chat_completions")
-					: !model.capabilities.includes("transcription")
+					: !model.capabilities.includes("transcription") &&
+						!(
+							(purpose === "file" || purpose === "meeting") &&
+							model.capabilities.includes("transcription_jobs")
+						)
 			)
 				continue;
 			choices.push({
@@ -139,12 +159,19 @@ export function useModelChoices(purpose: ModelPurpose) {
 					? ["Text generation"]
 					: [
 							"After recording",
+							...(standardJob ? ["File/meeting job"] : []),
 							...(model.id === "gpt-4o-transcribe-diarize"
 								? ["Speaker labels"]
 								: []),
 						],
 				pricing:
 					"Uses your Kolboo allowance. Vendor pricing is unavailable, not assumed free.",
+				limitations:
+					model.provider === "yiddishlabs"
+						? standardJob
+							? "YiddishLabs stores submitted jobs and content. Local cancellation does not cancel provider processing or charges."
+							: "YiddishLabs says Flash does not store audio or transcripts. This is the provider's retention description, not an independent audit."
+						: undefined,
 			});
 		}
 	const managedMessage = auth.isPending

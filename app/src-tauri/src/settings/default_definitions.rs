@@ -85,6 +85,7 @@ pub(crate) fn seedable_settings(
             "stt_language",
             json!(default_values::DEFAULT_STT_LANGUAGE),
         ),
+        SettingDefaultDefinition::missing_or_null("stt_input_mode", json!(super::SttInputMode::Auto)),
         // Free-tier toggles are consumed by stats filtering. Keep them seedable so
         // existing installs gain the toggle without changing cost history rows.
         SettingDefaultDefinition::missing_or_null("cerebras_free_tier", json!(true)),

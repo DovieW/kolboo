@@ -223,6 +223,21 @@ tests plus isolated real-Wry checks; no History transition or clipboard-decision
 logic is exempted. The old autostart-registration exception was removed because
 isolated production startup now covers it.
 
+On 2026-10-12 the maintainer approved four exact native/race line exceptions for
+the model-picker/streaming/YiddishLabs work: two cold microphone-watchdog argument
+forwarders and two post-await cancellation defenses. Isolated Linux Wry/null-PCM
+fixtures execute the ordinary recording, preview, live-output ownership and
+startup-failure cleanup paths. The earlier live-output dispatch waivers were
+removed because those lines now execute.
+The same approval covers one non-executable module declaration and 21 named,
+unused default-method/vtable records emitted only for test fixture types.
+`functionInstances` lists exact compiler names, requires a covered source
+definition and another covered Rust function instance, and rejects any new
+uncalled instance at that definition. It is not a production-adapter or function
+body exclusion. Compiler/name changes require review. No frontend behavior or
+provider-protocol code is exempted. Real hot-plug recovery, physical-microphone
+and Windows/macOS native acceptance remain unverified by these fixtures.
+
 Rust coverage evidence is available through:
 
 ```sh
@@ -240,7 +255,9 @@ been removed. No new read-recovery or session-preservation code is exempted.
 
 Linux Rust coverage also runs `pnpm cargo:test:window-native -- --coverage`.
 This explicitly opted-in integration test uses real GTK/Tauri windows and
-Openbox in Xvfb, a private D-Bus session and temporary application storage.
+Openbox in Xvfb, a private D-Bus session, user namespace/session keyring and
+temporary application storage/runtime directories. The runner verifies its
+namespace changed while its UID/GID remained unchanged before starting tests.
 It verifies isolated clipboard selection after copy approval/denial, fractional-DPI sizing, resize/maximize persistence, actual tray-path
 window recreation, storage failures and production startup/close. The production
 startup process runs in a network namespace without external connectivity; no
@@ -263,22 +280,25 @@ timeouts name the operation so a geometry failure is diagnosable in CI logs.
 On Ubuntu/Kubuntu install the optional acceptance prerequisites:
 
 ```sh
-sudo apt-get install xvfb openbox x11-utils xauth
+sudo apt-get install xvfb openbox x11-utils xauth keyutils
 pnpm cargo:test:window-native
 ```
 
 Coverage fails rather than silently skipping this boundary when its prerequisites
-or unprivileged network namespaces are unavailable. Failed-run artifacts remain
+or local unprivileged user/network namespaces are unavailable. Failed-run artifacts remain
 in the printed temporary directory for diagnosis. The first instrumented desktop
 binary compilation may take longer than the window assertions themselves.
-CI uses a privileged network-namespace launcher that immediately drops back to
-the runner UID/GID and preserves only the named display, temporary-storage and
-LLVM-profile environment variables (including the runner's HOME). It does not
-disable the host's namespace security policy. Full offline startup also needs
+CI uses a privileged user-namespace launcher that maps and drops back to the
+runner UID/GID, preserving only named display/storage/runtime and LLVM-profile
+variables (including the runner's HOME). Retained capabilities are scoped to
+that private user namespace, allowing offline startup to create its own network
+namespace without a second host-root launcher. Host namespace security policy
+is not disabled. Full offline startup also needs
 the tray runtime (`libayatana-appindicator3-dev` on Ubuntu). Failed startup logs
 are printed from the synthetic fixture, never the user's desktop/data.
-`KOLBOO_NATIVE_WINDOW_RUNNER` selects this trusted launcher, never an offline-test
-bypass.
+`KOLBOO_NATIVE_USER_NAMESPACE_RUNNER` is a trusted CI argv array, not a bypass:
+kernel namespace/UID checks and a child readiness marker remain mandatory.
+`KOLBOO_NATIVE_WINDOW_RUNNER` selects the offline network-namespace launcher.
 
 The merged Linux LCOV report uses binutils `c++filt --format=rust --no-verbose`
 to identify the same Rust function across test/desktop build hashes. It retains

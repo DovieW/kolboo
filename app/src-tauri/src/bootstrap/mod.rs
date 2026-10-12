@@ -791,6 +791,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         managed_inference_fallback_llm_provider: None,
         stt_model,
         stt_language,
+        stt_input_mode: loaded_model_settings.stt_input_mode,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,

@@ -6,7 +6,10 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ModelChoice } from "../lib/modelSelection";
 import type { AppSettings } from "../lib/tauri/types";
 import { ActionModelPicker } from "./ActionModelPicker";
-import { ModelNavigationContext, type ModelProviderSetup } from "./ModelNavigation";
+import {
+	ModelNavigationContext,
+	type ModelProviderSetup,
+} from "./ModelNavigation";
 
 const fixture = vi.hoisted(() => ({
 	settings: undefined as AppSettings | undefined,
@@ -177,7 +180,9 @@ it("saves scoped choices independently and writes an inheritance tombstone witho
 	});
 	await render({ profileId: "p" });
 	expect(host.textContent).toContain("Friendly");
-	fixture.settings.rewrite_program_prompt_profiles[0]!.presets = [];
+	const [profile] = fixture.settings.rewrite_program_prompt_profiles;
+	if (!profile) throw new Error("Missing fixture profile");
+	profile.presets = [];
 	await render({ profileId: "p", presetId: "missing" });
 	expect(host.textContent).toContain("Friendly");
 });

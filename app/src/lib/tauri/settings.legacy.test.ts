@@ -69,6 +69,12 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("legacy settings fixtures", () => {
+    itWithImportTimeout("normalizes a malformed legacy profile collection instead of inventing profile overrides", async () => {
+        vi.resetModules();
+        currentStore = new FakeStore({ ...legacySettingsFixture, rewrite_program_prompt_profiles: { invalid: "profile collection" } });
+        const { tauriAPI } = await import("../tauri");
+        expect((await tauriAPI.getSettings()).rewrite_program_prompt_profiles).toEqual([]);
+    });
 	itWithImportTimeout(
 		"preserves explicit stored language hints through migration",
 		async () => {
