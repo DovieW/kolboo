@@ -58,10 +58,13 @@ pub(super) async fn transcribe(
     .text("chunking_strategy", "auto");
     let endpoint = provider.transcriptions_url();
     let response = crate::http::with_cloudflare_access_headers_if_target(
-        provider
-            .client
-            .post(&endpoint)
-            .bearer_auth(&provider.api_key),
+        openai_compat::with_managed_selection(
+            provider
+                .client
+                .post(&endpoint)
+                .bearer_auth(&provider.api_key),
+            provider.managed_model_provider,
+        ),
         &endpoint,
     )
     .multipart(form)

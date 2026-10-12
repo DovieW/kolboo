@@ -33,6 +33,19 @@ pub(crate) enum WsSendOutcome {
     Closed,
 }
 
+impl WsSendOutcome {
+    /// A closed socket cannot acknowledge required audio/control delivery.
+    /// Providers must fail instead of accepting a transcript with missing input.
+    pub(crate) fn require_sent(self) -> Result<(), SttError> {
+        match self {
+            Self::Sent => Ok(()),
+            Self::Closed => Err(SttError::NetworkMessage(
+                "Streaming connection closed before audio delivery completed".into(),
+            )),
+        }
+    }
+}
+
 /// Check if a tungstenite send error indicates the WebSocket has transitioned
 /// to a closing/closed state (e.g. the server sent a `Close` frame).
 ///
@@ -177,6 +190,19 @@ pub struct PartialTranscript {
     pub committed_text: Option<String>,
 }
 
+/// Preview frames may be coalesced by a slow UI, but a committed insertion
+/// chunk cannot be silently lost. Fail the stream if delivery loses one.
+pub(crate) fn publish_partial(
+    sender: &mpsc::Sender<PartialTranscript>,
+    partial: PartialTranscript,
+) -> Result<(), SttError> {
+    let committed = partial.committed_text.is_some();
+    if sender.try_send(partial).is_err() && committed {
+        return Err(SttError::Api("Committed transcript delivery failed".into()));
+    }
+    Ok(())
+}
+
 /// Capture never waits for a provider queue. If a chunk cannot be delivered,
 /// mark this input incomplete and stop its provider rather than accepting a
 /// transcript with missing audio. All sender clones share that failure state.
@@ -247,11 +273,12 @@ pub struct StreamingSttSession {
     /// success it must drain before final output; on failure/drop it is aborted.
     partial_consumer: Option<OwnedStreamingTask<()>>,
     partial_consumer_start: Option<tokio::sync::oneshot::Sender<()>>,
+    partial_consumer_failed: Arc<AtomicBool>,
 }
 
 /// A JoinHandle detaches on drop by default. This guard travels with the
 /// finalization future too, so cancelling that future cannot orphan a provider.
-struct OwnedStreamingTask<T>(tokio::task::JoinHandle<T>);
+pub(crate) struct OwnedStreamingTask<T>(pub(crate) tokio::task::JoinHandle<T>);
 
 impl<T> Drop for OwnedStreamingTask<T> {
     fn drop(&mut self) {
@@ -276,6 +303,7 @@ impl StreamingSttSession {
             task: OwnedStreamingTask(task),
             partial_consumer: None,
             partial_consumer_start: None,
+            partial_consumer_failed: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -286,6 +314,10 @@ impl StreamingSttSession {
     /// elsewhere for later finalization.
     pub fn take_partial_rx(&mut self) -> Option<mpsc::Receiver<PartialTranscript>> {
         self.partial_rx.take()
+    }
+
+    pub(crate) fn partial_consumer_failure_flag(&self) -> Arc<AtomicBool> {
+        self.partial_consumer_failed.clone()
     }
 
     /// Replacing a consumer aborts the previous task and retires its permit.
@@ -315,6 +347,48 @@ impl StreamingSttSession {
         }
     }
 
+    /// Buffered input uses the same owned provider and finalization as live
+    /// capture. Chunk boundaries remain whole PCM frames, including multichannel
+    /// input; previews drain locally and queue closure is incomplete input.
+    pub(crate) async fn transcribe_buffered_pcm(
+        mut self,
+        pcm: &[u8],
+        sample_rate: u32,
+        channels: u8,
+    ) -> Result<String, SttError> {
+        let frame_bytes = usize::from(channels) * 2;
+        if frame_bytes == 0 || sample_rate == 0 || pcm.len() % frame_bytes != 0 {
+            return Err(SttError::Audio(
+                "Buffered streaming requires complete PCM audio frames".into(),
+            ));
+        }
+        if let Some(mut partials) = self.take_partial_rx() {
+            self.defer_partial_consumer(async move { while partials.recv().await.is_some() {} });
+            self.activate_partial_consumer();
+        }
+        let frames_per_chunk = (sample_rate as usize / 2).max(1).min(262_144 / frame_bytes);
+        for chunk in pcm.chunks(frames_per_chunk * frame_bytes) {
+            let samples = chunk
+                .chunks_exact(frame_bytes)
+                .map(|frame| {
+                    frame
+                        .chunks_exact(2)
+                        .map(|bytes| {
+                            i16::from_le_bytes([bytes[0], bytes[1]]) as f32 / i16::MAX as f32
+                        })
+                        .sum::<f32>()
+                        / f32::from(channels)
+                })
+                .collect();
+            self.audio_tx.send(samples).await.map_err(|_| {
+                SttError::NetworkMessage(
+                    "The provider closed before all upload audio was delivered".into(),
+                )
+            })?;
+        }
+        self.finalize().await
+    }
+
     /// Finalize the session: drop the audio sender, then await the final transcript.
     ///
     /// This will cause the background task to see the channel close, send a commit
@@ -327,6 +401,7 @@ impl StreamingSttSession {
     /// recording duration. Timeout/cancellation drops the owned task guard.
     pub async fn finalize_with_timeout(self, deadline: Duration) -> Result<String, SttError> {
         let input_failed = self.audio_tx.failed.clone();
+        let consumer_failed = self.partial_consumer_failed.clone();
         // Drop audio_tx to signal end-of-audio.
         drop(self.audio_tx);
         let mut task = self.task;
@@ -340,6 +415,9 @@ impl StreamingSttSession {
                 (&mut consumer.0).await.map_err(|_| {
                     SttError::NetworkMessage("Streaming partial consumer task failed".into())
                 })?;
+            }
+            if consumer_failed.load(Ordering::SeqCst) {
+                return Err(SttError::Api("Live insertion stopped; recover the retained recording. Already inserted text will not be replaced".into()));
             }
             Ok(text)
         })
@@ -357,6 +435,29 @@ impl StreamingSttSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn required_delivery_never_accepts_a_closed_socket() {
+        assert!(WsSendOutcome::Sent.require_sent().is_ok());
+        assert!(
+            matches!(WsSendOutcome::Closed.require_sent(), Err(SttError::NetworkMessage(message)) if message.contains("before audio delivery completed"))
+        );
+    }
+
+    #[tokio::test]
+    async fn preview_delivery_can_coalesce_but_committed_chunks_cannot_disappear() {
+        let (sender, receiver) = mpsc::channel(1);
+        let partial = |committed| PartialTranscript {
+            text: "preview".into(),
+            committed_text: committed,
+        };
+        publish_partial(&sender, partial(None)).unwrap();
+        publish_partial(&sender, partial(None)).unwrap();
+        assert!(publish_partial(&sender, partial(Some("chunk".into()))).is_err());
+        drop(receiver);
+        publish_partial(&sender, partial(None)).unwrap();
+        assert!(publish_partial(&sender, partial(Some("chunk".into()))).is_err());
+    }
     use crate::settings::ProxyMode;
 
     /// The returned sender closes only when the spawned provider future drops.
@@ -488,6 +589,24 @@ mod tests {
             "synthetic completed transcript"
         );
         assert!(inserted.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn failed_live_insertion_never_returns_a_successful_transcript() {
+        let (audio_tx, _rx) = mpsc::channel(1);
+        let (_tx, partial_rx) = mpsc::channel(1);
+        let mut session = StreamingSttSession::new(
+            audio_tx,
+            partial_rx,
+            tokio::spawn(async { Ok("transcript".into()) }),
+        );
+        let failed = session.partial_consumer_failure_flag();
+        session.set_partial_consumer(tokio::spawn(async move {
+            failed.store(true, Ordering::SeqCst);
+        }));
+        assert!(
+            matches!(session.finalize().await, Err(SttError::Api(message)) if message.contains("Already inserted text will not be replaced"))
+        );
     }
 
     #[tokio::test]
@@ -721,6 +840,80 @@ mod tests {
         );
         assert!(
             matches!(session.finalize().await, Err(SttError::NetworkMessage(message)) if message == "Streaming provider task failed")
+        );
+    }
+
+    #[tokio::test]
+    async fn buffered_pcm_preserves_frames_downmixes_and_drains_before_finalization() {
+        for rate in [1, 16000, 1_000_000] {
+            let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<f32>>(1);
+            let (partials, partial_rx) = mpsc::channel(1);
+            let frames = if rate == 1 { 1000 } else { 100_000 };
+            let pcm = [16384_i16, 0, -8192]
+                .repeat(frames)
+                .into_iter()
+                .flat_map(i16::to_le_bytes)
+                .collect::<Vec<_>>();
+            let task = tokio::spawn(async move {
+                let mut count = 0;
+                while let Some(chunk) = audio_rx.recv().await {
+                    assert!(!chunk.is_empty());
+                    assert!(chunk.len() <= 262_144 / 6);
+                    for value in &chunk {
+                        assert!((*value - (8192.0 / i16::MAX as f32 / 3.0)).abs() < 0.00001);
+                    }
+                    count += chunk.len();
+                    partials
+                        .send(PartialTranscript {
+                            text: "draft".into(),
+                            committed_text: None,
+                        })
+                        .await
+                        .unwrap();
+                }
+                assert_eq!(count, frames);
+                Ok("complete".into())
+            });
+            let session = StreamingSttSession::new(audio_tx, partial_rx, task);
+            assert_eq!(
+                session
+                    .transcribe_buffered_pcm(&pcm, rate, 3)
+                    .await
+                    .unwrap(),
+                "complete"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_buffered_pcm_cancels_owned_tasks_before_audio_delivery() {
+        for (pcm, rate, channels) in [(vec![0], 16000, 1), (vec![], 0, 1), (vec![], 16000, 0)] {
+            let (session, mut stop) = pending_session().await;
+            assert!(matches!(
+                session.transcribe_buffered_pcm(&pcm, rate, channels).await,
+                Err(SttError::Audio(_))
+            ));
+            stop.closed().await;
+            assert!(stop.is_closed());
+        }
+    }
+
+    #[tokio::test]
+    async fn buffered_input_does_not_require_a_second_preview_consumer() {
+        let (audio_tx, mut audio_rx) = mpsc::channel(1);
+        let (_partials, partial_rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            assert!(audio_rx.recv().await.is_none());
+            Ok(String::new())
+        });
+        let mut session = StreamingSttSession::new(audio_tx, partial_rx, task);
+        drop(session.take_partial_rx());
+        assert_eq!(
+            session
+                .transcribe_buffered_pcm(&[], 16000, 1)
+                .await
+                .unwrap(),
+            ""
         );
     }
 

@@ -14,6 +14,28 @@ use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+// Imported files and meeting chunks must preserve the ordinary adapter's
+// request contract. They neither create Standard-job receipts nor allow a BYOK
+// provider to become Managed merely because a refreshed token is available.
+async fn transcribe_uploaded<P: SttProvider>(
+    provider: &P,
+    audio: &[u8],
+    format: &AudioFormat,
+) -> Result<String, SttError> {
+    assert!(provider
+        .with_renewed_managed_token("must-not-promote-byok")
+        .is_none());
+    let directory = tempfile::tempdir().unwrap();
+    let context = crate::stt::SttUploadContext {
+        purpose: crate::stt::UploadPurpose::File,
+        chunk_offset: 0,
+        checkpoint_path: directory.path().join("unused-job-receipt"),
+    };
+    let result = provider.transcribe_upload(audio, format, &context).await?;
+    assert!(!context.checkpoint_path.exists());
+    Ok(result.text)
+}
+
 #[test]
 fn test_groq_provider_implements_trait() {
     let provider = GroqSttProvider::new("test_key".to_string(), None, None, None);
@@ -241,7 +263,7 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello deepgram");
 
     let received = guard.received_requests().await;
@@ -350,7 +372,7 @@ async fn test_assemblyai_transcribe_sends_expected_requests() {
             encoding: AudioEncoding::Wav,
         };
 
-        let result = provider.transcribe(&wav_data, &format).await;
+        let result = transcribe_uploaded(&provider, &wav_data, &format).await;
         assert_eq!(result.unwrap(), "hello assemblyai");
 
         let upload_received = upload_guard.received_requests().await;
@@ -456,7 +478,7 @@ async fn test_groq_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello groq");
 
     let received = guard.received_requests().await;
@@ -552,7 +574,7 @@ async fn test_fireworks_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello fireworks");
 
     let received = guard.received_requests().await;
@@ -648,7 +670,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello aquavoice");
 
     let received = guard.received_requests().await;
@@ -744,7 +766,7 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello elevenlabs");
 
     let received = guard.received_requests().await;
@@ -988,7 +1010,7 @@ async fn test_whisper_server_transcribe_sends_expected_multipart_and_prompt_is_c
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello from mock");
 
     let received = guard.received_requests().await;
@@ -1238,8 +1260,9 @@ async fn test_openai_live_transcription_ga_websocket_contract() {
                     } else if value["type"] == "input_audio_buffer.commit" {
                         assert_eq!(audio_bytes, 4800);
                         for event in [
-                            json!({"type":"conversation.item.input_audio_transcription.delta", "delta":"hello"}),
-                            json!({"type":"conversation.item.input_audio_transcription.completed", "transcript":"hello world"}),
+                            json!({"type":"input_audio_buffer.committed", "item_id":"item-1", "previous_item_id":null}),
+                            json!({"type":"conversation.item.input_audio_transcription.delta", "item_id":"item-1", "event_id":"delta-1", "delta":"hello"}),
+                            json!({"type":"conversation.item.input_audio_transcription.completed", "item_id":"item-1", "transcript":"hello world"}),
                         ] {
                             ws.send(Message::Text(event.to_string().into()))
                                 .await

@@ -13,9 +13,9 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
 
 /// Speechmatics batch (one-shot) WebSocket endpoint.
-const DEFAULT_WS_URL: &str = "wss://eu.rt.speechmatics.com/v2/";
+pub(super) const DEFAULT_WS_URL: &str = "wss://eu.rt.speechmatics.com/v2/";
 /// Speechmatics concurrent-streaming WebSocket endpoint.
-const STREAMING_WS_URL: &str = "wss://eu2.rt.speechmatics.com/v2/";
+pub(super) const STREAMING_WS_URL: &str = "wss://eu2.rt.speechmatics.com/v2/";
 /// Timeout for handshakes and active-stream reads.
 const DEFAULT_WS_TIMEOUT: Duration = Duration::from_secs(30);
 /// Timeout waiting for `EndOfTranscript` after `EndOfStream`.
@@ -48,9 +48,8 @@ impl SpeechmaticsTranscriptAccumulator {
         elapsed_ms: u64,
     ) -> PartialTranscript {
         if !text.is_empty() {
-            if !self.current_segment.is_empty() {
-                self.current_segment.push(' ');
-            }
+            // metadata.transcript is already formatted for concatenation,
+            // including whitespace and RTL punctuation. Never reconstruct it.
             self.current_segment.push_str(&text);
         }
         self.current_partial.clear();
@@ -108,27 +107,25 @@ impl SpeechmaticsTranscriptAccumulator {
         }
     }
 
-    fn finalize_pending_text(&mut self) -> Option<PartialTranscript> {
-        let mut trailing = std::mem::take(&mut self.current_segment);
-        let trailing_partial = std::mem::take(&mut self.current_partial);
-
-        let trailing_partial = trailing_partial.trim();
-        if !trailing_partial.is_empty() {
-            if !trailing.is_empty() {
-                trailing.push(' ');
-            }
-            trailing.push_str(trailing_partial);
+    fn finalize_pending_text(&mut self) -> Result<Option<PartialTranscript>, SttError> {
+        if !self.current_partial.trim().is_empty() {
+            return Err(SttError::Api(
+                "Speechmatics did not finalize its last transcript; the recording is retained"
+                    .into(),
+            ));
         }
+        self.current_partial.clear();
+        let trailing = std::mem::take(&mut self.current_segment);
 
         if trailing.is_empty() {
-            return None;
+            return Ok(None);
         }
 
         self.committed_segments.push(trailing.clone());
-        Some(PartialTranscript {
+        Ok(Some(PartialTranscript {
             text: join_segments(&self.committed_segments, ""),
             committed_text: Some(trailing),
-        })
+        }))
     }
 
     fn final_text(&self) -> String {
@@ -157,232 +154,59 @@ pub(super) async fn transcribe_ws(
     sample_rate: u32,
     channels: u8,
 ) -> Result<(String, JsonValue), SttError> {
-    let mut request = DEFAULT_WS_URL
-        .into_client_request()
-        .map_err(|e| SttError::NetworkMessage(format!("Invalid websocket URL: {}", e)))?;
-
-    let bearer = format!("Bearer {}", provider.api_key.trim());
-    request.headers_mut().insert(
-        "Authorization",
-        bearer
-            .parse()
-            .map_err(|e| SttError::Config(format!("Invalid Authorization header: {}", e)))?,
-    );
-
-    let (mut ws_write, mut ws_read) =
-        connect_ws_split_with_timeout(request, DEFAULT_WS_TIMEOUT, &provider.proxy_settings)
-            .await?;
-
-    let request_json = json!({
-        "provider": "speechmatics",
-        "endpoint": DEFAULT_WS_URL,
-        "auth": "Authorization: Bearer <redacted>",
-        "start_recognition": start_recognition_message(provider, sample_rate, false),
-        "audio": {
-            "bytes": pcm.len(),
-            "sample_rate": sample_rate,
-            "channels": channels,
-            "encoding": "pcm_s16le",
-            "chunk_bytes": batch_chunk_size_bytes(sample_rate, channels),
-        }
-    });
-
-    if let Some(store) = &provider.request_log_store {
-        store.with_current(|log| {
-            log.stt_request_json = Some(request_json);
-        });
+    if channels == 0 || sample_rate == 0 || pcm.len() % (usize::from(channels) * 2) != 0 {
+        return Err(SttError::Audio(
+            "Speechmatics requires complete PCM audio frames".into(),
+        ));
     }
-
-    send_start_recognition(
-        &mut ws_write,
-        &start_recognition_message(provider, sample_rate, false),
-        "Speechmatics batch transcription",
-    )
-    .await?;
-    wait_for_recognition_started(&mut ws_read, "batch").await?;
-
-    // Stream audio and drain protocol messages concurrently so we do not turn a
-    // long recording into hundreds of serialized client/server round-trips.
-    let mut last_seq_no: u64 = 0;
-    let mut transcript = String::new();
-    let mut received_for_log: Vec<JsonValue> = Vec::new();
-    let mut chunks = pcm.chunks(batch_chunk_size_bytes(sample_rate, channels));
-    let mut audio_done = false;
-
-    loop {
-        tokio::select! {
-            send_result = async {
-                if let Some(chunk) = chunks.next() {
-                    match ws_send_binary_with_closed_handling(
-                        &mut ws_write,
-                        chunk.to_vec(),
-                        "Speechmatics batch: send audio chunk",
-                    ).await? {
-                        WsSendOutcome::Sent => Ok(true),
-                        WsSendOutcome::Closed => Err(SttError::NetworkMessage(
-                            "Speechmatics websocket closed while sending audio".to_string(),
-                        )),
-                    }
-                } else {
-                    match ws_send_json_text_with_closed_handling(
-                        &mut ws_write,
-                        &json!({
-                            "message": "EndOfStream",
-                            "last_seq_no": last_seq_no,
-                        }),
-                        "Speechmatics batch: send EndOfStream",
-                    ).await? {
-                        WsSendOutcome::Sent => Ok(false),
-                        WsSendOutcome::Closed => Err(SttError::NetworkMessage(
-                            "Speechmatics websocket closed while sending EndOfStream".to_string(),
-                        )),
-                    }
-                }
-            }, if !audio_done => {
-                match send_result {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        audio_done = true;
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-
-            msg = ws_next_with_timeout(&mut ws_read, DEFAULT_WS_TIMEOUT) => {
-                let Some(msg) = msg? else {
-                    if audio_done {
-                        break;
-                    }
-                    return Err(SttError::NetworkMessage(
-                        "Speechmatics websocket closed while sending audio".to_string(),
-                    ));
-                };
-
-                match msg {
-                    Message::Text(text) => {
-                        let Ok(value) = serde_json::from_str::<JsonValue>(&text) else {
-                            continue;
-                        };
-
-                        match value.get("message").and_then(|m| m.as_str()).unwrap_or("") {
-                            "AudioAdded" => {
-                                if let Some(seq) = value.get("seq_no").and_then(|seq| seq.as_u64()) {
-                                    last_seq_no = seq;
-                                }
-                            }
-                            "AddTranscript" => {
-                                if let Some(results) = value.get("results").and_then(|results| results.as_array()) {
-                                    SpeechmaticsSttProvider::append_transcript_from_results(
-                                        &mut transcript,
-                                        results,
-                                    );
-                                }
-                                received_for_log.push(value);
-                            }
-                            "EndOfTranscript" => {
-                                received_for_log.push(value);
-                                break;
-                            }
-                            "Error" => {
-                                return Err(SttError::Api(text.to_string()));
-                            }
-                            _ => {
-                                if received_for_log.len() < 100 {
-                                    received_for_log.push(value);
-                                }
-                            }
-                        }
-                    }
-                    Message::Close(frame) => {
-                        if audio_done {
-                            break;
-                        }
-                        return Err(SttError::NetworkMessage(format!(
-                            "Speechmatics websocket closed: {:?}",
-                            frame,
-                        )));
-                    }
-                    _ => {
-                        // Ignore binary/ping/pong frames; Speechmatics transcript events are JSON.
-                    }
-                }
-            }
-        }
-    }
-
-    // Drain the post-EOS tail if the server has more finalized transcript frames
-    // to deliver before `EndOfTranscript`.
-    loop {
-        let Some(msg) = ws_next_with_timeout(&mut ws_read, POST_EOS_TIMEOUT).await? else {
-            break;
-        };
-
-        match msg {
-            Message::Text(text) => {
-                let Ok(value) = serde_json::from_str::<JsonValue>(&text) else {
-                    continue;
-                };
-
-                match value.get("message").and_then(|m| m.as_str()).unwrap_or("") {
-                    "AddTranscript" => {
-                        if let Some(results) =
-                            value.get("results").and_then(|results| results.as_array())
-                        {
-                            SpeechmaticsSttProvider::append_transcript_from_results(
-                                &mut transcript,
-                                results,
-                            );
-                        }
-                        received_for_log.push(value);
-                    }
-                    "EndOfTranscript" => {
-                        received_for_log.push(value);
-                        break;
-                    }
-                    "Error" => {
-                        return Err(SttError::Api(text.to_string()));
-                    }
-                    _ => {
-                        if received_for_log.len() < 100 {
-                            received_for_log.push(value);
-                        }
-                    }
-                }
-            }
-            Message::Close(_) => break,
-            _ => {}
-        }
-    }
-
-    ws_close_best_effort(
-        &mut ws_write,
-        "Speechmatics batch transcription",
-        Duration::from_secs(3),
-    )
-    .await;
-
+    let session = start_session(provider, sample_rate, &provider.batch_ws_url, false).await?;
+    let text = transcribe_buffered_session(session, pcm, sample_rate, channels).await?;
     Ok((
-        transcript.clone(),
-        json!({
-            "provider": "speechmatics",
-            "operating_point": provider.operating_point_for_api(),
-            "audio_format": {
-                "sample_rate": sample_rate,
-                "channels": channels,
-                "encoding": "pcm_s16le",
-                "bytes": pcm.len(),
-            },
-            "transcript": transcript,
-            "received_messages": received_for_log,
-        }),
+        text.clone(),
+        json!({"provider":"speechmatics","transcript":text}),
     ))
+}
+
+async fn transcribe_buffered_session(
+    session: StreamingSttSession,
+    pcm: &[u8],
+    sample_rate: u32,
+    channels: u8,
+) -> Result<String, SttError> {
+    session
+        .transcribe_buffered_pcm(pcm, sample_rate, channels)
+        .await
 }
 
 pub(super) async fn start_streaming_session(
     provider: &SpeechmaticsSttProvider,
     sample_rate: u32,
 ) -> Result<StreamingSttSession, SttError> {
-    let mut request = STREAMING_WS_URL
+    start_session(provider, sample_rate, &provider.streaming_ws_url, true).await
+}
+
+async fn start_session(
+    provider: &SpeechmaticsSttProvider,
+    sample_rate: u32,
+    endpoint: &str,
+    enable_partials: bool,
+) -> Result<StreamingSttSession, SttError> {
+    if !matches!(
+        provider
+            .operating_point
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "enhanced" | "standard"
+    ) {
+        return Err(SttError::Config(
+            "The selected Speechmatics model is unavailable; no model will be substituted".into(),
+        ));
+    }
+    if provider.language == "auto" {
+        return Err(SttError::Config("Speechmatics Enhanced and Standard need an explicit language hint in Kolboo's WebSocket adapter. Auto-detect is not available; no language will be substituted".into()));
+    }
+    let mut request = endpoint
         .into_client_request()
         .map_err(|e| SttError::NetworkMessage(format!("WS request build failed: {}", e)))?;
 
@@ -400,7 +224,7 @@ pub(super) async fn start_streaming_session(
 
     send_start_recognition(
         &mut ws_write,
-        &start_recognition_message(provider, sample_rate, true),
+        &start_recognition_message(provider, sample_rate, enable_partials),
         "Speechmatics streaming",
     )
     .await?;
@@ -413,10 +237,10 @@ pub(super) async fn start_streaming_session(
     if let Some(store) = &request_log_store {
         let request_json = json!({
             "provider": "speechmatics",
-            "endpoint": STREAMING_WS_URL,
+            "endpoint": endpoint,
             "auth": "Authorization: Bearer <redacted>",
             "mode": "concurrent",
-            "start_recognition": start_recognition_message(provider, sample_rate, true),
+            "start_recognition": start_recognition_message(provider, sample_rate, enable_partials),
         });
         store.with_current(|log| {
             log.stt_request_json = Some(request_json);
@@ -448,8 +272,9 @@ async fn run_streaming_task(
     let session_start = std::time::Instant::now();
     let mut pcm_buffer: Vec<u8> = Vec::new();
     let mut num_chunks_sent: usize = 0;
-    let mut last_seq_no: u64 = 0;
     let mut transcript_state = SpeechmaticsTranscriptAccumulator::default();
+    let mut final_ranges = std::collections::HashSet::new();
+    let mut last_final_end = 0.0;
 
     let mut audio_done = false;
     let mut ws_done = false;
@@ -474,54 +299,33 @@ async fn run_streaming_task(
 
                         while pcm_buffer.len() >= target_chunk_bytes {
                             let chunk: Vec<u8> = pcm_buffer.drain(..target_chunk_bytes).collect();
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 chunk,
                                 "Speechmatics streaming: send audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
-                                    num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    ws_done = true;
-                                    break;
-                                }
-                            }
+                            ).await?.require_sent()?;
+                            num_chunks_sent += 1;
                         }
                     }
                     None => {
                         if !pcm_buffer.is_empty() {
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 pcm_buffer.clone(),
                                 "Speechmatics streaming: send final audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
-                                    num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    audio_done = true;
-                                    ws_done = true;
-                                    pcm_buffer.clear();
-                                    continue;
-                                }
-                            }
+                            ).await?.require_sent()?;
+                            num_chunks_sent += 1;
                             pcm_buffer.clear();
                         }
 
-                        match ws_send_json_text_with_closed_handling(
+                        ws_send_json_text_with_closed_handling(
                             &mut ws_write,
                             &json!({
                                 "message": "EndOfStream",
-                                "last_seq_no": last_seq_no,
+                                "last_seq_no": num_chunks_sent,
                             }),
                             "Speechmatics streaming: send EndOfStream",
-                        ).await? {
-                            WsSendOutcome::Sent => {}
-                            WsSendOutcome::Closed => {
-                                ws_done = true;
-                            }
-                        }
+                        ).await?.require_sent()?;
 
                         audio_done = true;
                     }
@@ -531,18 +335,18 @@ async fn run_streaming_task(
             ws_msg = ws_next_with_timeout(&mut ws_read, ws_timeout), if !ws_done => {
                 match ws_msg {
                     Ok(Some(Message::Text(text))) => {
-                        let value: JsonValue = serde_json::from_str(&text).map_err(|e| {
-                            SttError::Api(format!(
-                                "Speechmatics streaming: failed to parse JSON: {} (raw={})",
-                                e, text
-                            ))
-                        })?;
+                        let value: JsonValue = serde_json::from_str(&text)
+                            .map_err(|_| SttError::Api("Speechmatics returned invalid JSON".into()))?;
 
                         match parse_server_event(&value) {
-                            SpeechmaticsServerEvent::AudioAdded { seq_no } => {
-                                last_seq_no = seq_no;
-                            }
-                            SpeechmaticsServerEvent::AddTranscript { text, has_eos } => {
+                            SpeechmaticsServerEvent::AudioAdded { .. } => {}
+                            SpeechmaticsServerEvent::AddTranscript { has_eos, .. } => {
+                                let (start, end, text) = streaming_transcript_metadata(&value)?;
+                                if !final_ranges.insert((start.to_bits(), end.to_bits())) { continue; }
+                                if start < last_final_end {
+                                    return Err(SttError::Api("Speechmatics returned overlapping or out-of-order final results; the recording is retained".into()));
+                                }
+                                last_final_end = end;
                                 let partial = transcript_state.apply_final_text(
                                     text,
                                     has_eos,
@@ -555,54 +359,45 @@ async fn run_streaming_task(
                                     });
                                 }
 
-                                let _ = partial_tx.try_send(partial);
+                                crate::stt::streaming::publish_partial(&partial_tx, partial)?;
                             }
-                            SpeechmaticsServerEvent::AddPartialTranscript { text } => {
+                            SpeechmaticsServerEvent::AddPartialTranscript { .. } => {
+                                let (start, end, text) = streaming_transcript_metadata(&value)?;
+                                if start < last_final_end || end <= last_final_end { continue; }
                                 let partial = transcript_state.apply_partial_text(
                                     text,
                                     session_start.elapsed().as_millis() as u64,
                                 );
-                                let _ = partial_tx.try_send(partial);
+                                crate::stt::streaming::publish_partial(&partial_tx, partial)?;
                             }
                             SpeechmaticsServerEvent::EndOfTranscript => {
+                                if !audio_done { return Err(SttError::Api("Speechmatics finalized before audio delivery completed".into())); }
                                 log::info!("Speechmatics streaming: EndOfTranscript received");
                                 ws_done = true;
                             }
                             SpeechmaticsServerEvent::Error(message) => {
-                                return Err(SttError::Api(format!(
-                                    "Speechmatics streaming error: {}",
-                                    message,
-                                )));
+                                let _ = message;
+                                return Err(SttError::Api("Speechmatics rejected the stream; the recording is retained".into()));
                             }
                             SpeechmaticsServerEvent::RecognitionStarted => {
                                 // Startup already waited for this. Ignore late echoes.
                             }
-                            SpeechmaticsServerEvent::Unknown(message_type) => {
-                                log::debug!("Speechmatics streaming: {}", message_type);
+                            SpeechmaticsServerEvent::Unknown(_) => {
+                                log::debug!("Speechmatics streaming: ignored an unknown event");
                             }
                         }
                     }
-                    Ok(Some(Message::Close(frame))) => {
-                        log::warn!("Speechmatics streaming: server sent Close frame {:?}", frame);
-                        ws_done = true;
-                    }
-                    Ok(None) => {
-                        log::warn!("Speechmatics streaming: WS stream ended (None)");
-                        ws_done = true;
-                    }
+                    Ok(Some(Message::Close(_))) | Ok(None) => return Err(SttError::NetworkMessage("Speechmatics closed without confirming finalization".into())),
                     Ok(_) => {}
                     Err(SttError::Timeout) if audio_done => {
-                        log::warn!(
-                            "Speechmatics streaming: timed out waiting for EndOfTranscript, using accumulated segments"
-                        );
-                        ws_done = true;
+                        return Err(SttError::Timeout);
                     }
                     Err(SttError::Timeout) => {
                         log::warn!(
                             "Speechmatics streaming: WS read timed out while audio still flowing ({}s)",
                             DEFAULT_WS_TIMEOUT.as_secs(),
                         );
-                        ws_done = true;
+                        return Err(SttError::Timeout);
                     }
                     Err(error) => {
                         log::error!("Speechmatics streaming: WS read error: {}", error);
@@ -621,8 +416,8 @@ async fn run_streaming_task(
     .await;
     drop(ws_write);
 
-    if let Some(partial) = transcript_state.finalize_pending_text() {
-        let _ = partial_tx.try_send(partial);
+    if let Some(partial) = transcript_state.finalize_pending_text()? {
+        crate::stt::streaming::publish_partial(&partial_tx, partial)?;
     }
 
     let elapsed = session_start.elapsed();
@@ -642,6 +437,32 @@ async fn run_streaming_task(
         num_chunks_sent,
     );
     Ok(final_text)
+}
+
+fn streaming_transcript_metadata(value: &JsonValue) -> Result<(f64, f64, String), SttError> {
+    let invalid = || {
+        SttError::Api(
+            "Speechmatics returned incomplete transcript metadata; the recording is retained"
+                .into(),
+        )
+    };
+    let metadata = value.get("metadata").ok_or_else(invalid)?;
+    let start = metadata
+        .get("start_time")
+        .and_then(JsonValue::as_f64)
+        .ok_or_else(invalid)?;
+    let end = metadata
+        .get("end_time")
+        .and_then(JsonValue::as_f64)
+        .ok_or_else(invalid)?;
+    if !start.is_finite() || !end.is_finite() || start < 0.0 || end < start {
+        return Err(invalid());
+    }
+    let text = metadata
+        .get("transcript")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(invalid)?;
+    Ok((start, end, text.into()))
 }
 
 fn start_recognition_message(
@@ -680,8 +501,13 @@ async fn send_start_recognition(
 }
 
 async fn wait_for_recognition_started(ws_read: &mut WsRead, mode: &str) -> Result<(), SttError> {
+    let deadline = tokio::time::Instant::now() + DEFAULT_WS_TIMEOUT;
     loop {
-        let msg = ws_next_with_timeout(ws_read, DEFAULT_WS_TIMEOUT).await?;
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(SttError::Timeout);
+        }
+        let msg = ws_next_with_timeout(ws_read, remaining).await?;
         match msg {
             Some(Message::Text(text)) => {
                 let Ok(value) = serde_json::from_str::<JsonValue>(&text) else {
@@ -696,17 +522,17 @@ async fn wait_for_recognition_started(ws_read: &mut WsRead, mode: &str) -> Resul
                     "RecognitionStarted" => return Ok(()),
                     "Error" => {
                         return Err(SttError::Api(format!(
-                            "Speechmatics {} error during startup: {}",
-                            mode, text,
+                            "Speechmatics {} rejected stream startup",
+                            mode,
                         )));
                     }
                     _ => {}
                 }
             }
-            Some(Message::Close(frame)) => {
+            Some(Message::Close(_)) => {
                 return Err(SttError::NetworkMessage(format!(
-                    "Speechmatics {} websocket closed during startup: {:?}",
-                    mode, frame,
+                    "Speechmatics {} websocket closed during startup",
+                    mode,
                 )));
             }
             None => {
@@ -718,10 +544,6 @@ async fn wait_for_recognition_started(ws_read: &mut WsRead, mode: &str) -> Resul
             _ => {}
         }
     }
-}
-
-fn batch_chunk_size_bytes(sample_rate: u32, channels: u8) -> usize {
-    chunk_size_bytes_for_pcm_s16le(sample_rate, channels, 100, 2_048, 32_768)
 }
 
 fn parse_server_event(value: &JsonValue) -> SpeechmaticsServerEvent {
@@ -812,18 +634,7 @@ fn extract_streaming_text(results: &[JsonValue]) -> (String, bool) {
 }
 
 fn join_segments(committed: &[String], current_partial: &str) -> String {
-    let mut parts: Vec<&str> = committed
-        .iter()
-        .map(|segment| segment.as_str())
-        .filter(|segment| !segment.is_empty())
-        .collect();
-
-    let trimmed_partial = current_partial.trim();
-    if !trimmed_partial.is_empty() {
-        parts.push(trimmed_partial);
-    }
-
-    parts.join(" ")
+    committed.concat() + current_partial
 }
 
 fn join_segments_with_accumulating(
@@ -831,24 +642,12 @@ fn join_segments_with_accumulating(
     accumulating: &str,
     current_partial: &str,
 ) -> String {
-    let mut parts: Vec<&str> = committed
-        .iter()
-        .map(|segment| segment.as_str())
-        .filter(|segment| !segment.is_empty())
-        .collect();
-
-    let trimmed_accumulating = accumulating.trim();
-    if !trimmed_accumulating.is_empty() {
-        parts.push(trimmed_accumulating);
-    }
-
-    let trimmed_partial = current_partial.trim();
-    if !trimmed_partial.is_empty() {
-        parts.push(trimmed_partial);
-    }
-
-    parts.join(" ")
+    join_segments(committed, accumulating) + current_partial
 }
+
+#[cfg(test)]
+#[path = "tests/realtime_contract.rs"]
+mod realtime_contract;
 
 #[cfg(test)]
 mod tests {
@@ -912,7 +711,7 @@ mod tests {
         assert_eq!(not_yet_committed.text, "hello");
         assert_eq!(not_yet_committed.committed_text, None);
 
-        let committed = accumulator.apply_final_text("world.".to_string(), true, 30);
+        let committed = accumulator.apply_final_text(" world.".to_string(), true, 30);
         assert_eq!(committed.text, "hello world.");
         assert_eq!(committed.committed_text.as_deref(), Some("hello world."));
     }
@@ -921,29 +720,37 @@ mod tests {
     fn transcript_accumulator_finalizes_trailing_text() {
         let mut accumulator = SpeechmaticsTranscriptAccumulator::default();
         let _ = accumulator.apply_final_text("Hello".to_string(), false, 10);
-        let _ = accumulator.apply_partial_text("world".to_string(), 20);
+        let _ = accumulator.apply_final_text(" world".to_string(), false, 20);
 
         let finalized = accumulator
             .finalize_pending_text()
+            .unwrap()
             .expect("trailing text to finalize");
         assert_eq!(finalized.text, "Hello world");
         assert_eq!(finalized.committed_text.as_deref(), Some("Hello world"));
         assert_eq!(accumulator.final_text(), "Hello world");
+        assert!(accumulator.finalize_pending_text().unwrap().is_none());
+        accumulator.apply_partial_text("unfinished".into(), 0);
+        assert!(accumulator.finalize_pending_text().is_err());
     }
 
     #[test]
-    fn join_helpers_filter_empty_parts() {
-        assert_eq!(join_segments(&["hello".into()], "world"), "hello world");
+    fn join_helpers_preserve_provider_formatting() {
+        assert_eq!(join_segments(&["hello".into()], " world"), "hello world");
         assert_eq!(join_segments(&[], "partial"), "partial");
-        assert_eq!(join_segments(&[], "   "), "");
+        assert_eq!(join_segments(&[], "   "), "   ");
 
         assert_eq!(
-            join_segments_with_accumulating(&["Hello.".into()], "The quick", "brown fox"),
+            join_segments_with_accumulating(&["Hello.".into()], " The quick", " brown fox"),
             "Hello. The quick brown fox"
         );
         assert_eq!(
-            join_segments_with_accumulating(&["Hello.".into()], "", "world"),
+            join_segments_with_accumulating(&["Hello.".into()], "", " world"),
             "Hello. world"
+        );
+        assert_eq!(
+            join_segments_with_accumulating(&["שלום\n".into()], "  וועלט", "!"),
+            "שלום\n  וועלט!"
         );
     }
 

@@ -112,7 +112,7 @@ fn build_openai(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         transcription_prompt,
     );
     let provider = if let Some(url) = managed_gateway_url {
-        provider.with_api_base_url(url)
+        provider.with_managed_gateway(url)
     } else {
         provider
     };
@@ -205,7 +205,7 @@ fn build_groq(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         transcription_prompt,
     );
     let provider = if let Some(url) = managed_gateway_url {
-        provider.with_api_base_url(url)
+        provider.with_managed_gateway(url)
     } else {
         provider
     };
@@ -222,12 +222,10 @@ fn build_elevenlabs(ctx: CloudSttProviderBuildContext) -> Arc<dyn SttProvider> {
         proxy_settings,
         managed_gateway_url,
         request_log_store,
-        stt_live_output,
         ..
     } = ctx;
 
-    let provider = crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language)
-        .with_vad_commit(stt_live_output);
+    let provider = crate::stt::ElevenLabsSttProvider::with_client(client, api_key, model, language);
     let provider = if let Some(url) = managed_gateway_url {
         provider.with_api_base_url(url)
     } else {
@@ -354,5 +352,10 @@ mod tests {
 
         assert_eq!(openai.name(), "openai");
         assert_eq!(groq.name(), "groq");
+        let mut context = test_context();
+        context.model = Some("scribe_v2_realtime".into());
+        let elevenlabs = adapter_for("elevenlabs").unwrap().build(context);
+        assert_eq!(elevenlabs.name(), "elevenlabs");
+        assert!(elevenlabs.supports_streaming());
     }
 }

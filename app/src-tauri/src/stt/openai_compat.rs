@@ -10,6 +10,18 @@ use crate::request_log::RequestLogStore;
 use reqwest::multipart;
 use serde_json::{json, Value as JsonValue};
 
+/// Explicit Managed selections carry provider identity as well as raw model ID.
+/// BYOK/custom endpoints never receive this Kolboo-only routing header.
+pub(super) fn with_managed_selection(
+    request: reqwest::RequestBuilder,
+    provider: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match provider {
+        Some(provider) => request.header("x-kolboo-model-provider", provider),
+        None => request,
+    }
+}
+
 pub(super) fn normalize_optional_text(s: Option<&str>) -> Option<String> {
     let s = s.map(str::trim).filter(|v| !v.is_empty())?;
     Some(s.to_string())

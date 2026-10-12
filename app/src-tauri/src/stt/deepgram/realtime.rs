@@ -4,7 +4,7 @@ use crate::request_log::RequestLogStore;
 use crate::stt::streaming::{
     connect_ws_split_with_timeout, ws_close_best_effort, ws_next_with_timeout,
     ws_send_binary_with_closed_handling, ws_send_json_text_with_closed_handling, PartialTranscript,
-    StreamingSttSession, WsRead, WsSendOutcome, WsWrite,
+    StreamingSttSession, WsRead, WsWrite,
 };
 use crate::stt::SttError;
 use reqwest::Url;
@@ -21,9 +21,11 @@ const DEFAULT_WS_TIMEOUT: Duration = Duration::from_secs(30);
 /// Timeout waiting for final results after sending `Finalize`.
 const POST_FINALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum DeepgramServerEvent {
     Results {
+        start: f64,
+        duration: f64,
         transcript: String,
         is_final: bool,
     },
@@ -34,11 +36,14 @@ enum DeepgramServerEvent {
     UtteranceEnd,
     SpeechStarted,
     Error(String),
-    Unknown(String),
+    Unknown,
+    InvalidResults,
 }
 
 #[derive(Debug, Default)]
 struct DeepgramTranscriptAccumulator {
+    finalized_ranges: std::collections::HashSet<(u64, u64)>,
+    final_end: f64,
     committed_segments: Vec<String>,
     current_partial: String,
     logged_partials: Vec<JsonValue>,
@@ -47,11 +52,27 @@ struct DeepgramTranscriptAccumulator {
 impl DeepgramTranscriptAccumulator {
     fn apply_result(
         &mut self,
+        start: f64,
+        duration: f64,
         transcript: String,
         is_final: bool,
         elapsed_ms: u64,
-    ) -> PartialTranscript {
+    ) -> Result<PartialTranscript, SttError> {
+        let range = (start.to_bits(), duration.to_bits());
+        if self.finalized_ranges.contains(&range)
+            || (!is_final && start + 0.000001 < self.final_end)
+        {
+            return Ok(PartialTranscript {
+                text: join_segments(&self.committed_segments, &self.current_partial),
+                committed_text: None,
+            });
+        }
+        if is_final && start + 0.000001 < self.final_end {
+            return Err(SttError::Api("Deepgram returned overlapping or out-of-order final audio ranges; the recording is retained".into()));
+        }
         let (full_text, committed_text) = if is_final {
+            self.finalized_ranges.insert(range);
+            self.final_end = start + duration;
             // Deepgram marks fully punctuated segments with `is_final=true`.
             // We commit those immediately so live output keeps sentence-sized chunks.
             if !transcript.is_empty() {
@@ -80,28 +101,19 @@ impl DeepgramTranscriptAccumulator {
             "committed_segments": self.committed_segments.len(),
         }));
 
-        PartialTranscript {
+        Ok(PartialTranscript {
             text: full_text,
             committed_text,
-        }
-    }
-
-    fn finalize_pending_partial(&mut self) -> Option<PartialTranscript> {
-        if self.current_partial.is_empty() {
-            return None;
-        }
-
-        let trailing_partial = std::mem::take(&mut self.current_partial);
-        self.committed_segments.push(trailing_partial.clone());
-
-        Some(PartialTranscript {
-            text: join_segments(&self.committed_segments, ""),
-            committed_text: Some(trailing_partial),
         })
     }
 
-    fn final_text(&self) -> String {
-        join_segments(&self.committed_segments, &self.current_partial)
+    fn final_text(&self) -> Result<String, SttError> {
+        if !self.current_partial.is_empty() {
+            return Err(SttError::Api(
+                "Deepgram did not finalize its last transcript; the recording is retained".into(),
+            ));
+        }
+        Ok(join_segments(&self.committed_segments, ""))
     }
 
     fn into_response_json(self, num_chunks_sent: usize, elapsed: Duration) -> JsonValue {
@@ -148,7 +160,15 @@ pub(super) fn streaming_ws_url(
         .append_pair("utterance_end_ms", "1500");
 
     if provider.detect_language {
-        url.query_pairs_mut().append_pair("detect_language", "true");
+        if !matches!(
+            provider.model.as_str(),
+            "nova-2" | "nova-3" | "nova-3-medical"
+        ) {
+            return Err(SttError::Config("This Deepgram model needs an explicit language for realtime input. Choose a language hint or After recording; the model will not be substituted".into()));
+        }
+        // Batch language detection is not a realtime API parameter. Nova's
+        // documented multilingual mode preserves the selected model.
+        url.query_pairs_mut().append_pair("language", "multi");
     } else if let Some(language) = provider.language.as_deref() {
         url.query_pairs_mut().append_pair("language", language);
     }
@@ -275,64 +295,40 @@ async fn run_streaming_task(
 
                         while pcm_buffer.len() >= target_chunk_bytes {
                             let chunk: Vec<u8> = pcm_buffer.drain(..target_chunk_bytes).collect();
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 chunk,
                                 "Deepgram streaming: send audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
+                            ).await?.require_sent()?;
                                     num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    ws_done = true;
-                                    break;
-                                }
-                            }
+
                         }
                     }
                     None => {
                         if !pcm_buffer.is_empty() {
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 pcm_buffer.clone(),
                                 "Deepgram streaming: send final audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
+                            ).await?.require_sent()?;
                                     num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    audio_done = true;
-                                    ws_done = true;
-                                    pcm_buffer.clear();
-                                    continue;
-                                }
-                            }
+
                             pcm_buffer.clear();
                         }
 
                         let finalize = json!({"type": "Finalize"});
-                        match ws_send_json_text_with_closed_handling(
+                        ws_send_json_text_with_closed_handling(
                             &mut ws_write,
                             &finalize,
                             "Deepgram streaming: send Finalize",
-                        ).await? {
-                            WsSendOutcome::Sent => {}
-                            WsSendOutcome::Closed => {
-                                ws_done = true;
-                            }
-                        }
+                        ).await?.require_sent()?;
 
                         let close_stream = json!({"type": "CloseStream"});
-                        match ws_send_json_text_with_closed_handling(
+                        ws_send_json_text_with_closed_handling(
                             &mut ws_write,
                             &close_stream,
                             "Deepgram streaming: send CloseStream",
-                        ).await? {
-                            WsSendOutcome::Sent => {}
-                            WsSendOutcome::Closed => {
-                                ws_done = true;
-                            }
-                        }
+                        ).await?.require_sent()?;
 
                         audio_done = true;
                     }
@@ -344,24 +340,18 @@ async fn run_streaming_task(
                     Ok(Some(Message::Text(text))) => {
                         let value: JsonValue = match serde_json::from_str(&text) {
                             Ok(value) => value,
-                            Err(error) => {
-                                log::debug!(
-                                    "Deepgram streaming: JSON parse error: {} (raw={})",
-                                    error,
-                                    text
-                                );
-                                continue;
-                            }
+                                    Err(_) => return Err(SttError::Api("Deepgram returned invalid JSON".into())),
                         };
 
                         match parse_server_event(&value) {
-                            DeepgramServerEvent::Results { transcript, is_final } => {
+                                    DeepgramServerEvent::Results { start, duration, transcript, is_final } => {
                                 let elapsed = session_start.elapsed().as_millis() as u64;
                                 let partial = transcript_state.apply_result(
+                                            start, duration,
                                     transcript,
                                     is_final,
                                     elapsed,
-                                );
+                                        )?;
 
                                 if let Some(store) = &request_log_store {
                                     store.with_current(|log| {
@@ -369,16 +359,13 @@ async fn run_streaming_task(
                                     });
                                 }
 
-                                let _ = partial_tx.try_send(partial);
+                                        crate::stt::streaming::publish_partial(&partial_tx, partial)?;
                             }
                             DeepgramServerEvent::Metadata {
-                                request_id,
-                                model_name,
+                                        ..
                             } => {
                                 log::info!(
-                                    "Deepgram streaming session started (request_id={}, model={})",
-                                    request_id,
-                                    model_name,
+                                            "Deepgram streaming session started",
                                 );
                             }
                             DeepgramServerEvent::UtteranceEnd | DeepgramServerEvent::SpeechStarted => {
@@ -386,39 +373,32 @@ async fn run_streaming_task(
                                 // These events are useful for logs, but they do not change transcript state.
                             }
                             DeepgramServerEvent::Error(message) => {
-                                return Err(SttError::Api(format!("Deepgram error: {}", message)));
+                                        let _ = message;
+                                        return Err(SttError::Api("Deepgram rejected the stream; the recording is retained".into()));
                             }
-                            DeepgramServerEvent::Unknown(message_type) => {
-                                log::debug!(
-                                    "Deepgram streaming: unknown message type: {}",
-                                    message_type,
-                                );
+                            DeepgramServerEvent::Unknown => {
+                                log::debug!("Deepgram streaming: ignored an unknown event");
                             }
+                                    DeepgramServerEvent::InvalidResults => return Err(SttError::Api("Deepgram returned invalid audio range metadata".into())),
                         }
                     }
-                    Ok(Some(Message::Close(frame))) => {
-                        log::info!("Deepgram streaming: server sent Close frame {:?}", frame);
-                        ws_done = true;
-                    }
-                    Ok(None) => {
-                        log::info!("Deepgram streaming: WS stream ended");
+                            Ok(Some(Message::Close(_))) | Ok(None) => {
+                                if !audio_done { return Err(SttError::NetworkMessage("Deepgram closed before audio delivery completed".into())); }
+                                log::info!("Deepgram streaming: server closed its connection");
                         ws_done = true;
                     }
                     Ok(_) => {
                         // Ignore binary/ping/pong.
                     }
                     Err(SttError::Timeout) if audio_done => {
-                        log::warn!(
-                            "Deepgram streaming: timed out waiting for final results, using accumulated segments"
-                        );
-                        ws_done = true;
+                                return Err(SttError::Timeout);
                     }
                     Err(SttError::Timeout) => {
                         log::warn!(
                             "Deepgram streaming: WS read timed out while audio still flowing ({}s)",
                             DEFAULT_WS_TIMEOUT.as_secs(),
                         );
-                        ws_done = true;
+                                return Err(SttError::Timeout);
                     }
                     Err(error) => {
                         log::error!("Deepgram streaming: WS read error: {}", error);
@@ -432,12 +412,8 @@ async fn run_streaming_task(
     ws_close_best_effort(&mut ws_write, "Deepgram streaming", Duration::from_secs(3)).await;
     drop(ws_write);
 
-    if let Some(partial) = transcript_state.finalize_pending_partial() {
-        let _ = partial_tx.try_send(partial);
-    }
-
     let elapsed = session_start.elapsed();
-    let final_text = transcript_state.final_text();
+    let final_text = transcript_state.final_text()?;
     let response_json = transcript_state.into_response_json(num_chunks_sent, elapsed);
 
     log::info!(
@@ -464,13 +440,31 @@ fn parse_server_event(value: &JsonValue) -> DeepgramServerEvent {
         .to_string();
 
     match message_type.as_str() {
-        "Results" => DeepgramServerEvent::Results {
-            transcript: extract_transcript(value).to_string(),
-            is_final: value
-                .get("is_final")
-                .and_then(|f| f.as_bool())
-                .unwrap_or(false),
-        },
+        "Results" => {
+            let Some(start) = value
+                .get("start")
+                .and_then(JsonValue::as_f64)
+                .filter(|value| value.is_finite() && *value >= 0.0)
+            else {
+                return DeepgramServerEvent::InvalidResults;
+            };
+            let Some(duration) = value
+                .get("duration")
+                .and_then(JsonValue::as_f64)
+                .filter(|value| value.is_finite() && *value >= 0.0 && (start + *value).is_finite())
+            else {
+                return DeepgramServerEvent::InvalidResults;
+            };
+            DeepgramServerEvent::Results {
+                start,
+                duration,
+                transcript: extract_transcript(value).to_string(),
+                is_final: value
+                    .get("is_final")
+                    .and_then(|f| f.as_bool())
+                    .unwrap_or(false),
+            }
+        }
         "Metadata" => DeepgramServerEvent::Metadata {
             request_id: value
                 .get("request_id")
@@ -494,7 +488,7 @@ fn parse_server_event(value: &JsonValue) -> DeepgramServerEvent {
                 .unwrap_or("Unknown Deepgram error")
                 .to_string(),
         ),
-        _ => DeepgramServerEvent::Unknown(message_type),
+        _ => DeepgramServerEvent::Unknown,
     }
 }
 
@@ -524,8 +518,13 @@ fn join_segments(committed: &[String], current_partial: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "tests/realtime_contract.rs"]
+mod contract;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stt::SttProvider;
 
     #[test]
     fn streaming_ws_url_default() {
@@ -558,8 +557,25 @@ mod tests {
     fn streaming_ws_url_with_detect_language() {
         let provider = DeepgramSttProvider::new("k".to_string(), None, Some("auto".to_string()));
         let url = streaming_ws_url(&provider, 16000).expect("ws url");
-        assert!(url.contains("detect_language=true"));
+        assert!(url.contains("language=multi"));
+        assert!(!url.contains("detect_language"));
         assert!(!url.contains("language=auto"));
+    }
+
+    #[test]
+    fn auto_streaming_never_substitutes_an_unsupported_model() {
+        let provider = DeepgramSttProvider::new("k".into(), Some("whisper-large".into()), None);
+        assert!(!provider.supports_streaming());
+        assert!(matches!(
+            streaming_ws_url(&provider, 16000),
+            Err(SttError::Config(_))
+        ));
+        let explicit =
+            DeepgramSttProvider::new("k".into(), Some("whisper-large".into()), Some("he".into()));
+        assert!(explicit.supports_streaming());
+        assert!(streaming_ws_url(&explicit, 16000)
+            .unwrap()
+            .contains("language=he"));
     }
 
     #[test]
@@ -567,12 +583,16 @@ mod tests {
         assert_eq!(
             parse_server_event(&json!({
                 "type": "Results",
+                "start": 0.0,
+                "duration": 1.0,
                 "is_final": true,
                 "channel": {
                     "alternatives": [{ "transcript": "hello world" }]
                 }
             })),
             DeepgramServerEvent::Results {
+                start: 0.0,
+                duration: 1.0,
                 transcript: "hello world".to_string(),
                 is_final: true,
             },
@@ -600,7 +620,7 @@ mod tests {
 
         assert_eq!(
             parse_server_event(&json!({ "type": "SomethingNew" })),
-            DeepgramServerEvent::Unknown("SomethingNew".to_string()),
+            DeepgramServerEvent::Unknown,
         );
     }
 
@@ -608,27 +628,70 @@ mod tests {
     fn transcript_accumulator_tracks_partial_and_final_results() {
         let mut accumulator = DeepgramTranscriptAccumulator::default();
 
-        let partial = accumulator.apply_result("hello".to_string(), false, 12);
+        let partial = accumulator
+            .apply_result(0.0, 1.0, "hello".to_string(), false, 12)
+            .unwrap();
         assert_eq!(partial.text, "hello");
         assert_eq!(partial.committed_text, None);
 
-        let committed = accumulator.apply_result("hello world".to_string(), true, 24);
+        let committed = accumulator
+            .apply_result(0.0, 1.0, "hello world".to_string(), true, 24)
+            .unwrap();
         assert_eq!(committed.text, "hello world");
         assert_eq!(committed.committed_text.as_deref(), Some("hello world"));
-        assert_eq!(accumulator.final_text(), "hello world");
+        assert_eq!(accumulator.final_text().unwrap(), "hello world");
     }
 
     #[test]
-    fn transcript_accumulator_finalizes_trailing_partial() {
+    fn transcript_accumulator_never_promotes_unfinalized_partials() {
         let mut accumulator = DeepgramTranscriptAccumulator::default();
-        let _ = accumulator.apply_result("hello".to_string(), false, 10);
-        let finalized = accumulator
-            .finalize_pending_partial()
-            .expect("trailing partial to finalize");
+        accumulator
+            .apply_result(0.0, 1.0, "hello".to_string(), false, 10)
+            .unwrap();
+        assert!(accumulator.final_text().is_err());
+    }
 
-        assert_eq!(finalized.text, "hello");
-        assert_eq!(finalized.committed_text.as_deref(), Some("hello"));
-        assert_eq!(accumulator.final_text(), "hello");
+    #[test]
+    fn finalized_audio_ranges_are_not_duplicated_or_reordered() {
+        let mut a = DeepgramTranscriptAccumulator::default();
+        assert_eq!(
+            a.apply_result(0.0, 1.0, "first".into(), true, 0)
+                .unwrap()
+                .committed_text
+                .as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            a.apply_result(0.0, 1.0, "duplicate".into(), true, 0)
+                .unwrap()
+                .committed_text,
+            None
+        );
+        assert_eq!(
+            a.apply_result(0.0, 0.5, "stale".into(), false, 0)
+                .unwrap()
+                .text,
+            "first"
+        );
+        assert!(a.apply_result(0.5, 1.0, "overlap".into(), true, 0).is_err());
+        assert_eq!(
+            a.apply_result(1.0, 1.0, "first".into(), true, 0)
+                .unwrap()
+                .text,
+            "first first"
+        );
+        assert_eq!(a.final_text().unwrap(), "first first");
+        for event in [
+            json!({"type":"Results"}),
+            json!({"type":"Results","start":-1,"duration":1}),
+            json!({"type":"Results","start":0,"duration":-1}),
+            json!({"type":"Results","start":0}),
+        ] {
+            assert_eq!(
+                parse_server_event(&event),
+                DeepgramServerEvent::InvalidResults
+            );
+        }
     }
 
     #[test]

@@ -37,9 +37,7 @@ pub struct ElevenLabsSttProvider {
     language_code: Option<String>,
     api_base_url: String,
     request_log_store: Option<RequestLogStore>,
-    /// When true, use `commit_strategy=vad` so the server auto-commits speech
-    /// segments during recording (enables live output for ElevenLabs).
-    use_vad_commit: bool,
+    /// Explicit network configuration shared by HTTP and owned WebSocket input.
     proxy_settings: ProxySettings,
 }
 
@@ -64,7 +62,6 @@ impl ElevenLabsSttProvider {
             language_code,
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
-            use_vad_commit: false,
             proxy_settings: ProxySettings::default(),
         }
     }
@@ -86,15 +83,8 @@ impl ElevenLabsSttProvider {
             language_code,
             api_base_url: Self::DEFAULT_ELEVENLABS_API_BASE_URL.to_string(),
             request_log_store: None,
-            use_vad_commit: false,
             proxy_settings: ProxySettings::default(),
         }
-    }
-
-    /// Enable VAD-based commit strategy for live output.
-    pub fn with_vad_commit(mut self, enabled: bool) -> Self {
-        self.use_vad_commit = enabled;
-        self
     }
 
     pub fn with_proxy_settings(mut self, proxy_settings: ProxySettings) -> Self {

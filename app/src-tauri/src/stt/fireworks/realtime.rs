@@ -6,7 +6,7 @@ use crate::request_log::RequestLogStore;
 use crate::stt::streaming::{
     connect_ws_split_with_timeout, ws_close_best_effort, ws_next_with_timeout,
     ws_send_binary_with_closed_handling, ws_send_json_text_with_closed_handling, PartialTranscript,
-    StreamingSttSession, WsRead, WsSendOutcome, WsWrite,
+    StreamingSttSession, WsRead, WsWrite,
 };
 use crate::stt::SttError;
 use serde_json::{json, Value as JsonValue};
@@ -37,6 +37,7 @@ struct FireworksTranscriptAccumulator {
     segment_first_seen: Vec<Instant>,
     committed_up_to: usize,
     logged_partials: Vec<JsonValue>,
+    seen_segments: std::collections::HashSet<usize>,
 }
 
 impl FireworksTranscriptAccumulator {
@@ -50,10 +51,14 @@ impl FireworksTranscriptAccumulator {
         &mut self,
         updated_segments: Vec<(usize, String)>,
         elapsed_ms: u64,
-    ) -> PartialTranscript {
+    ) -> Result<PartialTranscript, SttError> {
         let mut updated_ids = std::collections::HashSet::new();
 
         for (id, text) in updated_segments {
+            if id >= 16384 || (id < self.committed_up_to && self.segments[id] != text) {
+                return Err(SttError::Api("Fireworks revised committed text or returned an invalid segment range; the recording is retained".into()));
+            }
+            self.seen_segments.insert(id);
             updated_ids.insert(id);
 
             if id >= self.segments.len() {
@@ -116,10 +121,10 @@ impl FireworksTranscriptAccumulator {
             None
         };
 
-        PartialTranscript {
+        Ok(PartialTranscript {
             text: full_text,
             committed_text,
-        }
+        })
     }
 
     fn finalize_remaining_commit(&self) -> Option<String> {
@@ -135,8 +140,14 @@ impl FireworksTranscriptAccumulator {
         }
     }
 
-    fn final_text(&self) -> String {
-        join_segments(&self.segments)
+    fn final_text(&self) -> Result<String, SttError> {
+        if (0..self.segments.len()).any(|id| !self.seen_segments.contains(&id)) {
+            return Err(SttError::Api(
+                "Fireworks did not return every transcript segment; the recording is retained"
+                    .into(),
+            ));
+        }
+        Ok(join_segments(&self.segments))
     }
 
     fn into_response_json(self, num_chunks_sent: usize, elapsed: Duration) -> JsonValue {
@@ -281,54 +292,30 @@ async fn run_streaming_task(
 
                         while pcm_buffer.len() >= target_chunk_bytes {
                             let chunk: Vec<u8> = pcm_buffer.drain(..target_chunk_bytes).collect();
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 chunk,
                                 "Fireworks streaming: send audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
-                                    num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    log::warn!(
-                                        "Fireworks streaming: websocket closed while sending audio, finishing early"
-                                    );
-                                    ws_done = true;
-                                    break;
-                                }
-                            }
+                            ).await?.require_sent()?;
+                            num_chunks_sent += 1;
                         }
                     }
                     None => {
                         if !pcm_buffer.is_empty() {
-                            match ws_send_binary_with_closed_handling(
+                            ws_send_binary_with_closed_handling(
                                 &mut ws_write,
                                 pcm_buffer.clone(),
                                 "Fireworks streaming: send final audio chunk",
-                            ).await? {
-                                WsSendOutcome::Sent => {
-                                    num_chunks_sent += 1;
-                                }
-                                WsSendOutcome::Closed => {
-                                    audio_done = true;
-                                    ws_done = true;
-                                    pcm_buffer.clear();
-                                    continue;
-                                }
-                            }
+                            ).await?.require_sent()?;
+                            num_chunks_sent += 1;
                             pcm_buffer.clear();
                         }
 
-                        match ws_send_json_text_with_closed_handling(
+                        ws_send_json_text_with_closed_handling(
                             &mut ws_write,
                             &json!({"checkpoint_id": "final"}),
                             "Fireworks streaming: send final checkpoint",
-                        ).await? {
-                            WsSendOutcome::Sent => {}
-                            WsSendOutcome::Closed => {
-                                ws_done = true;
-                            }
-                        }
+                        ).await?.require_sent()?;
 
                         audio_done = true;
                     }
@@ -338,19 +325,14 @@ async fn run_streaming_task(
             ws_msg = ws_next_with_timeout(&mut ws_read, ws_timeout), if !ws_done => {
                 match ws_msg {
                     Ok(Some(Message::Text(text))) => {
-                        let value: JsonValue = serde_json::from_str(&text).map_err(|e| {
-                            SttError::Api(format!(
-                                "Fireworks streaming: failed to parse JSON: {} (raw={})",
-                                e, text,
-                            ))
-                        })?;
+                        let value: JsonValue = serde_json::from_str(&text).map_err(|_| SttError::Api("Fireworks returned invalid JSON".into()))?;
 
                         match parse_server_event(&value) {
                             FireworksServerEvent::Segments(updated_segments) => {
                                 let partial = transcript_state.apply_segments(
                                     updated_segments,
                                     session_start.elapsed().as_millis() as u64,
-                                );
+                                )?;
 
                                 if let Some(store) = &request_log_store {
                                     store.with_current(|log| {
@@ -358,16 +340,15 @@ async fn run_streaming_task(
                                     });
                                 }
 
-                                let _ = partial_tx.try_send(partial);
+                                crate::stt::streaming::publish_partial(&partial_tx, partial)?;
                             }
                             FireworksServerEvent::FinalCheckpoint => {
+                                if !audio_done { return Err(SttError::Api("Fireworks finalized before audio delivery completed".into())); }
                                 ws_done = true;
                             }
                             FireworksServerEvent::Error(error) => {
-                                return Err(SttError::Api(format!(
-                                    "Fireworks streaming error: {}",
-                                    error,
-                                )));
+                                let _ = error;
+                                return Err(SttError::Api("Fireworks rejected the stream; the recording is retained".into()));
                             }
                             FireworksServerEvent::Unknown => {
                                 // Ignore future provider-local events until we have a reason
@@ -375,15 +356,10 @@ async fn run_streaming_task(
                             }
                         }
                     }
-                    Ok(Some(Message::Close(_))) | Ok(None) => {
-                        ws_done = true;
-                    }
+                    Ok(Some(Message::Close(_))) | Ok(None) => return Err(SttError::NetworkMessage("Fireworks closed without confirming finalization".into())),
                     Ok(_) => {}
                     Err(SttError::Timeout) if audio_done => {
-                        log::warn!(
-                            "Fireworks streaming: timed out waiting for final checkpoint, using accumulated segments"
-                        );
-                        ws_done = true;
+                        return Err(SttError::Timeout);
                     }
                     Err(error) => {
                         return Err(error);
@@ -395,12 +371,15 @@ async fn run_streaming_task(
 
     ws_close_best_effort(&mut ws_write, "Fireworks streaming", Duration::from_secs(3)).await;
 
-    let final_text = transcript_state.final_text();
+    let final_text = transcript_state.final_text()?;
     if let Some(remaining) = transcript_state.finalize_remaining_commit() {
-        let _ = partial_tx.try_send(PartialTranscript {
-            text: final_text.clone(),
-            committed_text: Some(remaining),
-        });
+        crate::stt::streaming::publish_partial(
+            &partial_tx,
+            PartialTranscript {
+                text: final_text.clone(),
+                committed_text: Some(remaining),
+            },
+        )?;
     }
 
     let elapsed = session_start.elapsed();
@@ -477,6 +456,10 @@ fn join_segments(segments: &[String]) -> String {
 }
 
 #[cfg(test)]
+#[path = "tests/realtime_contract.rs"]
+mod realtime_contract;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::stt::SttProvider;
@@ -551,20 +534,52 @@ mod tests {
     fn transcript_accumulator_commits_leading_stable_segments() {
         let mut accumulator = FireworksTranscriptAccumulator::default();
 
-        let first = accumulator.apply_segments(vec![(0, "hello".to_string())], 10);
+        let first = accumulator
+            .apply_segments(vec![(0, "hello".to_string())], 10)
+            .unwrap();
         assert_eq!(first.text, "hello");
         assert_eq!(first.committed_text, None);
 
-        let _ = accumulator.apply_segments(vec![(0, "hello".to_string())], 20);
-        let not_yet_committed = accumulator.apply_segments(vec![(0, "hello".to_string())], 30);
+        accumulator
+            .apply_segments(vec![(0, "hello".to_string())], 20)
+            .unwrap();
+        let not_yet_committed = accumulator
+            .apply_segments(vec![(0, "hello".to_string())], 30)
+            .unwrap();
         assert_eq!(not_yet_committed.committed_text, None);
 
         // The stability threshold counts unchanged follow-up updates after the
         // segment is first observed, so the fourth identical frame is the one
         // that becomes commit-worthy.
-        let committed = accumulator.apply_segments(vec![(0, "hello".to_string())], 40);
+        let committed = accumulator
+            .apply_segments(vec![(0, "hello".to_string())], 40)
+            .unwrap();
         assert_eq!(committed.text, "hello");
         assert_eq!(committed.committed_text.as_deref(), Some("hello"));
+        assert!(accumulator
+            .apply_segments(vec![(0, "changed".into())], 50)
+            .is_err());
+        assert_eq!(accumulator.final_text().unwrap(), "hello");
+        assert!(accumulator
+            .apply_segments(vec![(usize::MAX, "invalid".into())], 60)
+            .is_err());
+    }
+
+    #[test]
+    fn missing_segment_ids_fail_but_explicitly_empty_segments_are_valid() {
+        let mut accumulator = FireworksTranscriptAccumulator::default();
+        accumulator
+            .apply_segments(vec![(1, "tail".into())], 0)
+            .unwrap();
+        assert!(accumulator.final_text().is_err());
+        accumulator.apply_segments(vec![(0, "".into())], 1).unwrap();
+        assert_eq!(accumulator.final_text().unwrap(), "tail");
+        assert_eq!(
+            FireworksTranscriptAccumulator::default()
+                .final_text()
+                .unwrap(),
+            ""
+        );
     }
 
     #[test]

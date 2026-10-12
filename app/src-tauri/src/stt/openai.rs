@@ -28,6 +28,7 @@ use serde_json::json;
 use std::time::Duration;
 
 /// OpenAI STT provider for speech-to-text
+#[derive(Clone)]
 pub struct OpenAiSttProvider {
     client: reqwest::Client,
     api_key: String,
@@ -35,6 +36,7 @@ pub struct OpenAiSttProvider {
     default_prompt: Option<String>,
     default_language: Option<String>,
     api_base_url: String,
+    managed_model_provider: Option<&'static str>,
     request_log_store: Option<RequestLogStore>,
     proxy_settings: ProxySettings,
 }
@@ -71,6 +73,7 @@ impl OpenAiSttProvider {
                 .map(|s| s.to_string()),
             default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
+            managed_model_provider: None,
             request_log_store: None,
             proxy_settings: ProxySettings::default(),
         }
@@ -96,6 +99,7 @@ impl OpenAiSttProvider {
                 .map(|s| s.to_string()),
             default_language: Self::normalize_language(language),
             api_base_url: Self::DEFAULT_OPENAI_API_BASE_URL.to_string(),
+            managed_model_provider: None,
             request_log_store: None,
             proxy_settings: ProxySettings::default(),
         }
@@ -107,6 +111,12 @@ impl OpenAiSttProvider {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn with_api_base_url(mut self, base_url: String) -> Self {
         self.api_base_url = base_url;
+        self
+    }
+
+    pub(crate) fn with_managed_gateway(mut self, base_url: String) -> Self {
+        self.api_base_url = base_url;
+        self.managed_model_provider = Some("openai");
         self
     }
 
@@ -226,7 +236,12 @@ impl OpenAiSttProvider {
             clamped_prompt.as_deref(),
             language,
             self.request_log_store.as_ref(),
-            |rb| rb.bearer_auth(&self.api_key),
+            |rb| {
+                openai_compat::with_managed_selection(
+                    rb.bearer_auth(&self.api_key),
+                    self.managed_model_provider,
+                )
+            },
             SttError::Network,
         )
         .await
@@ -359,10 +374,13 @@ impl OpenAiSttProvider {
 
         let responses_url = self.responses_url();
         let response = crate::http::with_cloudflare_access_headers_if_target(
-            self.client
-                .post(&responses_url)
-                .bearer_auth(&self.api_key)
-                .json(&request_body),
+            openai_compat::with_managed_selection(
+                self.client
+                    .post(&responses_url)
+                    .bearer_auth(&self.api_key)
+                    .json(&request_body),
+                self.managed_model_provider,
+            ),
             &responses_url,
         )
         .send()
@@ -418,6 +436,14 @@ impl OpenAiSttProvider {
 
 #[async_trait]
 impl SttProvider for OpenAiSttProvider {
+    fn with_renewed_managed_token(&self, token: &str) -> Option<std::sync::Arc<dyn SttProvider>> {
+        if self.managed_model_provider.is_none() || token.trim().is_empty() {
+            return None;
+        }
+        let mut renewed = self.clone();
+        renewed.api_key = token.into();
+        Some(std::sync::Arc::new(renewed))
+    }
     async fn transcribe_detailed(
         &self,
         audio: &[u8],
@@ -448,7 +474,7 @@ impl SttProvider for OpenAiSttProvider {
     }
 
     fn supports_streaming(&self) -> bool {
-        self.supports_realtime_streaming()
+        self.managed_model_provider.is_none() && self.supports_realtime_streaming()
     }
 
     fn requires_streaming(&self) -> bool {
