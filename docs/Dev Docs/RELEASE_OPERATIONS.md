@@ -100,7 +100,13 @@ The account page must be a verified HTTPS deployment rather than the protected
 Preparation is not publication: push and remote checks, compatible beta API
 deployment, exact-package Linux login/session/managed/BYOK acceptance, updater
 artifact verification, and release evidence remain required. Platform/operator
-and legal deferrals from 0.3.2 do not automatically carry forward.
+and legal deferrals from 0.3.2 do not automatically carry forward. On October 13
+the maintainer explicitly carried forward Windows/macOS hands-on acceptance,
+public legal-link verification and the full operator-rehearsal deferrals for
+0.3.3. These are deferred, not passed. Automated checks, all three platform
+packages, signature verification and exact-package Linux acceptance remain
+required. Admission controls and server-side email confirmation remain enabled;
+this does not authorize public paid signup.
 
 The Windows preparation run `38388645737` exposed a checkpoint-cleanup error:
 Windows can report a child path beneath a regular file as `NotFound`, unlike
@@ -113,6 +119,12 @@ the release tag moves; Linux coverage alone is not Windows verification.
 Local `check:ci` and `coverage:patch` passed on October 13 after this fix: 1,160
 Rust tests, 1,022 frontend tests, isolated Linux/Wry and offline startup checks,
 and 100% non-exempt desktop patch coverage. No new exception was added.
+The corrected Windows run `38421610105` passed both native Windows automated
+checks and installer packaging, finishing at 12:08 PM Eastern on October 13.
+Linux build, CI, patch coverage and audits also passed on commit `13962a6`.
+PR #111 was merged as `58ec0e1` with the maintainer's explicitly approved merge
+override; no branch rules changed. These development builds are not acceptance
+of the final account-enabled, updater-signed release packages.
 
 ## Windows startup regression (0.3.2)
 
