@@ -147,6 +147,13 @@ rebased to the same tagged CLI without dropping the Kolboo upgrade safeguards.
 The first draft remains unpublished: replacement packages, all updater
 signatures/provenance, and actual AppImage frontend rendering must be verified.
 Prior DEB acceptance does not establish acceptance of a different executable.
+Local CLI 2.12.1 repackaging of the verified DEB executable rendered frontend
+controls and passed real startup-size and close-to-exit checks on an isolated,
+offline Ubuntu 26.04 desktop. Repeating the original signed AppImage under the
+same fixture, with sufficient temporary disk space, still produced the EGL
+abort. This is supporting evidence, not acceptance of the final GitHub-built
+replacement. All 37 release-helper tests and full local `check:ci` passed after
+the packaging change; desktop patch coverage and remote gates remain required.
 
 The maintainer explicitly requested no YiddishLabs changes after reviewing the
 two BYOK findings: initial secure-key bootstrap omits the YiddishLabs slots,
