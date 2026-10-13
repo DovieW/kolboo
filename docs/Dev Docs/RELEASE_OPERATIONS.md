@@ -1,6 +1,6 @@
 # Release operations
 
-> **Channel scope:** Stable Windows distribution remains gated. Versioned desktop releases also include explicitly experimental, unnotarized universal macOS downloads and Linux Community/BYOK packages. Signed automatic updates are configured for versioned releases on all three platforms; Linux-only prereleases retain manual updates. Publication still requires the applicable exact-package acceptance or an explicitly recorded deferral; none of these channels opens managed signup or constitutes a broad product launch.
+> **Channel scope:** Version 0.3.3 prepares account-enabled Windows, Linux and experimental, unnotarized universal macOS packages for the existing invite-only beta. BYOK remains account-free. Signed automatic updates are configured for versioned releases on all three platforms; Linux-only Community prereleases retain manual updates. Publication still requires applicable exact-package acceptance or an explicitly recorded deferral. This is not public paid signup or a broad managed-service launch.
 
 Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS is an experimental download, not yet a supported or native-accepted platform.
 
@@ -72,6 +72,29 @@ strict. Live service acceptance is still required before opening signup.
 Release titles follow the simple `vX.Y.Z` convention. Unsigned Windows publisher
 identity and experimental macOS limitations are disclosed in the release body,
 not appended to its title.
+
+## 0.3.3 account-enabled beta preparation
+
+The maintainer authorized shipping 0.3.3 with login and leaving Managed
+YiddishLabs disabled on October 13. All versioned-release platform calls opt in
+to `service_enabled: true`; ordinary development builds and Linux-only Community
+beta tags remain cloud-disabled by default. Both build-mode flags and all five
+public origins/keys come from the same explicit input. Release verification
+rejects missing or invalid public configuration before expensive builds begin.
+Only the Supabase publishable key enters desktop packages, never server keys or
+Cloudflare Access credentials. `production` here names the strict installer
+validation mode, not a promotion of the existing early-development backend.
+
+The approved-email admission hook and complimentary beta access remain in force.
+Do not disable admission, enable paid checkout, publish YiddishLabs models, apply
+its job-table migration, or configure vendor credentials as part of this release.
+The account page must be a verified HTTPS deployment rather than the protected
+`kolboo.dovie.dev` origin or a missing production login page.
+
+Preparation is not publication: push and remote checks, compatible beta API
+deployment, exact-package Linux login/session/managed/BYOK acceptance, updater
+artifact verification, and release evidence remain required. Platform/operator
+and legal deferrals from 0.3.2 do not automatically carry forward.
 
 ## Windows startup regression (0.3.2)
 

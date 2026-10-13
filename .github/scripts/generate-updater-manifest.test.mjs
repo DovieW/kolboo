@@ -87,8 +87,8 @@ test("stable releases sign and publish all updater formats without enabling unsi
 	assert.match(linux, /test -n "\$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"/);
 	assert.match(linux, /tauri signer sign "\$GITHUB_WORKSPACE\/\$deb_path"/);
 	assert.match(linux, /cp "\$deb_path.sig" "\$appimage_path.sig" artifacts\//);
-	assert.match(linux, /channel=\$\{\{ inputs.release_signing && 'versioned-community' \|\| 'linux-community-beta' \}\}/);
-	assert.match(release, /uses: \.\/\.github\/workflows\/linux-build.yml\s+with:\s+release_signing: true/);
+	assert.match(linux, /channel=\$\{\{ inputs.service_enabled && 'service-beta' \|\| inputs.release_signing && 'versioned-community' \|\| 'linux-community-beta' \}\}/);
+	assert.match(release, /uses: \.\/\.github\/workflows\/linux-build.yml\s+with:\s+service_enabled: true\s+release_signing: true/);
 	assert.doesNotMatch(beta, /release_signing: true/);
 	assert.match(mac, /VITE_SIGNED_UPDATER_ENABLED: \$\{\{ inputs.release_build && 'true' \|\| 'false' \}\}/);
 	assert.match(mac, /test -n "\$TAURI_SIGNING_PRIVATE_KEY"/);

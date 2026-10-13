@@ -12,12 +12,20 @@ on:
       - ".github/workflows/linux-build.yml"
   workflow_dispatch:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration"
+        type: boolean
+        default: false
       release_signing:
         description: "Build signed automatic-update packages"
         type: boolean
         default: false
   workflow_call:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration; Community builds remain the default"
+        type: boolean
+        default: false
       release_signing:
         type: boolean
         default: false
@@ -56,9 +64,14 @@ jobs:
       CARGO_TERM_COLOR: always
       RUSTFLAGS: -C link-arg=-fuse-ld=mold
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
-      # 0.3.2 ships Community/BYOK only; service rollout remains separate.
-      TAURI_CLOUD_ENV: community
-      VITE_CLOUD_SERVICE_ENABLED: "false"
+      # Service releases retain account-free BYOK; never embed server credentials.
+      TAURI_CLOUD_ENV: ${{ inputs.service_enabled && 'production' || 'community' }}
+      VITE_CLOUD_SERVICE_ENABLED: ${{ inputs.service_enabled && 'true' || 'false' }}
+      TAURI_API_BASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_API_BASE_URL || '' }}
+      TAURI_MANAGED_INFERENCE_GATEWAY_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_MANAGED_INFERENCE_GATEWAY_URL || '' }}
+      TAURI_SUPABASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_URL || '' }}
+      TAURI_SUPABASE_PUBLISHABLE_KEY: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_PUBLISHABLE_KEY || '' }}
+      TAURI_PUBLIC_AUTH_PAGE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_PUBLIC_AUTH_PAGE_URL || '' }}
       TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
       TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
@@ -221,7 +234,7 @@ jobs:
           sentry_runtime_enabled=${{ steps.build-meta.outputs.reporting_enabled }}
           sentry_sourcemaps_required=${{ steps.build-meta.outputs.sourcemaps_required }}
           sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
-          channel=${{ inputs.release_signing && 'versioned-community' || 'linux-community-beta' }}
+          channel=${{ inputs.service_enabled && 'service-beta' || inputs.release_signing && 'versioned-community' || 'linux-community-beta' }}
           architecture=x86_64
           build_runner=ubuntu-22.04
           updater_enabled=${{ inputs.release_signing && 'true' || 'false' }}
