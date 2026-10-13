@@ -74,6 +74,31 @@ fn receipts_reject_invalid_job_ids_oversized_files_and_foreign_checkpoint_names(
     assert!(delete_owned_checkpoints(&invalid).is_err());
 }
 
+#[test]
+fn absent_checkpoint_cleanup_checks_parent_shape_without_disclosing_paths() {
+    let directory = tempfile::tempdir().unwrap();
+    for base in [
+        directory.path().join("absent.transcripts"),
+        directory.path().join("missing/nested/absent.transcripts"),
+    ] {
+        assert!(delete_owned_checkpoints(&base).unwrap().is_empty());
+        assert!(!base.with_extension("yiddish-jobs").exists());
+    }
+    let parent_file = directory.path().join("private-parent-file");
+    std::fs::write(&parent_file, b"retain").unwrap();
+    for base in [
+        parent_file.join("absent.transcripts"),
+        parent_file.join("missing/absent.transcripts"),
+        directory.path().join("invalid\0.transcripts"),
+    ] {
+        let error = delete_owned_checkpoints(&base).unwrap_err().to_string();
+        assert!(error.contains("recording is retained"));
+        assert!(!error.contains("private-parent-file"));
+        assert!(!error.contains(directory.path().to_str().unwrap()));
+        assert_eq!(std::fs::read(&parent_file).unwrap(), b"retain");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn receipt_directory_sync_rejects_files_links_and_missing_directories_privately() {
@@ -519,6 +544,18 @@ fn checkpoint_directories_cannot_follow_links_or_reuse_world_readable_storage() 
     let base = directory.path().join("recording.transcripts");
     let owned = base.with_extension("yiddish-jobs");
     let outside = tempfile::tempdir().unwrap();
+    let outside_receipt = checkpoint_path(
+        &outside.path().join("recording.transcripts"),
+        false,
+        b"audio",
+        0,
+    )
+    .unwrap();
+    std::fs::write(&outside_receipt, b"retain receipt").unwrap();
+    let parent_link = directory.path().join("parent-link");
+    symlink(outside.path(), &parent_link).unwrap();
+    assert!(delete_owned_checkpoints(&parent_link.join("recording.transcripts")).is_err());
+    assert_eq!(std::fs::read(&outside_receipt).unwrap(), b"retain receipt");
     symlink(outside.path(), &owned).unwrap();
     assert!(checkpoint_path(&base, false, b"audio", 0).is_err());
     assert!(delete_owned_checkpoints(&base).is_err());

@@ -102,6 +102,18 @@ deployment, exact-package Linux login/session/managed/BYOK acceptance, updater
 artifact verification, and release evidence remain required. Platform/operator
 and legal deferrals from 0.3.2 do not automatically carry forward.
 
+The Windows preparation run `38388645737` exposed a checkpoint-cleanup error:
+Windows can report a child path beneath a regular file as `NotFound`, unlike
+Linux's `NotADirectory`. Cleanup now checks the nearest existing parent before
+treating missing receipts as an idempotent no-op. Invalid parents fail privately
+and retain the recording; legitimately missing directory trees still succeed.
+Regression tests exercise both forms of absence, file parents, and linked
+parents without deleting unrelated content. A new Windows run must pass before
+the release tag moves; Linux coverage alone is not Windows verification.
+Local `check:ci` and `coverage:patch` passed on October 13 after this fix: 1,160
+Rust tests, 1,022 frontend tests, isolated Linux/Wry and offline startup checks,
+and 100% non-exempt desktop patch coverage. No new exception was added.
+
 ## Windows startup regression (0.3.2)
 
 The overlay layout helper previously acquired its layout mutex before resolving

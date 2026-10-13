@@ -107,6 +107,18 @@ pub(crate) fn checkpoint_path(
 /// receipt. Keep these locks alive until the caller also removes owned audio.
 pub(crate) fn delete_owned_checkpoints(base: &std::path::Path) -> Result<Vec<File>, SttError> {
     let directory = base.with_extension("yiddish-jobs");
+    // Windows may report a child of a regular file as NotFound rather than
+    // NotADirectory. Verify the nearest existing parent before accepting an
+    // absent receipt directory. Missing directory trees remain an idempotent
+    // no-op; files and links are never treated as valid storage parents.
+    for parent in directory.ancestors().skip(1) {
+        match std::fs::symlink_metadata(parent) {
+            Ok(metadata) if metadata.is_dir() => break,
+            Ok(_) => return Err(storage_error()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Err(storage_error()),
+        }
+    }
     let metadata = match std::fs::symlink_metadata(&directory) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
