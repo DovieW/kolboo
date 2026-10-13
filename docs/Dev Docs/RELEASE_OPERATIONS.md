@@ -100,7 +100,13 @@ The account page must be a verified HTTPS deployment rather than the protected
 Preparation is not publication: push and remote checks, compatible beta API
 deployment, exact-package Linux login/session/managed/BYOK acceptance, updater
 artifact verification, and release evidence remain required. Platform/operator
-and legal deferrals from 0.3.2 do not automatically carry forward.
+and legal deferrals from 0.3.2 do not automatically carry forward. On October 13
+the maintainer explicitly carried forward Windows/macOS hands-on acceptance,
+public legal-link verification and the full operator-rehearsal deferrals for
+0.3.3. These are deferred, not passed. Automated checks, all three platform
+packages, signature verification and exact-package Linux acceptance remain
+required. Admission controls and server-side email confirmation remain enabled;
+this does not authorize public paid signup.
 
 The Windows preparation run `38388645737` exposed a checkpoint-cleanup error:
 Windows can report a child path beneath a regular file as `NotFound`, unlike
@@ -113,6 +119,47 @@ the release tag moves; Linux coverage alone is not Windows verification.
 Local `check:ci` and `coverage:patch` passed on October 13 after this fix: 1,160
 Rust tests, 1,022 frontend tests, isolated Linux/Wry and offline startup checks,
 and 100% non-exempt desktop patch coverage. No new exception was added.
+The corrected Windows run `38421610105` passed both native Windows automated
+checks and installer packaging, finishing at 12:08 PM Eastern on October 13.
+Linux build, CI, patch coverage and audits also passed on commit `13962a6`.
+PR #111 was merged as `58ec0e1` with the maintainer's explicitly approved merge
+override; no branch rules changed. These development builds are not acceptance
+of the final account-enabled, updater-signed release packages.
+
+The first signed release run `38466928729` produced all three platform packages.
+Its exact DEB was installed on the maintainer's KDE/Ubuntu 26.04 laptop, with
+the user-local launcher redirected to `/usr/bin/kolboo` and the old launcher
+retained as a backup. The maintainer reported the restored signed-in Managed
+path and signed-out BYOK dictation working. This does not prove a fresh
+email-code login or every restart/animation/permission permutation.
+
+The signed AppImage from that run failed frontend rendering on newer Mesa with
+WebKit `EGL_BAD_PARAMETER`; passing geometry/close checks alone is insufficient.
+It contains the older bundled host display libraries implicated in
+[Tauri #15976](https://github.com/tauri-apps/tauri/issues/15976). CLI 2.12.1
+includes the [upstream packaging fix](https://github.com/tauri-apps/tauri/pull/16062).
+Linux packaging now inventories the extracted image and rejects bundled
+`libwayland-client` before uploading artifacts, matching the upstream fix.
+Other GTK/display dependencies remain bundled by upstream; their presence is
+not treated as proof of failure or portability. Actual rendering is required.
+The Windows NSIS template was
+rebased to the same tagged CLI without dropping the Kolboo upgrade safeguards.
+The first draft remains unpublished: replacement packages, all updater
+signatures/provenance, and actual AppImage frontend rendering must be verified.
+Prior DEB acceptance does not establish acceptance of a different executable.
+Local CLI 2.12.1 repackaging of the verified DEB executable rendered frontend
+controls and passed real startup-size and close-to-exit checks on an isolated,
+offline Ubuntu 26.04 desktop. Repeating the original signed AppImage under the
+same fixture, with sufficient temporary disk space, still produced the EGL
+abort. This is supporting evidence, not acceptance of the final GitHub-built
+replacement. All 37 release-helper tests and full local `check:ci` passed after
+the packaging change; desktop patch coverage and remote gates remain required.
+
+The maintainer explicitly requested no YiddishLabs changes after reviewing the
+two BYOK findings: initial secure-key bootstrap omits the YiddishLabs slots,
+and imported-file Standard submissions use meeting-purpose metadata. Both
+remain known limitations, not fixes included in 0.3.3. Managed YiddishLabs stays
+disabled; no vendor credentials, paid tests or job-table migration were added.
 
 ## Windows startup regression (0.3.2)
 
