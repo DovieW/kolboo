@@ -25,6 +25,7 @@ const TRAY_HISTORY_EMPTY_ID: &str = "tray-history-empty";
 const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
 pub(crate) mod main_window;
+pub(crate) mod startup;
 
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();
@@ -582,99 +583,17 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         .map(|o| o.apply_to(&llm::PromptSections::default()))
         .unwrap_or_default();
 
-    let rewrite_program_prompt_profiles: Vec<settings::RewriteProgramPromptProfile> =
-        get_setting_from_store(app, "rewrite_program_prompt_profiles", Vec::new());
+    let loaded_model_settings = crate::model_selection::read_model_settings(app);
+    let model_selections = loaded_model_settings.selections;
+    let model_selection_error = loaded_model_settings.error;
+    let rewrite_program_prompt_profiles = loaded_model_settings.profiles;
     let rewrite_program_prompt_profiles =
         settings::filter_enabled_rewrite_profiles(rewrite_program_prompt_profiles);
 
-    let program_prompt_profiles: Vec<llm::ProgramPromptProfile> = rewrite_program_prompt_profiles
-        .into_iter()
-        .map(|p| {
-            let profile_prompts = p
-                .cleanup_prompt_sections
-                .as_ref()
-                .map(|o| o.apply_to(&base_prompts))
-                .unwrap_or_else(|| base_prompts.clone());
-
-            let presets = p
-                .presets
-                .into_iter()
-                .map(|preset| {
-                    let preset_prompts = preset
-                        .cleanup_prompt_sections
-                        .as_ref()
-                        .map(|o| o.apply_to(&profile_prompts))
-                        .unwrap_or_else(|| profile_prompts.clone());
-
-                    llm::ProgramPreset {
-                        id: preset.id,
-                        name: preset.name,
-                        routing_hints: preset.routing_hints,
-                        prompts: preset_prompts,
-                        rewrite_llm_enabled: preset.rewrite_llm_enabled,
-                        stt_provider: preset.stt_provider,
-                        stt_model: preset.stt_model,
-                        stt_language: preset.stt_language,
-                        stt_timeout_seconds: preset.stt_timeout_seconds,
-                        llm_provider: preset.llm_provider,
-                        llm_model: preset.llm_model,
-                        openai_reasoning_effort: preset.openai_reasoning_effort,
-                        gemini_thinking_budget: preset.gemini_thinking_budget,
-                        gemini_thinking_level: preset.gemini_thinking_level,
-                        anthropic_thinking_budget: preset.anthropic_thinking_budget,
-                    }
-                })
-                .collect();
-
-            llm::ProgramPromptProfile {
-                id: p.id,
-                name: p.name,
-                program_paths: p.program_paths,
-                prompts: profile_prompts,
-
-                presets,
-                default_preset_id: p.default_preset_id,
-                default_preset_description: p.default_preset_description,
-                default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
-                active_preset_id: p.active_preset_id,
-                router: p.router,
-
-                rewrite_llm_enabled: p.rewrite_llm_enabled,
-                stt_provider: p.stt_provider,
-                stt_model: p.stt_model,
-                stt_language: p.stt_language,
-                stt_timeout_seconds: p.stt_timeout_seconds,
-                llm_provider: p.llm_provider,
-                llm_model: p.llm_model,
-                openai_reasoning_effort: p.openai_reasoning_effort,
-                gemini_thinking_budget: p.gemini_thinking_budget,
-                gemini_thinking_level: p.gemini_thinking_level,
-                anthropic_thinking_budget: p.anthropic_thinking_budget,
-
-                quick_ask_provider: p.quick_ask_provider,
-                quick_ask_model: p.quick_ask_model,
-                quick_ask_system_prompt: p.quick_ask_system_prompt,
-                context_grab_method: p.context_grab_method,
-
-                quick_replace_enabled: p.quick_replace_enabled,
-                quick_replace_provider: p.quick_replace_provider,
-                quick_replace_model: p.quick_replace_model,
-                quick_replace_system_prompt: p.quick_replace_system_prompt,
-                quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
-                quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
-                quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
-                quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
-
-                rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
-                quick_replace_include_clipboard_context: p.quick_replace_include_clipboard_context,
-                quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
-
-                rewrite_active_window_ocr_mode: p.rewrite_active_window_ocr_mode,
-                quick_replace_active_window_ocr_mode: p.quick_replace_active_window_ocr_mode,
-                quick_ask_active_window_ocr_mode: p.quick_ask_active_window_ocr_mode,
-            }
-        })
-        .collect();
+    let program_prompt_profiles = crate::llm::profile_conversion::build_program_prompt_profiles(
+        rewrite_program_prompt_profiles,
+        &base_prompts,
+    );
 
     // Microphone selection (backend / CPAL).
     // Historical key name is `selected_mic_id` (originally from browser deviceId).
@@ -853,6 +772,8 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
     );
 
     let config = pipeline::PipelineConfig {
+        model_selection_error: model_selection_error.clone(),
+        model_selections: model_selections.clone(),
         input_device_name,
 
         hot_mic_enabled,
@@ -870,6 +791,7 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         managed_inference_fallback_llm_provider: None,
         stt_model,
         stt_language,
+        stt_input_mode: loaded_model_settings.stt_input_mode,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,
@@ -896,6 +818,11 @@ pub(crate) fn initialize_pipeline_from_settings(app: &AppHandle) -> pipeline::Sh
         quiet_audio_require_speech,
 
         llm_config: llm::LlmConfig {
+            model_selections: model_selections.clone(),
+            selection_error: model_selection_error,
+            selection: model_selections
+                .get(&crate::model_selection::ModelAction::Rewrite)
+                .cloned(),
             custom_providers: crate::custom_providers::load(app),
             enabled: llm_enabled,
             provider: llm_provider_effective,

@@ -1,7 +1,14 @@
-import { Button, Group, Select, Stack, Switch, Text } from "@mantine/core";
+import { Button, Group, Stack, Switch, Text } from "@mantine/core";
 import { useEffect, useState } from "react";
-import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
+import {
+	modelSelectionKey,
+	recordingModelFromSelection,
+	recordingModelSelection,
+} from "../lib/modelSelection";
+import { useModelChoices } from "../lib/queries/modelChoices";
 import type { RecordingPreferences } from "../lib/tauri/types";
+import { ModelPicker } from "./ModelPicker";
+import { useModelNavigation } from "./ModelNavigation";
 
 type Selection = RecordingPreferences["meeting_model"];
 export function FileModelPicker({
@@ -15,22 +22,25 @@ export function FileModelPicker({
 	onReadyChange: (ready: boolean) => void;
 	disabled: boolean;
 }) {
-	const { options, loading, failedSources } = useTranscriptionModels();
+	const { choices, setupProviders, loading, failedSources, managedMessage, retry } = useModelChoices("file");
+	const navigation = useModelNavigation();
 	const [speakers, setSpeakers] = useState(
 		value?.model === "gpt-4o-transcribe-diarize",
 	);
 	useEffect(() => {
 		if (value) setSpeakers(value.model === "gpt-4o-transcribe-diarize");
 	}, [value]);
-	const selected = value
-		? `${value.provider}::${value.model}::${value.use_managed ? "managed" : "byok"}`
-		: null;
-	const models = [...options.values()].filter(
-		(option) => (option.model === "gpt-4o-transcribe-diarize") === speakers,
+	const selection = recordingModelSelection(value);
+	const selected = selection ? modelSelectionKey(selection) : null;
+	const available = choices.some(
+		(choice) => choice.ready && modelSelectionKey(choice.selection) === selected,
+	);
+	const models = choices.filter(
+		(choice) => choice.capabilities.includes("Speaker labels") === speakers,
 	);
 	useEffect(() => {
-		onReadyChange(selected !== null && options.has(selected));
-	}, [selected, options, onReadyChange]);
+		onReadyChange(available);
+	}, [available, onReadyChange]);
 	return (
 		<Stack gap="sm">
 			<Group justify="space-between">
@@ -47,29 +57,20 @@ export function FileModelPicker({
 					}}
 				/>
 			</Group>
-			<Select
-				aria-label="Transcription model"
-				size="lg"
-				searchable
-				clearable
-				clearButtonProps={{ "aria-label": "Clear transcription model" }}
-				placeholder={loading ? "Loading models…" : "Choose a model"}
-				nothingFoundMessage="No matching models"
-				data={models}
-				value={selected}
+			<ModelPicker
+				label="Transcription model"
+				loading={loading}
+				choices={models}
+				setupProviders={setupProviders}
+				value={recordingModelSelection(value)}
 				disabled={disabled}
-				onChange={(key) => {
-					const chosen = key ? options.get(key) : undefined;
-					onChange(
-						chosen
-							? {
-									provider: chosen.provider,
-									model: chosen.model,
-									use_managed: chosen.use_managed,
-								}
-							: null,
-					);
-				}}
+				onChange={(selection) =>
+					onChange(recordingModelFromSelection(selection))
+				}
+				managedMessage={managedMessage}
+				onRetry={retry}
+				onSetup={navigation?.setup}
+				onManagedAccess={navigation?.account}
 			/>
 			{failedSources.length > 0 ? (
 				<Group gap="xs">
@@ -80,11 +81,7 @@ export function FileModelPicker({
 						variant="subtle"
 						size="compact-xs"
 						disabled={disabled}
-						onClick={() =>
-							void Promise.allSettled(
-								failedSources.map((source) => source.query.refetch()),
-							)
-						}
+						onClick={retry}
 					>
 						Retry
 					</Button>
@@ -96,7 +93,7 @@ export function FileModelPicker({
 						: "Add a provider in Settings to get started."}
 				</Text>
 			) : null}
-			{selected && !loading && !options.has(selected) && (
+			{selected && !loading && !available && (
 				<Text size="xs" c="orange">
 					This model is no longer available. Choose another.
 				</Text>

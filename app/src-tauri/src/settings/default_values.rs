@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use super::{migrations, ProxySettings};
 
 pub const DEFAULT_STT_PROVIDER: &str = "groq";
-pub const DEFAULT_STT_LANGUAGE: &str = "en";
+pub const DEFAULT_STT_LANGUAGE: &str = "auto";
 pub const DEFAULT_STT_TIMEOUT_SECONDS: f64 = 10.0;
 pub const DEFAULT_STT_LIVE_OUTPUT: bool = false;
 pub const DEFAULT_STT_SIMULATED_STREAMING: bool = false;

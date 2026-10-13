@@ -65,12 +65,21 @@ impl RecordingStore {
         self.dir.join(format!("{}.wav", id))
     }
 
+    pub(crate) fn transcription_checkpoint(&self, id: &str) -> Result<PathBuf, String> {
+        if !Self::is_safe_request_id(id) {
+            return Err("Invalid recording id".into());
+        }
+        Ok(self.path_for_id(id).with_extension("transcripts"))
+    }
+
     fn sidecar_owner(path: &Path) -> Option<&str> {
         let name = path.file_name()?.to_str()?;
         let id = name
             .strip_suffix(".options.json")
             .or_else(|| name.strip_suffix(".prepared.json"))
-            .or_else(|| name.strip_suffix(".waveform.json"))?;
+            .or_else(|| name.strip_suffix(".waveform.json"))
+            .or_else(|| name.strip_suffix(".transcripts"))
+            .or_else(|| name.strip_suffix(".yiddish-jobs"))?;
         Self::is_safe_request_id(id).then_some(id)
     }
 
@@ -156,6 +165,16 @@ impl RecordingStore {
                 .map_err(|e| format!("Failed to create recordings dir: {}", e))?;
         }
 
+        let checkpoint = self.transcription_checkpoint(id)?;
+        if self.fs.exists(&checkpoint) || self.fs.exists(&checkpoint.with_extension("yiddish-jobs"))
+        {
+            // Saving an already-owned recording must not erase its paid-job
+            // identity or completed chunks. Different audio needs a new ID.
+            if self.fs.read(&path).ok().as_deref() == Some(wav_bytes) {
+                return Ok(());
+            }
+            return Err("This recording has saved transcription progress; use a new recording ID instead of replacing its audio".into());
+        }
         self.remove_waveform(id)?;
         self.fs
             .write_private(&path, wav_bytes)
@@ -190,6 +209,14 @@ impl RecordingStore {
             return Err("Invalid request id".to_string());
         }
 
+        let checkpoint = self.transcription_checkpoint(id)?;
+        let _job_guards = crate::stt::yiddishlabs::delete_owned_checkpoints(&checkpoint)
+            .map_err(|_| "Could not remove protected upload receipts; audio is retained")?;
+        if self.fs.exists(&checkpoint) {
+            self.fs
+                .remove_file(&checkpoint)
+                .map_err(|_| "Could not remove saved transcription progress")?;
+        }
         self.remove_waveform(id)?;
         let marker = self.dir.join(format!("{id}.prepared.json"));
         if self.fs.exists(&marker) {
@@ -401,9 +428,16 @@ impl RecordingStore {
         {
             if let Some(id) = Self::sidecar_owner(&path) {
                 if !self.fs.exists(&self.path_for_id(id)) {
-                    self.fs
-                        .remove_file(&path)
-                        .map_err(|_| "Could not remove recording metadata")?;
+                    if path.extension().and_then(|ext| ext.to_str()) == Some("yiddish-jobs") {
+                        let checkpoint = self.transcription_checkpoint(id)?;
+                        let _guards =
+                            crate::stt::yiddishlabs::delete_owned_checkpoints(&checkpoint)
+                                .map_err(|_| "Could not remove protected upload receipts")?;
+                    } else {
+                        self.fs
+                            .remove_file(&path)
+                            .map_err(|_| "Could not remove recording metadata")?;
+                    }
                 }
             }
         }
@@ -428,12 +462,63 @@ mod tests {
     use options::{RecordingMode, RecordingPreferences};
 
     #[test]
+    fn saving_audio_preserves_paid_job_identity_and_deletion_owns_receipt_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = RecordingStore::new(temp.path().to_owned());
+        store.save_wav("owned", b"original audio").unwrap();
+        let checkpoint = store.transcription_checkpoint("owned").unwrap();
+        store
+            .fs
+            .write_private(&checkpoint, b"completed chunks")
+            .unwrap();
+        let receipt =
+            crate::stt::yiddishlabs::checkpoint_path(&checkpoint, false, b"original audio", 0)
+                .unwrap();
+        store
+            .fs
+            .write_private(&receipt, b"saved job identity")
+            .unwrap();
+        store.save_wav("owned", b"original audio").unwrap();
+        assert!(store.save_wav("owned", b"replacement audio").is_err());
+        assert_eq!(store.load_wav("owned").unwrap(), b"original audio");
+        assert_eq!(std::fs::read(&receipt).unwrap(), b"saved job identity");
+        assert!(store.transcription_checkpoint("../outside").is_err());
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&receipt)
+            .unwrap();
+        locked.try_lock().unwrap();
+        assert!(store.delete_wav_if_exists("owned").is_err());
+        assert!(store.has("owned"));
+        assert!(checkpoint.exists());
+        drop(locked);
+        assert!(store.delete_wav_if_exists("owned").unwrap());
+        assert!(!checkpoint.exists());
+        assert!(!receipt.exists());
+        assert!(!checkpoint.with_extension("yiddish-jobs").exists());
+
+        let orphan = store.transcription_checkpoint("orphan").unwrap();
+        store.fs.write_private(&orphan, b"orphan progress").unwrap();
+        let orphan_receipt =
+            crate::stt::yiddishlabs::checkpoint_path(&orphan, true, b"orphan", 0).unwrap();
+        store
+            .fs
+            .write_private(&orphan_receipt, b"orphan identity")
+            .unwrap();
+        assert_eq!(store.delete_all_wavs().unwrap(), 0);
+        assert!(!orphan.exists());
+        assert!(!orphan_receipt.exists());
+    }
+
+    #[test]
     fn failed_audio_deletion_preserves_mode_and_bulk_cleanup_is_scoped() {
         let temp = tempfile::tempdir().unwrap();
         let store = RecordingStore::new(temp.path().to_owned());
         let options = RecordingPreferences {
             mode: RecordingMode::Meeting,
             meeting_model: None,
+            language_hint: None,
         };
         store.save_options("blocked", &options).unwrap();
         // A directory at the exact file path deterministically makes remove_file

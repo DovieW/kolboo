@@ -10,7 +10,7 @@ use serde_json::json;
 use std::time::Duration;
 
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-const DEFAULT_MODEL: &str = "claude-3-haiku-20240307";
+const DEFAULT_MODEL: &str = "claude-haiku-5-5";
 const API_VERSION: &str = "2023-06-01";
 
 /// Anthropic (Claude) LLM provider using the Messages API

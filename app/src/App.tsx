@@ -1,6 +1,6 @@
-import { NavLink, Text, Tooltip } from "@mantine/core";
+import { NavLink, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
 	BarChart2,
 	FileAudio,
@@ -18,6 +18,7 @@ import { Logo } from "./components/Logo";
 import { LogsView } from "./components/LogsView";
 import { MicStatusCard } from "./components/MicStatusCard";
 import { RecordingBar } from "./components/RecordingBar";
+import { ModelNavigationContext } from "./components/ModelNavigation";
 import { SettingsShell } from "./components/settings";
 import { SettingsGuideOverlay } from "./components/settings/SettingsGuideOverlay";
 import { TelemetryDisclosureModal } from "./components/settings/TelemetryDisclosureModal";
@@ -39,12 +40,6 @@ import { isTelemetryDisclosureResolved } from "./lib/settings/telemetryDisclosur
 import { getPolicyPathEnforcement, tauriAPI } from "./lib/tauri";
 import { listenTyped } from "./lib/tauri/events";
 import { AggregateAnalyticsBridge } from "./lib/telemetry/AggregateAnalyticsBridge";
-import {
-	checkSignedUpdateVersion,
-	compareSemver,
-	installSignedUpdate,
-	signedUpdaterEnabled,
-} from "./lib/updates";
 import "./styles.css";
 
 type View =
@@ -64,31 +59,10 @@ function Sidebar({
 }) {
 	const currentVersion = appPackageJson.version;
 
-	const { data: latestReleaseVersion } = useQuery({
-		queryKey: ["signedUpdateVersion"],
-		queryFn: checkSignedUpdateVersion,
-		enabled: signedUpdaterEnabled,
-		staleTime: 6 * 60 * 60 * 1000,
-		refetchOnWindowFocus: false,
-		retry: false,
-	});
-
-	const updateAvailable =
-		typeof latestReleaseVersion === "string" &&
-		compareSemver(latestReleaseVersion, currentVersion) > 0;
-
 	const releaseUrl = "https://github.com/DovieW/kolboo/releases";
-	const installUpdate = async () => {
-		try {
-			await installSignedUpdate();
-		} catch (error) {
-			notifications.show({
-				title: "Update failed",
-				message: error instanceof Error ? error.message : "Try again later.",
-				color: "red",
-			});
-		}
-	};
+	const updateNotice = import.meta.env.VITE_SIGNED_UPDATER_ENABLED === "true"
+		? "Updates download automatically and install when you quit Kolboo."
+		: "View releases and download an update.";
 
 	return (
 		<aside className="sidebar" aria-label="Kolboo">
@@ -134,43 +108,17 @@ function Sidebar({
 			</nav>
 
 			<footer className="sidebar-footer">
-				{updateAvailable ? (
-					<Tooltip
-						label={
-							<Text size="xs" fw={700}>
-								UPDATE
-							</Text>
-						}
-						withArrow
-						position="top"
-						offset={6}
-						arrowSize={6}
-						radius="sm"
-						color="red"
-						opened
-					>
-						<a
-							className="sidebar-footer-link"
-							href={releaseUrl}
-							onClick={(event) => {
-								if (!signedUpdaterEnabled) return;
-								event.preventDefault();
-								void installUpdate();
-							}}
-						>
-							v{currentVersion}
-						</a>
-					</Tooltip>
-				) : (
+				<Tooltip label={updateNotice} withArrow position="right">
 					<a
 						className="sidebar-footer-link"
+						aria-label={updateNotice}
 						href={releaseUrl}
 						target="_blank"
 						rel="noreferrer"
 					>
 						v{currentVersion}
 					</a>
-				)}
+				</Tooltip>
 			</footer>
 		</aside>
 	);
@@ -191,10 +139,12 @@ function HomeView({ onJumpToLog }: { onJumpToLog?: (logId: string) => void }) {
 
 function SettingsViewWithGuideLauncher({
 	onRunSetupGuide,
+	navigationRequest,
 }: {
 	onRunSetupGuide: () => void;
+	navigationRequest: {tab: string; id: number} | null;
 }) {
-	return <SettingsShell onRunSetupGuide={onRunSetupGuide} />;
+	return <SettingsShell onRunSetupGuide={onRunSetupGuide} navigationRequest={navigationRequest}/>;
 }
 
 function AccentColorSync() {
@@ -240,6 +190,7 @@ export default function App() {
 		bootShouldAutoOpenGuide ? "settings" : "home",
 	);
 	const [logsJumpToId, setLogsJumpToId] = useState<string | null>(null);
+	const [settingsNavigationRequest, setSettingsNavigationRequest] = useState<{tab: string; id: number} | null>(null);
 	const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
 		() => bootShouldAutoOpenGuide,
 	);
@@ -433,6 +384,7 @@ export default function App() {
 			case "settings":
 				return (
 					<SettingsViewWithGuideLauncher
+						navigationRequest={settingsNavigationRequest}
 						onRunSetupGuide={() => {
 							setSettingsGuideOpen(true);
 						}}
@@ -474,7 +426,13 @@ export default function App() {
 	}
 
 	return (
-		<div className="app-layout">
+		<ModelNavigationContext.Provider value={{
+			account: () => setActiveView("account"),
+			setup: (selection) => {
+				setActiveView("settings");
+				setSettingsNavigationRequest(previous => ({tab: selection.provider_id === "ollama" || selection.provider_id === "whisper-server" || selection.provider_id === "local-whisper" ? "ai" : "api-keys", id: (previous?.id ?? 0) + 1}));
+			},
+		}}><div className="app-layout">
 			<AggregateAnalyticsBridge
 				enabled={aggregateAnalyticsEnabled}
 				page={activeView}
@@ -534,5 +492,6 @@ export default function App() {
 				}}
 			/>
 		</div>
+		</ModelNavigationContext.Provider>
 	);
 }

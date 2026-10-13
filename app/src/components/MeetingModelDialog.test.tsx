@@ -16,58 +16,19 @@ const state = vi.hoisted(() => ({
 	refetchProviders: vi.fn(),
 	refetchCatalog: vi.fn(),
 }));
-vi.mock("../lib/queries/providers", () => ({
-	useAvailableProviders: () => ({
-		isPending: state.loadingProviders,
-		isError: state.providerError,
-		refetch: state.refetchProviders,
-		data:
-			state.loadingProviders || state.providerError
-				? undefined
-				: {
-						stt: state.custom
-							? [
-									{
-										value: "custom_test",
-										label: "My server",
-										models: ["my-transcriber"],
-									},
-								]
-							: state.openai
-								? [{ value: "openai", label: "OpenAI" }]
-								: state.managed
-									? []
-									: [{ value: "whisper", label: "Local Whisper" }],
-					},
-	}),
-	useWhisperModels: () => ({
-		data: [
-			{ id: "base", name: "Base", is_downloaded: true },
-			{ id: "small", name: "Small", is_downloaded: true },
-			{ id: "large", name: "Large", is_downloaded: false },
-		],
-	}),
-	useManagedModels: () => ({
-		isSuccess: !state.catalogError,
-		isError: state.catalogError,
-		refetch: state.refetchCatalog,
-		data: state.openai
-			? [
-					{
-						provider: "openai",
-						id: "gpt-4o-transcribe-diarize",
-						display_name: "Speaker model",
-						capabilities: ["transcription"],
-					},
-				]
-			: [],
-	}),
-}));
-vi.mock("../lib/queries/license", () => ({
-	useLicenseAuthContext: () => ({ data: {} }),
-}));
-vi.mock("../lib/tauri/managedInference", () => ({
-	hasManagedInferenceAccess: () => state.managed,
+vi.mock("../lib/queries/modelChoices", () => ({
+ useModelChoices: () => {
+  const choices: import("../lib/modelSelection").ModelChoice[] = [];
+  const add=(source:"byok"|"managed",provider:string,model:string,name:string)=>choices.push({selection:{source,provider_id:provider,model_id:model},displayName:name,providerName:provider === "custom_test" ? "My server" : provider === "local-whisper" ? "Local Whisper" : "OpenAI",ready:true,capabilities:["After recording",...(model === "gpt-4o-transcribe-diarize" ? ["Speaker labels"]:[])]});
+  if (!state.loadingProviders && !state.providerError) {
+   if (state.custom) add("byok","custom_test","my-transcriber","my-transcriber");
+   else if (state.openai) {add("byok","openai","whisper-1","Whisper");add("byok","openai","gpt-4o-transcribe-diarize","GPT-4o Transcribe · speaker labels");}
+   else if (!state.managed) {add("byok","local-whisper","base","Base");add("byok","local-whisper","small","Small");}
+  }
+  if (state.managed && state.openai && !state.catalogError) add("managed","openai","gpt-4o-transcribe-diarize","Speaker model");
+  const failedSources=[{label:"provider list",query:{isError:state.providerError,isFetching:false,refetch:state.refetchProviders}},{label:"managed models",query:{isError:state.managed && state.catalogError,isFetching:false,refetch:state.refetchCatalog}}].filter(({query})=>query.isError);
+  return {choices,loading:state.loadingProviders,failedSources,managedMessage:state.managed?undefined:"Sign in for Managed",retry:()=>{void state.refetchProviders(); if(state.managed) void state.refetchCatalog();}};
+ },
 }));
 let host: HTMLDivElement;
 let root: Root;
@@ -113,13 +74,17 @@ it("lets meetings select another downloaded local model without changing dictati
 	await render();
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
-	const options = [...document.querySelectorAll('[role="option"]')];
-	expect(options.map((option) => option.textContent)).toEqual([
-		"Base · Local Whisper",
-		"Small · Local Whisper",
+	const options = [...document.querySelectorAll('[role="option"]')].filter(
+		(option) => option.getAttribute("value")?.startsWith("["),
+	);
+	expect(
+		options.map((option) => JSON.parse(option.getAttribute("value") ?? "null")),
+	).toEqual([
+		["byok", "local-whisper", "base"],
+		["byok", "local-whisper", "small"],
 	]);
 	await act(async () => (options[1] as HTMLElement).click());
 	await act(async () =>
@@ -129,6 +94,7 @@ it("lets meetings select another downloaded local model without changing dictati
 	);
 	expect(save).toHaveBeenCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "local-whisper",
 			model: "small",
@@ -150,17 +116,64 @@ it("shows loading instead of claiming that an unfinished provider list is empty"
 	expect(save).not.toHaveBeenCalled();
 });
 
+it("starts at auto and saves a selected language together with the model", async () => {
+	await render({
+		mode: "meeting",
+		meeting_model: {
+			provider: "local-whisper",
+			model: "base",
+			use_managed: false,
+		},
+	});
+	const input = document.querySelector<HTMLInputElement>(
+		'[aria-label="Meeting language hint"]',
+	);
+	expect(input?.value).toBe("Auto-detect");
+	await act(async () => input?.click());
+	const option = [
+		...document.querySelectorAll<HTMLElement>('[role="option"]'),
+	].find((element) => element.textContent === "Yiddish");
+	expect(option).toBeDefined();
+	await act(async () => option?.click());
+	expect(input?.value).toBe("Yiddish");
+	expect(save).not.toHaveBeenCalled();
+	await act(async () =>
+		[...document.querySelectorAll("button")]
+			.find((b) => b.textContent === "Save")
+			?.click(),
+	);
+	expect(save).toHaveBeenCalledWith({
+		mode: "meeting",
+		meeting_model: {
+			provider: "local-whisper",
+			model: "base",
+			use_managed: false,
+		},
+		language_hint: "yi",
+	});
+});
+
+it("retains an existing explicit meeting hint", async () => {
+	await render({ mode: "meeting", meeting_model: null, language_hint: "he" });
+	expect(
+		document.querySelector<HTMLInputElement>(
+			'[aria-label="Meeting language hint"]',
+		)?.value,
+	).toBe("Hebrew");
+});
+
 it("saves a custom meeting model as BYOK even with managed access", async () => {
 	state.custom = true;
 	state.managed = true;
 	await render();
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
 	const option = document.querySelector('[role="option"]') as HTMLElement;
-	expect(option.textContent).toContain("my-transcriber · My server");
+	expect(option.textContent).toContain("my-transcriber");
+	expect(option.textContent).toContain("My server");
 	await act(async () => option.click());
 	await act(async () =>
 		[...document.querySelectorAll("button")]
@@ -169,6 +182,7 @@ it("saves a custom meeting model as BYOK even with managed access", async () => 
 	);
 	expect(save).toHaveBeenCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "custom_test",
 			model: "my-transcriber",
@@ -199,17 +213,20 @@ it("keeps BYOK models usable when the managed catalog fails, without falling bac
 	expect(document.body.textContent).toContain("Couldn't load managed models");
 	await act(async () =>
 		(
-			document.querySelector('[placeholder="Choose a model"]') as HTMLElement
+			document.querySelector('button[aria-label="Model"]') as HTMLElement
 		).click(),
 	);
-	const options = [...document.querySelectorAll('[role="option"]')];
+	const options = [...document.querySelectorAll('[role="option"]')].filter(
+		(option) => option.getAttribute("value")?.startsWith("["),
+	);
 	expect(
-		options.some((option) => option.textContent?.includes("· Managed")),
+		options.some(
+			(option) =>
+				JSON.parse(option.getAttribute("value") ?? "null")?.[0] === "managed",
+		),
 	).toBe(false);
-	const byok = options.find(
-		(option) =>
-			option.textContent?.includes("speaker labels") &&
-			option.textContent?.includes("Your key"),
+	const byok = options.find((option) =>
+		option.textContent?.includes("speaker labels"),
 	);
 	expect(byok).toBeDefined();
 	await act(async () => (byok as HTMLElement).click());
@@ -270,15 +287,16 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	state.openai = true;
 	await render();
 	const select = document.querySelector(
-		'[placeholder="Choose a model"]',
+		'button[aria-label="Model"]',
 	) as HTMLElement;
 	await act(async () => select.click());
 	await act(async () =>
-		(
-			[...document.querySelectorAll('[role="option"]')].find((option) =>
-				option.textContent?.includes("· Managed"),
-			) as HTMLElement
-		).click(),
+		[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+			.find((el) => el.textContent === "Kolboo Managed")
+			?.click(),
+	);
+	await act(async () =>
+		(document.querySelector('[role="option"]') as HTMLElement).click(),
 	);
 	const submit = () =>
 		[...document.querySelectorAll("button")]
@@ -287,6 +305,7 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	await act(async () => submit());
 	expect(save).toHaveBeenLastCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "openai",
 			model: "gpt-4o-transcribe-diarize",
@@ -295,17 +314,21 @@ it("keeps managed and user-key choices distinct without depending on dictation s
 	});
 	await act(async () => select.click());
 	await act(async () =>
+		[...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+			.find((el) => el.textContent === "Your models")
+			?.click(),
+	);
+	await act(async () =>
 		(
-			[...document.querySelectorAll('[role="option"]')].find(
-				(option) =>
-					option.textContent?.includes("speaker labels") &&
-					option.textContent?.includes("Your key"),
+			[...document.querySelectorAll('[role="option"]')].find((option) =>
+				option.textContent?.includes("speaker labels"),
 			) as HTMLElement
 		).click(),
 	);
 	await act(async () => submit());
 	expect(save).toHaveBeenLastCalledWith({
 		mode: "meeting",
+		language_hint: "auto",
 		meeting_model: {
 			provider: "openai",
 			model: "gpt-4o-transcribe-diarize",

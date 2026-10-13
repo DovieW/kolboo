@@ -1,6 +1,6 @@
 import { useClipboard, useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import { useHistoryFeedOrchestration } from "../lib/history/orchestration";
@@ -17,6 +17,7 @@ import {
 	useHistoryFeedFilters,
 } from "../lib/history/useHistoryFeedFilters";
 import { listAllLlmModelKeys, listAllSttModelKeys } from "../lib/modelOptions";
+import { resolveModelPreference } from "../lib/modelSelection";
 import {
 	useHistoryAll,
 	useHistoryPage,
@@ -198,16 +199,10 @@ export function HistoryFeed({
 	const [sendDrawerOpened, sendDrawerHandlers] = useDisclosure(false);
 	const isNarrow = useMediaQuery("(max-width: 900px)");
 
-	const { data: llmProviders } = useQuery({
-		queryKey: ["llmProviders"],
-		queryFn: () => llmAPI.getLlmProviders(),
-		staleTime: 60_000,
-	});
 
-	const hasAnyLlmProviders = (llmProviders?.length ?? 0) > 0;
-
-	const [sendProvider, setSendProvider] = useState<string | null>(null);
-	const [sendModel, setSendModel] = useState<string | null>(null);
+	const analysisModel = resolveModelPreference("history_analysis", settings);
+	const sendProvider = analysisModel.provider;
+	const sendModel = analysisModel.model;
 	const [sendOutput, setSendOutput] = useState<string>("");
 	const [sendProviderUsed, setSendProviderUsed] = useState<string>("");
 	const [sendModelUsed, setSendModelUsed] = useState<string>("");
@@ -220,6 +215,8 @@ export function HistoryFeed({
 			userPrompt: string;
 		}) =>
 			llmAPI.complete({
+				action: "history_analysis",
+				modelSelection: analysisModel.selection,
 				provider: args.provider,
 				model: args.model,
 				systemPrompt: args.systemPrompt,
@@ -472,22 +469,8 @@ export function HistoryFeed({
 
 		sendDrawerHandlers.open();
 
-		const firstProvider = (llmProviders ?? [])[0];
-		setSendProvider((current) => current ?? firstProvider?.id ?? null);
-		setSendModel((current) => {
-			if (current) return current;
-			if (!firstProvider) return null;
-			return firstProvider.default_model ?? firstProvider.models?.[0] ?? null;
-		});
 	};
 
-	const handleSendProviderChange = (providerId: string | null) => {
-		setSendProvider(providerId);
-		const provider = (llmProviders ?? []).find(
-			(item) => item.id === providerId,
-		);
-		setSendModel(provider?.default_model ?? provider?.models?.[0] ?? null);
-	};
 
 	const handleGenerateSendOutput = () => {
 		void (async () => {
@@ -634,16 +617,11 @@ export function HistoryFeed({
 				analysisPrompt={analysisPrompt}
 				onAnalysisPromptChange={setAnalysisPrompt}
 				onCopyAnalysisPrompt={() => clipboard.copy(analysisPrompt)}
-				hasAnyLlmProviders={hasAnyLlmProviders}
+				hasAnyLlmProviders={true}
 				onOpenSendDrawer={handleOpenSendDrawer}
 				sendDrawerOpened={sendDrawerOpened}
 				onCloseSendDrawer={sendDrawerHandlers.close}
 				isNarrow={Boolean(isNarrow)}
-				llmProviders={llmProviders}
-				sendProvider={sendProvider}
-				onSendProviderChange={handleSendProviderChange}
-				sendModel={sendModel}
-				onSendModelChange={setSendModel}
 				sendProviderUsed={sendProviderUsed}
 				sendModelUsed={sendModelUsed}
 				onGenerateSendOutput={handleGenerateSendOutput}

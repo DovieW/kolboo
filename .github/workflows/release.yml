@@ -31,6 +31,19 @@ jobs:
       - name: Verify versions match (and match tag)
         run: node .github/scripts/verify-versions.mjs
 
+      - name: Verify service release configuration
+        env:
+          TAURI_CLOUD_ENV: production
+          VITE_CLOUD_SERVICE_ENABLED: "true"
+          TAURI_API_BASE_URL: ${{ vars.KOLBOO_PROD_API_BASE_URL }}
+          TAURI_MANAGED_INFERENCE_GATEWAY_URL: ${{ vars.KOLBOO_PROD_MANAGED_INFERENCE_GATEWAY_URL }}
+          TAURI_SUPABASE_URL: ${{ vars.KOLBOO_PROD_SUPABASE_URL }}
+          TAURI_SUPABASE_PUBLISHABLE_KEY: ${{ vars.KOLBOO_PROD_SUPABASE_PUBLISHABLE_KEY }}
+          TAURI_PUBLIC_AUTH_PAGE_URL: ${{ vars.KOLBOO_PROD_PUBLIC_AUTH_PAGE_URL }}
+        run: |
+          node --test .github/scripts/validate-desktop-cloud-config.test.mjs .github/scripts/service-release-workflows.test.mjs
+          node .github/scripts/validate-desktop-cloud-config.mjs
+
       - name: Require PostHog configuration for the release
         shell: bash
         env:
@@ -68,6 +81,7 @@ jobs:
     needs: verify
     uses: ./.github/workflows/windows-build.yml
     with:
+      service_enabled: true
       build_local_whisper: false
       release_signing: true
     secrets: inherit
@@ -77,14 +91,18 @@ jobs:
     needs: verify
     uses: ./.github/workflows/macos-build.yml
     with:
+      service_enabled: true
       architecture: universal
       release_build: true
     secrets: inherit
 
   build-linux:
-    name: Build Linux Community packages
+    name: Build Linux packages
     needs: verify
     uses: ./.github/workflows/linux-build.yml
+    with:
+      service_enabled: true
+      release_signing: true
     secrets: inherit
 
   publish:
@@ -164,11 +182,11 @@ jobs:
         run: |
           cat >> .release/RELEASE_NOTES.md <<'EOF'
 
-          > **macOS (experimental):** The universal Mac download is ad-hoc signed, not Apple Developer ID signed or notarized, and has no automatic updater. macOS may block its first launch; only proceed if you trust this download. Native Mac acceptance is still pending.
+          > **macOS (experimental):** The universal Mac download is ad-hoc signed, not Apple Developer ID signed or notarized. Automatic-update archives are signed with Kolboo's updater key. macOS may block its first launch; only proceed if you trust this download. Native Mac acceptance is still pending.
           EOF
 
       - name: Generate signed updater manifest
-        run: node .github/scripts/generate-updater-manifest.mjs .release/windows/default .release/RELEASE_NOTES.md .release/windows/default/latest.json
+        run: node .github/scripts/generate-updater-manifest.mjs .release .release/RELEASE_NOTES.md .release/windows/default/latest.json
 
       - name: Create draft GitHub Release for exact-package acceptance
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -180,5 +198,6 @@ jobs:
             .release/windows/**
             .release/macos/*.dmg
             .release/macos/*.app.zip
+            .release/macos/*.app.tar.gz*
             .release/linux/**
           fail_on_unmatched_files: true

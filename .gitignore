@@ -66,6 +66,9 @@ Desktop.ini
 # Local debugging artifacts
 cdb-*.txt
 
+# Local Cloudflare CLI account cache (not application source).
+/.cloudflare/
+
 .ralph/**/state/
 .ralph/**/state/**
 .ralph/**/done-tickets.txt

@@ -7,6 +7,31 @@ import {
 } from "./profiles";
 
 describe("profile settings normalizer", () => {
+	it("preserves input-mode overrides and null inheritance for profiles and presets", () => {
+		const result = normalizeRewriteProfile({
+			id: "p",
+			name: "p",
+			stt_input_mode: "after_recording",
+			presets: [
+				{ id: "q", name: "q", stt_input_mode: "auto" },
+				{ id: "inherit", name: "inherit", stt_input_mode: null },
+			],
+		});
+		expect(result?.stt_input_mode).toBe("after_recording");
+		expect(result?.presets?.map((p) => p.stt_input_mode)).toEqual([
+			"auto",
+			null,
+		]);
+		for (const value of [undefined, null])
+			expect(
+				normalizeRewriteProfile({ id: "p", name: "p", stt_input_mode: value })
+					?.stt_input_mode,
+			).toBeNull();
+		for (const value of ["unknown", false])
+			expect(() =>
+				normalizeRewriteProfile({ id: "p", name: "p", stt_input_mode: value }),
+			).toThrow("input mode is invalid");
+	});
 	it.each(["system", "ctrl_v", "ctrl_shift_v", "shift_insert", "cmd_v"])(
 		"preserves %s as an explicit paste override",
 		(value) => {

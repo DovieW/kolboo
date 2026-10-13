@@ -15,6 +15,13 @@ pub struct PipelineErrorPayload {
 }
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SttPartialTranscriptPayload {
+    Started { session_epoch: u64 },
+    Partial { session_epoch: u64, text: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct OverlayAudioLevelPayload {
     pub seq: u64,
     pub rms: f32,
@@ -91,4 +98,32 @@ pub enum ConnectionStateEvent {
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct ConnectionStateChangedPayload {
     pub state: ConnectionStateEvent,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transcript_preview_events_have_distinct_kinds_and_preserve_epoch_and_rtl_text() {
+        let started =
+            serde_json::to_value(SttPartialTranscriptPayload::Started { session_epoch: 17 })
+                .unwrap();
+        assert_eq!(
+            started,
+            serde_json::json!({"kind":"started","session_epoch":17})
+        );
+        assert!(started.get("text").is_none());
+        let text = "שלום\n  \"וועלט\" — hello!";
+        let partial = serde_json::to_value(SttPartialTranscriptPayload::Partial {
+            session_epoch: 17,
+            text: text.into(),
+        })
+        .unwrap();
+        assert_eq!(
+            partial,
+            serde_json::json!({"kind":"partial","session_epoch":17,"text":text})
+        );
+        assert_eq!(partial["text"].as_str(), Some(text));
+    }
 }

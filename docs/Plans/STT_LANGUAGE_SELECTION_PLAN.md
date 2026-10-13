@@ -1,5 +1,11 @@
 # STT Language Selection Plan
 
+> Historical design notes. Language hints are now implemented; the old English
+> default below is superseded by Auto-detect for new/missing settings. Existing
+> explicit hints are preserved. File and meeting hints are immutable recording
+> snapshots. See [current behavior](../User%20Docs/SUPPORTED_PROVIDERS_AND_MODELS.md)
+> and [meeting recovery](../Dev%20Docs/MEETING_RECORDING.md).
+
 ## Why this doc exists
 We want a single place that captures the language-selection work needed for **Settings → AI → Transcribe** so we don’t lose the provider-specific details. This document is **planning only** (no code changes yet).
 

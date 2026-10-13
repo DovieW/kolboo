@@ -328,6 +328,7 @@ fn action_id(action: HotkeyAction) -> &'static str {
         HotkeyAction::Retry => "retry",
         HotkeyAction::QuickAskHold => "quick-ask-hold",
         HotkeyAction::QuickAskToggle => "quick-ask-toggle",
+        HotkeyAction::ShowWindow => "show-window",
     }
 }
 
@@ -339,6 +340,7 @@ fn action_label(action: HotkeyAction) -> &'static str {
         HotkeyAction::Retry => "Retry",
         HotkeyAction::QuickAskHold => "QuickAskHold",
         HotkeyAction::QuickAskToggle => "QuickAskToggle",
+        HotkeyAction::ShowWindow => "ShowWindow",
     }
 }
 
@@ -350,6 +352,7 @@ fn action_description(action: HotkeyAction) -> &'static str {
         HotkeyAction::Retry => "Retry the last dictation",
         HotkeyAction::QuickAskHold => "Hold to use Quick Ask",
         HotkeyAction::QuickAskToggle => "Start or stop Quick Ask",
+        HotkeyAction::ShowWindow => "Open Kolboo",
     }
 }
 
@@ -480,6 +483,24 @@ fn to_xkb_key_name(key: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_window_has_a_distinct_portal_action_and_description() {
+        assert_eq!(action_label(HotkeyAction::ShowWindow), "ShowWindow");
+        assert_eq!(action_description(HotkeyAction::ShowWindow), "Open Kolboo");
+        assert_eq!(
+            portal_shortcut_id(HotkeyAction::ShowWindow, 0, "CTRL+ALT+k"),
+            "show-window-0-ctrl_alt_k"
+        );
+        let cards = vec![HotkeyShortcutCard {
+            id: "open".into(),
+            kind: HotkeyAction::ShowWindow,
+            hotkey: Some(hotkey(&["ctrl", "alt"], "KeyK")),
+        }];
+        let registrations = collect_portal_shortcuts(&cards);
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].action, HotkeyAction::ShowWindow);
+    }
 
     fn hotkey(modifiers: &[&str], key: &str) -> HotkeyConfig {
         HotkeyConfig {

@@ -19,6 +19,7 @@ export {
 	normalizeNoiseGateStrength,
 	normalizeNoiseGateThresholdDbfs,
 	normalizePlayingAudioHandling,
+	normalizeSttInputMode,
 } from "./audio";
 
 export {

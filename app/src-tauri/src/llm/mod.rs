@@ -16,6 +16,7 @@ mod managed;
 mod ollama;
 mod openai;
 mod openai_compat;
+pub(crate) mod profile_conversion;
 mod prompts;
 
 pub use anthropic::AnthropicLlmProvider;
@@ -175,6 +176,11 @@ impl Default for LlmRegistry {
 /// Configuration for LLM formatting
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
+    pub model_selections: crate::model_selection::ModelSelections,
+    pub selection: Option<crate::model_selection::ModelSelection>,
+    pub selection_error: Option<String>,
+    /// Account session bearer; never a managed provider key or frontend setting.
+    pub managed_access_token: Option<String>,
     pub custom_providers: Vec<crate::custom_providers::CustomProvider>,
     /// Whether LLM formatting is enabled
     pub enabled: bool,
@@ -220,6 +226,7 @@ pub struct LlmConfig {
 /// `crate::settings`.
 #[derive(Debug, Clone)]
 pub struct ProgramPreset {
+    pub model_selections: crate::model_selection::ModelSelections,
     pub id: String,
     pub name: String,
 
@@ -238,6 +245,7 @@ pub struct ProgramPreset {
     pub stt_provider: Option<String>,
     pub stt_model: Option<String>,
     pub stt_language: Option<String>,
+    pub stt_input_mode: Option<crate::settings::SttInputMode>,
     pub stt_timeout_seconds: Option<f64>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
@@ -255,6 +263,7 @@ pub struct ProgramPreset {
 /// the default `LlmConfig.prompts`.
 #[derive(Debug, Clone)]
 pub struct ProgramPromptProfile {
+    pub model_selections: crate::model_selection::ModelSelections,
     #[cfg_attr(not(test), allow(dead_code))]
     pub id: String,
     pub name: String,
@@ -288,6 +297,7 @@ pub struct ProgramPromptProfile {
     pub stt_provider: Option<String>,
     pub stt_model: Option<String>,
     pub stt_language: Option<String>,
+    pub stt_input_mode: Option<crate::settings::SttInputMode>,
     pub stt_timeout_seconds: Option<f64>,
     pub llm_provider: Option<String>,
     pub llm_model: Option<String>,
@@ -335,6 +345,10 @@ pub struct ProgramPromptProfile {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
+            model_selections: Default::default(),
+            selection: None,
+            selection_error: None,
+            managed_access_token: None,
             enabled: false,
             custom_providers: Vec::new(),
             provider: "openai".to_string(),

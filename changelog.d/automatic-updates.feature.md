@@ -1,0 +1,3 @@
+- Added signed automatic updates for Windows, Linux AppImage/Debian packages, and experimental universal Mac builds. Updates download in the background and install when you quit.
+- Added **Check for updates** and **Install update** in **Settings → UI**. Manual installation is blocked during active dictation, transcription, imports and retries; failed manual installs can be retried.
+- Linux Debian updates may ask for administrator approval. Mac updates require a writable Applications folder. Installing on Linux or Mac closes Kolboo; reopen it to use the new version.

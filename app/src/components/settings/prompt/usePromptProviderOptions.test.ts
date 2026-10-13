@@ -61,6 +61,20 @@ const options = {
 	effectiveRouterLlmProvider: null,
 };
 
+it("keeps atomic profile choices and missing selections visible independently of catalog availability",()=>{
+    const stt={source:"byok" as const,provider_id:"unavailable_audio",model_id:"saved-speech"};
+    const rewrite={source:"managed" as const,provider_id:"openai",model_id:"saved-text"};
+    const profile={id:"p",name:"Profile",program_paths:[],cleanup_prompt_sections:{},model_selections:{transcription:stt,rewrite}};
+    const scoped=usePromptProviderOptions({...options,activeProfileId:"p",isDefaultScope:false,profiles:[profile],settings:{...options.settings,model_selections:{transcription:stt,rewrite}} as AppSettings});
+    expect(scoped.effectiveSttProvider).toBe("unavailable_audio");
+    expect(scoped.effectiveLlmProvider).toBe("openai");
+    expect(scoped.effectiveLlmModel).toBe("saved-text");
+    expect(scoped.selectedSttModelForUi).toBe("saved-speech");
+    const inherited=usePromptProviderOptions({...options,activeProfileId:"missing",isDefaultScope:false,settings:{...options.settings,stt_provider:null,llm_provider:null,stt_model:null,llm_model:null} as unknown as AppSettings});
+    expect(inherited.effectiveSttProvider).toBeNull(); expect(inherited.effectiveLlmProvider).toBeNull();
+    expect(inherited.effectiveLlmModel).toBeNull();
+});
+
 it("offers configured custom capabilities and model IDs for BYOK", () => {
 	const result = usePromptProviderOptions(options);
 	expect(result.sttCloudProviders).toEqual([
@@ -77,6 +91,81 @@ it("offers configured custom capabilities and model IDs for BYOK", () => {
 	]);
 	expect(result.quickAskModelOptions).toEqual(result.llmModelOptions);
 	expect(result.quickReplaceModelOptions).toEqual(result.llmModelOptions);
+});
+
+it("displays custom speech names while retaining the raw ID", () => {
+	const result = usePromptProviderOptions({
+		...options,
+		availableProviders: {
+			...options.availableProviders,
+			stt: [
+				{
+					...options.availableProviders.stt[0],
+					value: "custom_audio",
+					label: "Audio server",
+					is_local: false,
+					models: ["own-transcriber"],
+					model_names: { "own-transcriber": "Speech model" },
+				},
+			],
+		},
+	});
+	expect(result.sttModelOptions).toEqual([
+		{ value: "own-transcriber", label: "Speech model" },
+	]);
+	const missing = usePromptProviderOptions({
+		...options,
+		availableProviders: undefined,
+	});
+	expect(missing.sttModelOptions).toEqual([]);
+	const discovery = usePromptProviderOptions({
+		...options,
+		managedAccessEnabled: true,
+		showAllProvidersAndModels: true,
+		availableProviders: undefined,
+		settings: { ...options.settings, stt_provider: "groq", stt_model: null },
+	});
+	expect(discovery.effectiveSttProvider).toBe("groq");
+	expect(discovery.sttModelOptions.map((model) => model.value)).toContain(
+		"whisper-large-v3-turbo",
+	);
+	const unconfigured = usePromptProviderOptions({
+		...options,
+		managedAccessEnabled: true,
+		showAllProvidersAndModels: true,
+		settings: { ...options.settings, stt_provider: "groq", stt_model: null },
+	});
+	expect(unconfigured.sttModelOptions).toEqual(discovery.sttModelOptions);
+	const noModels = usePromptProviderOptions({
+		...options,
+		availableProviders: {
+			...options.availableProviders,
+			stt: [
+				{
+					value: "custom_audio",
+					label: "Audio server",
+					is_local: false,
+					models: null,
+				},
+			],
+		},
+	});
+	expect(noModels.effectiveSttProvider).toBe("custom_audio");
+	expect(noModels.sttModelOptions).toEqual([]);
+	expect(noModels.selectedSttModelForUi).toBeNull();
+});
+
+it("does not present the first catalog entry as an implicitly selected default", () => {
+	const result = usePromptProviderOptions({
+		...options,
+		settings: { ...options.settings, stt_model: null, llm_model: null },
+	});
+	expect(result.sttModelOptions).toHaveLength(1);
+	expect(result.llmModelOptions).toHaveLength(1);
+	expect(result.selectedSttModelForUi).toBeNull();
+	expect(result.selectedLlmModelForUi).toBeNull();
+	expect(result.selectedQuickAskModelForUi).toBeNull();
+	expect(result.selectedQuickReplaceModelForUi).toBeNull();
 });
 
 it("keeps custom providers outside managed-only choices and reveals them explicitly", () => {
@@ -109,4 +198,70 @@ it("keeps custom providers outside managed-only choices and reveals them explici
 	expect(all.llmModelOptions).toEqual([
 		{ value: "own-model", label: "own-model" },
 	]);
+});
+
+it("preserves saved IDs across catalog refreshes in all BYOK prompt flows", () => {
+	const settings = {
+		...options.settings,
+		stt_model: "old-stt",
+		llm_model: "old-llm",
+		quick_ask_model: "old-ask",
+	};
+	const result = usePromptProviderOptions({
+		...options,
+		settings,
+		localProfileQuickReplaceModel: "old-replace",
+	});
+	expect(result.sttModelOptions).toContainEqual({
+		value: "old-stt",
+		label: "old-stt (saved selection)",
+	});
+	expect(result.llmModelOptions).toContainEqual({
+		value: "old-llm",
+		label: "old-llm (saved selection)",
+	});
+	expect(result.quickAskModelOptions).toContainEqual({
+		value: "old-ask",
+		label: "old-ask (saved selection)",
+	});
+	expect(result.quickReplaceModelOptions).toContainEqual({
+		value: "old-replace",
+		label: "old-replace (saved selection)",
+	});
+	expect(result.selectedLlmModelForUi).toBe("old-llm");
+	expect(settings.llm_model).toBe("old-llm");
+	const profile = usePromptProviderOptions({
+		...options,
+		activeProfileId: "profile",
+		isDefaultScope: false,
+		localProfileSttModel: "profile-stt",
+		localProfileLlmModel: "profile-llm",
+		localProfileQuickAskModel: "profile-ask",
+		localProfileQuickReplaceModel: "profile-replace",
+	});
+	expect(profile.llmModelOptions.at(-1)?.value).toBe("profile-llm");
+	expect(profile.sttModelOptions.at(-1)?.value).toBe("profile-stt");
+	expect(profile.quickAskModelOptions.at(-1)?.value).toBe("profile-ask");
+	expect(profile.quickReplaceModelOptions.at(-1)?.value).toBe(
+		"profile-replace",
+	);
+	const inherited = usePromptProviderOptions({
+		...options,
+		activeProfileId: "profile",
+		isDefaultScope: false,
+	});
+	expect(inherited.selectedLlmModelForUi).toBeNull();
+	const inheritedIds=usePromptProviderOptions({...options,settings,activeProfileId:"profile",isDefaultScope:false,localProfileSttModel:null,localProfileLlmModel:null});
+	expect(inheritedIds.effectiveSttModel).toBe("old-stt");
+	expect(inheritedIds.effectiveLlmModel).toBe("old-llm");
+	const modelDefaults=usePromptProviderOptions({...options,settings:{...options.settings,stt_model:null,llm_model:null},activeProfileId:"profile",isDefaultScope:false});
+	expect(modelDefaults.effectiveSttModel).toBeNull();
+	expect(modelDefaults.effectiveLlmModel).toBeNull();
+	const empty = usePromptProviderOptions({
+		...options,
+		settings: undefined,
+		availableProviders: undefined,
+	});
+	expect(empty.llmModelOptions).toEqual([]);
+	expect(empty.sttModelOptions).toEqual([]);
 });

@@ -31,6 +31,23 @@ vi.mock("./events", () => ({
 }));
 
 describe("tauri command wrappers", () => {
+    itWithImportTimeout("preserves action, source and preset context through completion and prompt-tool IPC",async()=>{
+        const {llmAPI,configAPI}=await import("./commands");
+        const selection={source:"byok" as const,provider_id:"custom_text",model_id:"raw/model"};
+        await llmAPI.complete({provider:"custom_text",model:"raw/model",action:"quick_ask",profileId:"p",modelSelection:selection,systemPrompt:"sys",userPrompt:"user"});
+        expect(invokeMock).toHaveBeenCalledWith("llm_complete",{args:expect.objectContaining({action:"quick_ask",profileId:"p",modelSelection:selection,model:"raw/model"})});
+        await llmAPI.iterateRewritePrompt({profileId:"p",presetId:"q",mode:"new",transcript:"",problemOutput:"Synthetic goal",currentPrompt:"Synthetic prompt"});
+        expect(invokeMock).toHaveBeenCalledWith("iterate_rewrite_prompt",expect.objectContaining({profileId:"p",presetId:"q"}));
+        await llmAPI.testRewriteWithPrompt({profileId:"p",presetId:"q",transcript:"Synthetic input",prompt:"Synthetic prompt"});
+        expect(invokeMock).toHaveBeenCalledWith("test_rewrite_with_prompt",{profileId:"p",presetId:"q",transcript:"Synthetic input",prompt:"Synthetic prompt"});
+        await llmAPI.iterateRewritePrompt({transcript:"Synthetic",problemOutput:"Synthetic",currentPrompt:"Synthetic"});
+        await llmAPI.testRewriteWithPrompt({transcript:"Synthetic",prompt:"Synthetic"});
+        expect(invokeMock).toHaveBeenCalledWith("test_rewrite_with_prompt",{profileId:null,transcript:"Synthetic",prompt:"Synthetic"});
+        await configAPI.getAvailableProviders(true);
+        await configAPI.getAvailableProviders();
+        expect(invokeMock).toHaveBeenCalledWith("get_available_providers",{includeUnconfigured:true});
+        expect(invokeMock).toHaveBeenCalledWith("get_available_providers");
+    });
     itWithImportTimeout("email-code IPC preserves arguments and returns the hydrated state without sending them to telemetry", async () => {
         const { licenseAPI } = await import("./commands");
         const state = { tier: "community", status: "active" };

@@ -1,10 +1,10 @@
 # Release operations
 
-> **Channel scope:** Stable Windows distribution remains gated. Versioned desktop releases also include explicitly experimental, unnotarized universal macOS downloads and manual-update Linux Community/BYOK packages. Linux-only prereleases remain available separately. Linux publication requires exact-package native acceptance; none of these channels opens managed signup or constitutes a broad product launch.
+> **Channel scope:** Version 0.3.3 prepares account-enabled Windows, Linux and experimental, unnotarized universal macOS packages for the existing invite-only beta. BYOK remains account-free. Signed automatic updates are configured for versioned releases on all three platforms; Linux-only Community prereleases retain manual updates. Publication still requires applicable exact-package acceptance or an explicitly recorded deferral. This is not public paid signup or a broad managed-service launch.
 
 Windows remains the stable release target. Linux has a separate x86_64 Community/BYOK beta channel with manual updates and explicit native acceptance. macOS is an experimental download, not yet a supported or native-accepted platform.
 
-Linux-only beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. Versioned desktop releases also include Linux Community/BYOK packages, with manual updates and the same Linux exact-package acceptance requirements. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
+Linux-only beta tags use `vX.Y.Z-beta.N` and are handled only by `Linux Community Beta Release`; stable Windows release jobs exclude those tags. Versioned desktop releases include updater-signed Linux Community/BYOK packages with the same exact-package acceptance requirements. See [Linux development and beta releases](../How%20Tos/LINUX_DEVELOPMENT.md) for package verification, acceptance, installation, and rollback.
 
 ## Release gates
 
@@ -21,7 +21,7 @@ The release builds only the standard Windows bundle. The extra `local-whisper` W
 
 Windows checks must pass before installer packaging starts. A failing check therefore prevents an expensive installer build rather than leaving two independent jobs running. The macOS workflow finds Cargo's hashed architecture-specific dSYMs by UUID and verifies them against the finished executable before upload; missing or unusable release symbols still fail the build.
 
-The release also builds a universal macOS DMG and app ZIP with ad-hoc signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, auto-updates, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
+The release also builds a universal macOS DMG, app ZIP and updater-signed app archive with ad-hoc code signing. The workflow verifies the app bundle's code signature and both CPU architectures; it does **not** claim Apple Developer ID signing, notarization, or native Mac acceptance. The release notes disclose these limits and possible Gatekeeper warnings. Do not call this a supported Mac release until the native acceptance pass in [macOS development](../How%20Tos/MACOS_DEVELOPMENT.md) is complete.
 
 ## 0.3.1 maintenance-release deferrals
 
@@ -73,6 +73,47 @@ Release titles follow the simple `vX.Y.Z` convention. Unsigned Windows publisher
 identity and experimental macOS limitations are disclosed in the release body,
 not appended to its title.
 
+## 0.3.3 account-enabled beta preparation
+
+The maintainer authorized shipping 0.3.3 with login and leaving Managed
+YiddishLabs disabled on October 13. All versioned-release platform calls opt in
+to `service_enabled: true`; ordinary development builds and Linux-only Community
+beta tags remain cloud-disabled by default. Both build-mode flags and all five
+public origins/keys come from the same explicit input. Release verification
+rejects missing or invalid public configuration before expensive builds begin.
+Only the Supabase publishable key enters desktop packages, never server keys or
+Cloudflare Access credentials. `production` is the strict installer validation
+mode. On October 13 the maintainer also authorized promoting the existing live
+Worker fleet to production runtime safeguards, without replacing the service.
+The legacy `-dev` Worker URLs remain valid for existing clients; their names do
+not indicate a development sandbox. The existing database, durable catalog
+partition, account access and quota limits were preserved. Authenticated
+before/after acceptance and rejection of development-only routes passed in
+private deployment run `38404247436`; no paid inference or SQL migration ran.
+
+The approved-email admission hook and complimentary beta access remain in force.
+Do not disable admission, enable paid checkout, publish YiddishLabs models, apply
+its job-table migration, or configure vendor credentials as part of this release.
+The account page must be a verified HTTPS deployment rather than the protected
+`kolboo.dovie.dev` origin or a missing production login page.
+
+Preparation is not publication: push and remote checks, compatible beta API
+deployment, exact-package Linux login/session/managed/BYOK acceptance, updater
+artifact verification, and release evidence remain required. Platform/operator
+and legal deferrals from 0.3.2 do not automatically carry forward.
+
+The Windows preparation run `38388645737` exposed a checkpoint-cleanup error:
+Windows can report a child path beneath a regular file as `NotFound`, unlike
+Linux's `NotADirectory`. Cleanup now checks the nearest existing parent before
+treating missing receipts as an idempotent no-op. Invalid parents fail privately
+and retain the recording; legitimately missing directory trees still succeed.
+Regression tests exercise both forms of absence, file parents, and linked
+parents without deleting unrelated content. A new Windows run must pass before
+the release tag moves; Linux coverage alone is not Windows verification.
+Local `check:ci` and `coverage:patch` passed on October 13 after this fix: 1,160
+Rust tests, 1,022 frontend tests, isolated Linux/Wry and offline startup checks,
+and 100% non-exempt desktop patch coverage. No new exception was added.
+
 ## Windows startup regression (0.3.2)
 
 The overlay layout helper previously acquired its layout mutex before resolving
@@ -99,7 +140,57 @@ signup configuration, service rollout validation or the remaining release gates.
 
 ## Signed updates
 
-Release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Tauri creates updater signatures with the private updater key, while the application contains only `app/src-tauri/updater.pubkey`. The release workflow refuses to create `latest.json` without a signed Windows artifact and publishes the manifest with the installer.
+Versioned Windows, Linux and Mac release builds opt into `VITE_SIGNED_UPDATER_ENABLED=true`. Rust checks
+at startup and every six hours, including while the main webview is closed to
+the tray. It downloads and verifies newer releases in the background; a failed
+check/download does not block Community/BYOK use. Checks/downloads are bounded
+by a two-minute network timeout and cancelled on shutdown. No update can
+interrupt recording, transcription or other work on an idle timer: installation
+is deferred until explicit **Quit** (tray Quit or an exit-program close action),
+or **Settings → UI → Updates → Install update**. Manual installation acquires
+the pipeline's exclusive lease and refuses while recording, transcription,
+import or retry owns it. **Check for updates** uses the same backend owner as
+background checks, reports status, and downloads/verifies a newer package.
+Closing to tray does not install, and OS shutdown is not delayed. The standard
+Windows updater handoff restarts the updated application. Staged downloads are
+memory-only; if the process is killed or the machine shuts down before Quit,
+the next launch checks/downloads again.
+
+Linux AppImage updates replace the writable installed image. Debian updates
+use one OS-owned `pkexec /usr/bin/dpkg --install` approval prompt; cancellation
+does not fall through to password collection or terminal sudo. Missing polkit,
+unwritable images or package-install errors require a retry or manual download.
+Mac updates stage the signed app archive in the application's parent folder,
+then replace the bundle with rollback protection on the same filesystem. The
+application must be in a writable folder (for example `~/Applications`), not
+running from its read-only DMG. A failed rollback preserves the private backup.
+Linux/Mac successful installation closes Kolboo; reopen it to run the update.
+Updater signatures do not remove Gatekeeper, OS approval or publisher warnings.
+Failed manual installs retain the verified download and leave Kolboo running.
+
+Tauri creates updater signatures with the private updater key, while the
+application contains only `app/src-tauri/updater.pubkey`. The release workflow
+requires exactly one signed NSIS, MSI, AppImage, deb and universal Mac archive,
+verifies their files exist, and publishes installer-specific manifest entries so MSI
+installations receive MSI upgrades. The legacy generic Windows entry still
+points to NSIS. The NSIS setup also skips the uninstall page for newer NSIS
+versions run manually; app data and start-at-login registration are retained.
+First installation, same-version repair and explicit installer-format migration
+remain separate cases. See `app/src-tauri/windows/README.md` for template
+provenance and Windows acceptance cases. Administrator/UAC approval for
+machine-wide installs is not bypassed.
+
+The universal Mac archive serves both `darwin-aarch64` and `darwin-x86_64`.
+Linux deb and AppImage clients receive their own format; the generic Linux
+fallback uses AppImage. RPM and unbundled development executables do not enable
+native updating. Missing any platform signature fails feed generation rather
+than silently omitting that platform. Automated Linux/Wry and filesystem tests
+do not substitute for real Windows/Mac upgrade and rollback acceptance.
+
+Existing 0.3.2 clients do not acquire this automatic-check behavior remotely:
+users need one upgrade to the first release containing it, either through that
+client's signed updater link or by running the new installer. Do not publish
+an unverified installer as proof of upgrade acceptance.
 
 Updater checks stay disabled in ordinary builds and in the manual-update Linux beta channel. Enable them only for a release channel that has completed signed update and rollback acceptance. Never rotate or lose the updater private key without a migration plan: installed clients trust its committed public counterpart.
 
@@ -115,7 +206,7 @@ Updater checks stay disabled in ordinary builds and in the manual-update Linux b
 
 ## Rollback
 
-Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a new updater-signed release. Existing clients only accept metadata and artifacts signed by the updater key; publisher Authenticode signing remains optional.
+Do not overwrite a published tag. Mark the affected release as withdrawn, preserve its hashes and incident record, fix forward with a higher version, and publish a new updater-signed release. Metadata travels over HTTPS; clients verify the downloaded artifact against the committed updater key. Publisher Authenticode signing remains optional.
 
 ## Cargo cache disk usage
 

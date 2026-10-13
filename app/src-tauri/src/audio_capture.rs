@@ -5,6 +5,7 @@
 //!
 //! Supports optional Voice Activity Detection (VAD) for auto-stop functionality.
 
+use crate::stt::streaming::StreamingAudioSender;
 use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -20,9 +21,16 @@ use std::thread::{self, JoinHandle};
 
 pub mod computer_audio;
 mod device_selection;
+mod dispatch;
+use dispatch::{
+    append_recorded_chunk, normalize_i16, normalize_u16, CaptureDispatch, CaptureFence,
+};
 pub mod journal;
 mod meters;
 mod preprocessing;
+#[cfg(test)]
+#[path = "audio_capture/tests/streaming.rs"]
+mod streaming_tests;
 
 pub use device_selection::{
     get_default_input_device_info, list_input_devices, list_input_devices_v2, AudioInputDeviceInfo,
@@ -157,10 +165,14 @@ pub enum AudioCaptureError {
 /// Audio buffer that accumulates samples during recording
 #[derive(Debug, Clone)]
 pub struct AudioBuffer {
+    // Audio persistence and delivery share this buffer's mutex. Attaching a
+    // provider can replay its prefix without racing the next worker append.
+    live_audio_tx: Option<StreamingAudioSender>,
     recovery_path: Option<std::path::PathBuf>,
     journal: Option<Arc<StdMutex<journal::Journal>>>,
     journal_failed: bool,
     captured_samples: u64,
+    recording_epoch: u64,
     data: Vec<f32>,
     write_pos: usize,
     filled: usize,
@@ -205,11 +217,13 @@ impl AudioBuffer {
     pub fn new(sample_rate: u32, channels: u16, max_duration_secs: f32) -> Self {
         let capacity = Self::max_samples_for(sample_rate, channels, max_duration_secs);
         Self {
+            live_audio_tx: None,
             data: vec![0.0; capacity],
             recovery_path: None,
             journal: None,
             journal_failed: false,
             captured_samples: 0,
+            recording_epoch: 0,
             write_pos: 0,
             filled: 0,
             sample_rate,
@@ -223,6 +237,9 @@ impl AudioBuffer {
     /// This is primarily used by long-running streams (Hot Mic) when the underlying
     /// device is restarted.
     pub fn set_format(&mut self, sample_rate: u32, channels: u16) {
+        if sample_rate != self.sample_rate || channels.max(1) != self.channels {
+            self.fail_live_input();
+        }
         self.sample_rate = sample_rate;
         self.channels = channels.max(1);
 
@@ -265,7 +282,10 @@ impl AudioBuffer {
     ///
     /// Clears samples and sets the max duration (used for trimming during capture).
     pub fn reset_for_recording(&mut self, max_duration_secs: f32) {
+        self.fail_live_input();
+        self.live_audio_tx = None;
         self.captured_samples = 0;
+        self.recording_epoch = 0;
         self.max_duration_secs = max_duration_secs.max(0.0);
 
         let cap = Self::max_samples_for(self.sample_rate, self.channels, self.max_duration_secs);
@@ -281,6 +301,7 @@ impl AudioBuffer {
     /// Append samples to the buffer
     pub fn append(&mut self, new_samples: &[f32]) {
         if self.journal_failed {
+            self.fail_live_input();
             return;
         }
         if self.journal.is_none() {
@@ -289,6 +310,7 @@ impl AudioBuffer {
                     Ok(writer) => self.journal = Some(Arc::new(StdMutex::new(writer))),
                     Err(_) => {
                         self.journal_failed = true;
+                        self.fail_live_input();
                         return;
                     }
                 }
@@ -302,11 +324,13 @@ impl AudioBuffer {
                         .is_err()
                     {
                         self.journal_failed = true;
+                        self.fail_live_input();
                         return;
                     }
                 }
                 Err(_) => {
                     self.journal_failed = true;
+                    self.fail_live_input();
                     return;
                 }
             }
@@ -314,6 +338,7 @@ impl AudioBuffer {
         self.captured_samples = self
             .captured_samples
             .saturating_add(new_samples.len() as u64);
+        self.deliver_live_audio(new_samples);
         let cap = self.capacity();
         if cap == 0 || new_samples.is_empty() {
             return;
@@ -340,6 +365,38 @@ impl AudioBuffer {
         }
 
         self.filled = (self.filled + new_samples.len()).min(cap);
+    }
+
+    fn fail_live_input(&self) {
+        if let Some(sender) = &self.live_audio_tx {
+            sender.fail_input();
+        }
+    }
+
+    fn deliver_live_audio(&self, samples: &[f32]) {
+        if !samples.is_empty() {
+            if let Some(sender) = &self.live_audio_tx {
+                let mono = downmix_interleaved_to_mono(samples, self.channels as usize);
+                let _ = sender.try_send(mono);
+            }
+        }
+    }
+
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
+        if tx.is_some() {
+            self.fail_live_input();
+        }
+        self.live_audio_tx = tx;
+        if self.live_audio_tx.is_none() {
+            return;
+        }
+        if self.journal_failed || self.captured_samples > self.filled as u64 {
+            // The in-memory prefix has wrapped (or failed to persist). Never
+            // present a truncated recording as complete streaming input.
+            self.fail_live_input();
+        } else {
+            self.deliver_live_audio(&self.snapshot());
+        }
     }
 
     /// Clear all samples from the buffer
@@ -748,7 +805,7 @@ pub trait AudioCaptureBackend: Send {
     fn is_vad_auto_stop_enabled(&self) -> bool;
 
     /// Set (or clear) the live audio sender for concurrent STT streaming.
-    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>);
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>);
 
     /// Current sample rate of the active capture session (or the default).
     fn capture_sample_rate(&self) -> u32;
@@ -784,7 +841,7 @@ pub struct VadAutoStopConfig {
 struct CaptureHandle {
     command_tx: mpsc::Sender<CaptureCommand>,
     #[cfg_attr(not(test), allow(dead_code))]
-    event_rx: mpsc::Receiver<AudioCaptureEvent>,
+    event_rx: mpsc::Receiver<(u64, AudioCaptureEvent)>,
     thread_handle: JoinHandle<Result<(), AudioCaptureError>>,
 }
 
@@ -812,19 +869,13 @@ pub struct AudioCapture {
 
     // Recording session state shared with the capture thread.
     recording_active: Arc<AtomicBool>,
+    capture_fence: Arc<CaptureFence>,
 
     // Most recent realtime level stats (for UI metering / overlay waveform).
     level_meter: Arc<AudioLevelMeter>,
 
     // Most recent realtime waveform buckets (for true waveform rendering).
     waveform_meter: Arc<AudioWaveformMeter>,
-
-    /// Optional sender for live mono f32 audio chunks (used by concurrent STT streaming).
-    ///
-    /// When set, the worker thread downmixes captured audio to mono and sends chunks
-    /// through this sender. The pipeline sets this at recording start when the STT
-    /// provider supports concurrent streaming, and clears it when recording stops.
-    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
 }
 
 impl AudioCapture {
@@ -846,9 +897,9 @@ impl AudioCapture {
             mic_auto_recover_enabled: Arc::new(AtomicBool::new(false)),
             desired_device_name: Arc::new(StdMutex::new(None)),
             recording_active: Arc::new(AtomicBool::new(false)),
+            capture_fence: Arc::new(CaptureFence::default()),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
-            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -870,9 +921,9 @@ impl AudioCapture {
             mic_auto_recover_enabled: Arc::new(AtomicBool::new(false)),
             desired_device_name: Arc::new(StdMutex::new(None)),
             recording_active: Arc::new(AtomicBool::new(false)),
+            capture_fence: Arc::new(CaptureFence::default()),
             level_meter: Arc::new(AudioLevelMeter::default()),
             waveform_meter: Arc::new(AudioWaveformMeter::default()),
-            live_audio_tx: Arc::new(StdMutex::new(None)),
         }
     }
 
@@ -989,6 +1040,7 @@ impl AudioCapture {
 
         if let Ok(mut buf) = self.buffer.lock() {
             buf.reset_for_recording(max_duration_secs);
+            buf.recording_epoch = self.capture_fence.begin();
             if !pre_roll.is_empty() {
                 buf.append(&pre_roll);
             }
@@ -1000,8 +1052,23 @@ impl AudioCapture {
     /// Stop recording. Ordinary Hot Mic dictation keeps the stream open; a Home
     /// journal requires draining the worker before its audio can be finalized.
     pub fn stop_recording(&mut self) {
+        self.stop_recording_with_drain_timeout(std::time::Duration::from_millis(
+            STOP_JOIN_TIMEOUT_MS,
+        ));
+    }
+
+    fn stop_recording_with_drain_timeout(&mut self, drain_timeout: std::time::Duration) {
         self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
+        self.capture_fence.stop();
+        // Closing the recording boundary is not enough for Hot Mic: callbacks
+        // that already owned this epoch must finish before encoding its WAV.
+        if !self.capture_fence.drain(drain_timeout) {
+            if let Ok(buffer) = self.buffer.lock() {
+                self.capture_fence.fail(buffer.recording_epoch);
+                buffer.fail_live_input();
+            }
+        }
         // NOTE: We intentionally do NOT clear live_audio_tx here.
         // The worker thread must be allowed to flush any remaining queued chunks
         // (which have was_recording=true) through the live audio channel before
@@ -1023,12 +1090,17 @@ impl AudioCapture {
 
     /// Set (or clear) the live audio sender for concurrent STT streaming.
     ///
-    /// While set, the capture worker thread will send mono f32 chunks through
-    /// this sender for each audio callback during recording. Call with `None`
-    /// to stop streaming (also done automatically on `stop_recording`).
-    pub fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
-        if let Ok(mut slot) = self.live_audio_tx.lock() {
-            *slot = tx;
+    /// Replays the saved prefix before any later worker append, then delivers
+    /// new mono chunks without waiting for provider capacity. Clear after the
+    /// worker has drained on stop so finalization can close input.
+    pub fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
+        match self.buffer.lock() {
+            Ok(mut buffer) => buffer.set_live_audio_tx(tx),
+            Err(_) => {
+                if let Some(sender) = tx {
+                    sender.fail_input();
+                }
+            }
         }
     }
 
@@ -1119,7 +1191,7 @@ impl AudioCapture {
         let pre_roll_ms = self.pre_roll_ms.clone();
         let auto_recover = self.mic_auto_recover_enabled.clone();
         let desired_device_name = self.desired_device_name.clone();
-        let live_audio_tx = self.live_audio_tx.clone();
+        let capture_fence = self.capture_fence.clone();
 
         // Spawn capture thread
         let thread_handle = thread::spawn(move || {
@@ -1138,7 +1210,7 @@ impl AudioCapture {
                 vad_config,
                 auto_recover_enabled: auto_recover,
                 desired_device_name,
-                live_audio_tx,
+                capture_fence,
             })
         });
 
@@ -1180,6 +1252,7 @@ impl AudioCapture {
 
         if let Ok(mut buf) = self.buffer.lock() {
             buf.reset_for_recording(max_duration_secs);
+            buf.recording_epoch = self.capture_fence.begin();
         }
 
         self.recording_active.store(true, Ordering::Relaxed);
@@ -1299,6 +1372,7 @@ impl AudioCapture {
 
     /// Stop recording without returning audio data
     pub fn stop(&mut self) {
+        self.capture_fence.stop();
         self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
         if let Some(handle) = self.capture_handle.take() {
@@ -1372,7 +1446,12 @@ impl AudioCapture {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn poll_vad_event(&self) -> Option<AudioCaptureEvent> {
         if let Some(ref handle) = self.capture_handle {
-            handle.event_rx.try_recv().ok()
+            while let Ok((epoch, event)) = handle.event_rx.try_recv() {
+                if self.capture_fence.is_current(epoch) {
+                    return Some(event);
+                }
+            }
+            None
         } else {
             None
         }
@@ -1412,7 +1491,7 @@ impl AudioCaptureBackend for AudioCapture {
                     buffer.captured_samples as f64
                         / buffer.sample_rate.max(1) as f64
                         / buffer.channels.max(1) as f64,
-                    buffer.journal_failed,
+                    buffer.journal_failed || self.capture_fence.failed(buffer.recording_epoch),
                 )
             })
             .unwrap_or((0.0, true))
@@ -1503,6 +1582,11 @@ impl AudioCaptureBackend for AudioCapture {
             return Err(AudioCaptureError::NotActive);
         }
         self.recording_active.store(!paused, Ordering::Relaxed);
+        if paused {
+            self.capture_fence.stop();
+        } else if let Ok(buffer) = self.buffer.lock() {
+            self.capture_fence.resume(buffer.recording_epoch);
+        }
         Ok(())
     }
     fn shared_level_meter(&self) -> SharedAudioLevelMeter {
@@ -1574,7 +1658,7 @@ impl AudioCaptureBackend for AudioCapture {
         self.is_vad_auto_stop_enabled()
     }
 
-    fn set_live_audio_tx(&mut self, tx: Option<tokio::sync::mpsc::Sender<Vec<f32>>>) {
+    fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
         self.set_live_audio_tx(tx);
     }
 
@@ -1596,6 +1680,7 @@ impl Drop for AudioCapture {
 }
 
 struct CaptureThreadArgs {
+    capture_fence: Arc<CaptureFence>,
     device: cpal::Device,
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
@@ -1606,11 +1691,83 @@ struct CaptureThreadArgs {
     meter: Arc<AudioLevelMeter>,
     waveform_meter: Arc<AudioWaveformMeter>,
     command_rx: mpsc::Receiver<CaptureCommand>,
-    event_tx: mpsc::Sender<AudioCaptureEvent>,
+    event_tx: mpsc::Sender<(u64, AudioCaptureEvent)>,
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
-    live_audio_tx: Arc<StdMutex<Option<tokio::sync::mpsc::Sender<Vec<f32>>>>>,
+}
+
+// Native stream construction/play can fail after these workers have started.
+// Keep the stop signal and sender alive in one guard so every return path joins
+// both workers. The stream is declared after this guard and drops before it.
+struct CaptureWorkers {
+    stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+    vad: Option<JoinHandle<()>>,
+    vad_sender: Option<mpsc::Sender<(u64, Vec<f32>)>>,
+}
+
+impl Drop for CaptureWorkers {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+        self.vad_sender.take();
+        if let Some(vad) = self.vad.take() {
+            let _ = vad.join();
+        }
+    }
+}
+
+// Hot Mic keeps the native stream alive across recordings. Its VAD state and
+// queued events must not survive into another recording's ownership epoch.
+fn process_owned_vad_chunk(
+    processor: &mut VadFrameProcessor,
+    processor_epoch: &mut u64,
+    fence: &CaptureFence,
+    epoch: u64,
+    samples: &[f32],
+) -> Vec<VadEvent> {
+    if !fence.is_current(epoch) {
+        return Vec::new();
+    }
+    if *processor_epoch != epoch {
+        processor.reset();
+        *processor_epoch = epoch;
+    }
+    processor.process(samples)
+}
+
+fn enqueue_vad_chunk(
+    tx: &mpsc::Sender<(u64, Vec<f32>)>,
+    pool: &ArrayQueue<Vec<f32>>,
+    epoch: u64,
+    samples: &[f32],
+    channels: usize,
+) {
+    if let Some(mut mono) = pool.pop() {
+        downmix_interleaved_chunk_to_mono_into(samples, channels, &mut mono);
+        if let Err(mpsc::SendError((_epoch, mut mono))) = tx.send((epoch, mono)) {
+            mono.clear();
+            let _ = pool.push(mono);
+        }
+    }
+}
+
+fn forward_vad_events(
+    tx: &mpsc::Sender<(u64, AudioCaptureEvent)>,
+    epoch: u64,
+    events: Vec<VadEvent>,
+) {
+    for event in events {
+        let event = match event {
+            VadEvent::SpeechStart { .. } => AudioCaptureEvent::SpeechStart,
+            VadEvent::SpeechEnd => AudioCaptureEvent::SpeechEnd,
+            VadEvent::None => continue,
+        };
+        let _ = tx.send((epoch, event));
+    }
 }
 
 /// Run the audio capture in a dedicated thread
@@ -1618,6 +1775,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     use std::time::{Duration, Instant};
 
     let CaptureThreadArgs {
+        capture_fence,
         mut device,
         config,
         sample_format,
@@ -1632,7 +1790,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         vad_config,
         auto_recover_enabled,
         desired_device_name,
-        live_audio_tx,
     } = args;
     let sample_rate = config.sample_rate;
 
@@ -1644,17 +1801,10 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         log::error!("Audio stream error: {}", err);
     }
 
-    #[derive(Debug)]
-    struct CapturedChunk {
-        samples: Vec<f32>,
-        was_recording: bool,
-    }
-
     // Channel + pool for passing samples to the VAD processing thread.
     // The pool avoids per-callback allocations; the callback takes a Vec from the pool,
     // fills it with mono f32, and the VAD thread returns it to the pool after processing.
-    let (vad_samples_tx, vad_samples_rx): (mpsc::Sender<Vec<f32>>, mpsc::Receiver<Vec<f32>>) =
-        mpsc::channel();
+    let (vad_samples_tx, vad_samples_rx) = mpsc::channel::<(u64, Vec<f32>)>();
     let vad_pool: Option<Arc<ArrayQueue<Vec<f32>>>> = if vad_config.enabled {
         const VAD_POOL_SIZE: usize = 8;
 
@@ -1680,13 +1830,18 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     let callback_capacity =
         estimate_callback_interleaved_capacity(&config, config.channels.max(1) as usize);
 
-    let chunk_queue: Arc<ArrayQueue<CapturedChunk>> =
+    let chunk_queue: Arc<ArrayQueue<dispatch::CapturedChunk>> =
         Arc::new(ArrayQueue::new(CAPTURE_CHUNK_QUEUE_CAPACITY));
     let chunk_pool: Arc<ArrayQueue<Vec<f32>>> = Arc::new(ArrayQueue::new(CAPTURE_CHUNK_POOL_SIZE));
     for _ in 0..CAPTURE_CHUNK_POOL_SIZE {
         // Preallocate buffers; actual length is set by the callback.
         let _ = chunk_pool.push(Vec::with_capacity(callback_capacity));
     }
+    let dispatch = CaptureDispatch {
+        queue: chunk_queue.clone(),
+        pool: chunk_pool.clone(),
+        fence: capture_fence.clone(),
+    };
 
     let worker_stop = Arc::new(AtomicBool::new(false));
     let worker_handle = {
@@ -1707,12 +1862,12 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let vad_pool = vad_pool.clone();
         let channels = config.channels.max(1) as usize;
         let sample_rate = config.sample_rate;
-        let live_audio_tx = live_audio_tx.clone();
+        let fence = capture_fence.clone();
 
         thread::spawn(move || {
             let mut last_pre_roll_capacity: usize = 0;
 
-            let mut process_one = |chunk: CapturedChunk| {
+            let mut process_one = |mut chunk: dispatch::CapturedChunk| {
                 // Keep level/waveform meters up-to-date even when not recording.
                 let (rms, peak) = compute_rms_peak(&chunk.samples);
                 meter.update(rms, peak);
@@ -1739,42 +1894,20 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
 
                 // Recording buffer + VAD should reflect the state at callback-time,
                 // not "now" (avoids dropping the tail when recording_active flips).
-                if chunk.was_recording {
-                    if let Ok(mut buf) = buffer.lock() {
-                        buf.append(chunk.samples.as_slice());
-                    }
-
+                let recorded = buffer
+                    .lock()
+                    .map(|mut buf| append_recorded_chunk(&mut buf, &chunk, &fence))
+                    .unwrap_or(false);
+                if recorded {
                     if let Some(ref tx) = vad_tx {
                         if let Some(ref pool) = vad_pool {
-                            if let Some(mut mono) = pool.pop() {
-                                downmix_interleaved_chunk_to_mono_into(
-                                    chunk.samples.as_slice(),
-                                    channels,
-                                    &mut mono,
-                                );
-                                if let Err(mpsc::SendError(mut mono)) = tx.send(mono) {
-                                    mono.clear();
-                                    let _ = pool.push(mono);
-                                }
-                            }
-                        }
-                    }
-
-                    // Live audio streaming: send mono f32 chunks for concurrent STT.
-                    if let Ok(guard) = live_audio_tx.lock() {
-                        if let Some(ref sender) = *guard {
-                            let mono =
-                                downmix_interleaved_to_mono(chunk.samples.as_slice(), channels);
-                            // Use try_send to avoid blocking the capture worker.
-                            // If the channel is full the chunk is silently dropped;
-                            // the STT server still gets enough audio from other chunks.
-                            let _ = sender.try_send(mono);
+                            enqueue_vad_chunk(tx, pool, chunk.epoch, &chunk.samples, channels);
                         }
                     }
                 }
 
                 // Return the backing buffer to the pool.
-                let mut samples = chunk.samples;
+                let mut samples = std::mem::take(&mut chunk.samples);
                 samples.clear();
                 let _ = pool.push(samples);
             };
@@ -1810,8 +1943,10 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         let event_tx_clone = event_tx.clone();
         let vad_cfg = vad_config.vad_config.clone();
         let pool = vad_pool.clone();
+        let fence = capture_fence.clone();
         Some(thread::spawn(move || {
             let mut processor = VadFrameProcessor::new(vad_cfg, sample_rate);
+            let mut processor_epoch = 0;
             log::info!(
                 "VAD processor initialized for {} Hz audio in dedicated thread",
                 sample_rate
@@ -1819,15 +1954,15 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
 
             loop {
                 match vad_samples_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok(mut samples) => {
-                        for event in processor.process(&samples) {
-                            let capture_event = match event {
-                                VadEvent::SpeechStart { .. } => AudioCaptureEvent::SpeechStart,
-                                VadEvent::SpeechEnd => AudioCaptureEvent::SpeechEnd,
-                                VadEvent::None => continue,
-                            };
-                            let _ = event_tx_clone.send(capture_event);
-                        }
+                    Ok((epoch, mut samples)) => {
+                        let events = process_owned_vad_chunk(
+                            &mut processor,
+                            &mut processor_epoch,
+                            &fence,
+                            epoch,
+                            &samples,
+                        );
+                        forward_vad_events(&event_tx_clone, epoch, events);
 
                         // Return the buffer to the pool for reuse.
                         samples.clear();
@@ -1844,6 +1979,13 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         None
     };
 
+    let workers = CaptureWorkers {
+        stop: worker_stop,
+        worker: Some(worker_handle),
+        vad: vad_handle,
+        vad_sender: Some(vad_samples_tx),
+    };
+
     #[allow(clippy::too_many_arguments)]
     fn build_stream(
         device: &cpal::Device,
@@ -1851,23 +1993,12 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         sample_format: SampleFormat,
         start: Instant,
         last_callback_ms: Arc<AtomicU64>,
-        recording_active: Arc<AtomicBool>,
-        pre_roll_ms: Arc<AtomicU32>,
-        chunk_queue: Arc<ArrayQueue<CapturedChunk>>,
-        chunk_pool: Arc<ArrayQueue<Vec<f32>>>,
+        dispatch: &CaptureDispatch,
     ) -> Result<cpal::Stream, AudioCaptureError> {
-        use std::cell::RefCell;
-
-        let channels = config.channels.max(1) as usize;
-        let scratch_capacity = estimate_callback_interleaved_capacity(config, channels);
-
         match sample_format {
             SampleFormat::F32 => {
-                let queue = chunk_queue.clone();
-                let pool = chunk_pool.clone();
                 let last_callback_ms = last_callback_ms.clone();
-                let recording_active = recording_active.clone();
-                let pre_roll_ms = pre_roll_ms.clone();
+                let dispatch = dispatch.clone();
 
                 device
                     .build_input_stream(
@@ -1876,41 +2007,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             last_callback_ms
                                 .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                            let was_recording = recording_active.load(Ordering::Relaxed);
-
-                            // Fast path: try to reuse a preallocated Vec.
-                            let mut samples = match pool.pop() {
-                                Some(v) => v,
-                                None => return,
-                            };
-
-                            samples.clear();
-                            samples.extend_from_slice(data);
-
-                            let mut chunk = CapturedChunk {
-                                samples,
-                                was_recording,
-                            };
-
-                            // If the queue is full, drop the oldest chunk to make space, then retry.
-                            if let Err(returned) = queue.push(chunk) {
-                                chunk = returned;
-
-                                if let Some(oldest) = queue.pop() {
-                                    let mut old = oldest.samples;
-                                    old.clear();
-                                    let _ = pool.push(old);
-                                }
-
-                                if let Err(returned_again) = queue.push(chunk) {
-                                    let mut samples = returned_again.samples;
-                                    samples.clear();
-                                    let _ = pool.push(samples);
-                                }
-                            }
-
-                            // Keep capacity in sync if pre-roll ms changes drastically.
-                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                            dispatch.enqueue(data, std::convert::identity);
                         },
                         stream_err,
                         None,
@@ -1918,12 +2015,8 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                     .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
             }
             SampleFormat::I16 => {
-                let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
-                let queue = chunk_queue.clone();
-                let pool = chunk_pool.clone();
                 let last_callback_ms = last_callback_ms.clone();
-                let recording_active = recording_active.clone();
-                let pre_roll_ms = pre_roll_ms.clone();
+                let dispatch = dispatch.clone();
 
                 device
                     .build_input_stream(
@@ -1932,43 +2025,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             last_callback_ms
                                 .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                            let was_recording = recording_active.load(Ordering::Relaxed);
-
-                            let mut out = match pool.pop() {
-                                Some(v) => v,
-                                None => return,
-                            };
-                            out.clear();
-
-                            let mut tmp = scratch.borrow_mut();
-                            tmp.clear();
-                            for &s in data {
-                                // Normalize PCM i16 to [-1.0, 1.0]
-                                let v = (s as f32) / (i16::MAX as f32);
-                                tmp.push(v.clamp(-1.0, 1.0));
-                            }
-                            out.extend_from_slice(tmp.as_slice());
-
-                            let mut chunk = CapturedChunk {
-                                samples: out,
-                                was_recording,
-                            };
-
-                            if let Err(returned) = queue.push(chunk) {
-                                chunk = returned;
-                                if let Some(oldest) = queue.pop() {
-                                    let mut old = oldest.samples;
-                                    old.clear();
-                                    let _ = pool.push(old);
-                                }
-                                if let Err(returned_again) = queue.push(chunk) {
-                                    let mut samples = returned_again.samples;
-                                    samples.clear();
-                                    let _ = pool.push(samples);
-                                }
-                            }
-
-                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                            dispatch.enqueue(data, normalize_i16);
                         },
                         stream_err,
                         None,
@@ -1976,12 +2033,8 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                     .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
             }
             SampleFormat::U16 => {
-                let scratch = RefCell::new(Vec::<f32>::with_capacity(scratch_capacity));
-                let queue = chunk_queue.clone();
-                let pool = chunk_pool.clone();
                 let last_callback_ms = last_callback_ms.clone();
-                let recording_active = recording_active.clone();
-                let pre_roll_ms = pre_roll_ms.clone();
+                let dispatch = dispatch.clone();
 
                 device
                     .build_input_stream(
@@ -1990,43 +2043,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                             last_callback_ms
                                 .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
-                            let was_recording = recording_active.load(Ordering::Relaxed);
-
-                            let mut out = match pool.pop() {
-                                Some(v) => v,
-                                None => return,
-                            };
-                            out.clear();
-
-                            let mut tmp = scratch.borrow_mut();
-                            tmp.clear();
-                            for &s in data {
-                                // Normalize PCM u16 (0..=65535) to [-1.0, 1.0]
-                                let v = (s as f32) / (u16::MAX as f32);
-                                tmp.push((v * 2.0 - 1.0).clamp(-1.0, 1.0));
-                            }
-                            out.extend_from_slice(tmp.as_slice());
-
-                            let mut chunk = CapturedChunk {
-                                samples: out,
-                                was_recording,
-                            };
-
-                            if let Err(returned) = queue.push(chunk) {
-                                chunk = returned;
-                                if let Some(oldest) = queue.pop() {
-                                    let mut old = oldest.samples;
-                                    old.clear();
-                                    let _ = pool.push(old);
-                                }
-                                if let Err(returned_again) = queue.push(chunk) {
-                                    let mut samples = returned_again.samples;
-                                    samples.clear();
-                                    let _ = pool.push(samples);
-                                }
-                            }
-
-                            let _ = pre_roll_ms.load(Ordering::Relaxed);
+                            dispatch.enqueue(data, normalize_u16);
                         },
                         stream_err,
                         None,
@@ -2046,10 +2063,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         sample_format,
         start,
         last_callback_ms.clone(),
-        recording_active.clone(),
-        pre_roll_ms.clone(),
-        chunk_queue.clone(),
-        chunk_pool.clone(),
+        &dispatch,
     )?;
 
     stream
@@ -2100,10 +2114,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                     sample_format,
                     start,
                     last_callback_ms.clone(),
-                    recording_active.clone(),
-                    pre_roll_ms.clone(),
-                    chunk_queue.clone(),
-                    chunk_pool.clone(),
+                    &dispatch,
                 )
                 .and_then(|s| {
                     s.play()
@@ -2149,10 +2160,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                         sample_format,
                         start,
                         last_callback_ms.clone(),
-                        recording_active.clone(),
-                        pre_roll_ms.clone(),
-                        chunk_queue.clone(),
-                        chunk_pool.clone(),
+                        &dispatch,
                     )
                     .and_then(|s| {
                         s.play()
@@ -2183,23 +2191,153 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     // Close the producer first; otherwise a callback can enqueue an old recording
     // chunk after the worker has finished its final drain.
     drop(stream);
-    // Stop the worker and flush any pending chunks into the buffers before we shut down.
-    worker_stop.store(true, Ordering::Relaxed);
-    let _ = worker_handle.join();
-
-    // Drop the VAD sender to signal the VAD thread to stop
-    drop(vad_samples_tx);
-
-    // Wait for VAD thread to finish
-    if let Some(handle) = vad_handle {
-        let _ = handle.join();
-    }
+    // Flush queued capture, close VAD input, and join both workers. The same
+    // guard handles stream construction/play failures without detached tasks.
+    drop(workers);
 
     Ok(())
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn native_null_pcm_callbacks() {
+    // Only the explicitly isolated native runner installs this null-only PCM.
+    let directory = std::env::var("KOLBOO_NATIVE_WINDOW_DIRECTORY").unwrap();
+    assert_eq!(
+        std::env::var("ALSA_CONFIG_PATH").unwrap(),
+        format!("{directory}/asound.conf")
+    );
+    let wait_for_audio = |capture: &AudioCapture| {
+        let start = std::time::Instant::now();
+        while capture.buffer.lock().unwrap().captured_samples == 0 {
+            assert!(start.elapsed() < std::time::Duration::from_secs(2));
+            std::thread::yield_now();
+        }
+    };
+    for format in [
+        SampleFormat::F32,
+        SampleFormat::I16,
+        SampleFormat::U16,
+        SampleFormat::I32,
+    ] {
+        let mut capture = AudioCapture::new();
+        capture.buffer.lock().unwrap().set_format(16000, 1);
+        capture.begin_recording_with_pre_roll(1.0);
+        let (command_tx, command_rx) = mpsc::channel();
+        let (event_tx, event_rx) = mpsc::channel();
+        let buffer = capture.buffer.clone();
+        let pre_roll = capture.pre_roll.clone();
+        let recording_active = capture.recording_active.clone();
+        let capture_fence = capture.capture_fence.clone();
+        let meter = capture.level_meter.clone();
+        let waveform_meter = capture.waveform_meter.clone();
+        capture.capture_handle = Some(CaptureHandle {
+            command_tx,
+            event_rx,
+            thread_handle: thread::spawn(move || {
+                run_capture_thread(CaptureThreadArgs {
+                    device: cpal::default_host()
+                        .default_input_device()
+                        .expect("isolated null PCM"),
+                    config: cpal::StreamConfig {
+                        channels: 1,
+                        sample_rate: 16000,
+                        buffer_size: cpal::BufferSize::Fixed(64),
+                    },
+                    sample_format: format,
+                    buffer,
+                    pre_roll,
+                    recording_active,
+                    capture_fence,
+                    pre_roll_ms: Arc::new(AtomicU32::new(0)),
+                    meter,
+                    waveform_meter,
+                    command_rx,
+                    event_tx,
+                    vad_config: VadAutoStopConfig {
+                        enabled: true,
+                        auto_stop: true,
+                        ..Default::default()
+                    },
+                    auto_recover_enabled: Arc::new(AtomicBool::new(false)),
+                    desired_device_name: Arc::new(StdMutex::new(None)),
+                })
+            }),
+        });
+        if format == SampleFormat::I32 {
+            let handle = capture.capture_handle.take().unwrap();
+            assert!(matches!(
+                handle.thread_handle.join().unwrap(),
+                Err(AudioCaptureError::DeviceConfig(_))
+            ));
+            continue;
+        }
+        wait_for_audio(&capture);
+        let (duration, incomplete) = AudioCaptureBackend::recording_progress(&capture);
+        assert!(duration > 0.0);
+        // ALSA null is unpaced and may deliberately outrun the bounded queue.
+        // The native fixture must report that loss, not call it complete audio.
+        assert_eq!(
+            incomplete,
+            capture
+                .capture_fence
+                .failed(capture.buffer.lock().unwrap().recording_epoch)
+        );
+        AudioCaptureBackend::set_paused(&mut capture, true).unwrap();
+        assert!(!capture.is_recording());
+        AudioCaptureBackend::set_paused(&mut capture, false).unwrap();
+        assert!(capture.is_recording());
+        capture.stop_recording();
+        assert!(capture.capture_handle.is_none());
+        assert!(capture.buffer.lock().unwrap().captured_samples > 0);
+    }
+    for hot_mic in [false, true] {
+        let mut capture = AudioCapture::new();
+        capture
+            .set_capture_behavior(hot_mic, 0, false, None)
+            .unwrap();
+        capture.start_recording_session(1.0, None).unwrap();
+        wait_for_audio(&capture);
+        let (wav, stats) = capture
+            .stop_and_get_wav_with_diagnostics(AudioEncodeConfig::default())
+            .unwrap();
+        assert!(!wav.is_empty());
+        assert!(stats.stats.duration_secs > 0.0);
+        assert!(!capture.is_recording());
+        assert_eq!(capture.capture_handle.is_some(), hot_mic);
+        capture.stop();
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn undrained_callbacks_fail_capture_instead_of_accepting_incomplete_audio() {
+        use super::*;
+        let mut capture = AudioCapture::new();
+        capture.begin_recording_with_pre_roll(1.0);
+        let queue = Arc::new(ArrayQueue::new(1));
+        let pool = Arc::new(ArrayQueue::new(1));
+        pool.push(Vec::with_capacity(4)).unwrap();
+        let dispatch = CaptureDispatch {
+            queue: queue.clone(),
+            pool,
+            fence: capture.capture_fence.clone(),
+        };
+        dispatch.enqueue(&[0.1_f32], |sample| sample);
+        capture.stop_recording_with_drain_timeout(std::time::Duration::ZERO);
+        assert!(AudioCaptureBackend::recording_progress(&capture).1);
+        assert!(!capture.is_recording());
+        assert!(queue.pop().is_some());
+        // Available audio remains encodable for explicit recovery. The pipeline
+        // checks the independent incomplete flag after encoding, before upload.
+        assert!(capture.stop_and_get_wav().is_ok());
+        assert!(AudioCaptureBackend::recording_progress(&capture).1);
+        assert!(matches!(
+            AudioCaptureBackend::set_paused(&mut capture, true),
+            Err(AudioCaptureError::NotActive)
+        ));
+    }
+
     #[test]
     fn recovery_keeps_audio_beyond_the_memory_ring_and_explicit_discard_removes_it() {
         use super::*;
@@ -2231,7 +2369,7 @@ mod tests {
 
     fn spawn_test_capture_handle(
         on_stop: Option<Arc<AtomicBool>>,
-    ) -> (CaptureHandle, mpsc::Sender<AudioCaptureEvent>) {
+    ) -> (CaptureHandle, mpsc::Sender<(u64, AudioCaptureEvent)>) {
         let (command_tx, command_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let thread_handle = thread::spawn(move || {
@@ -2254,7 +2392,7 @@ mod tests {
 
     fn attach_running_capture(
         capture: &mut AudioCapture,
-    ) -> (mpsc::Sender<AudioCaptureEvent>, Arc<AtomicBool>) {
+    ) -> (mpsc::Sender<(u64, AudioCaptureEvent)>, Arc<AtomicBool>) {
         let stopped = Arc::new(AtomicBool::new(false));
         let (handle, event_tx) = spawn_test_capture_handle(Some(stopped.clone()));
         capture.capture_handle = Some(handle);
@@ -2587,11 +2725,12 @@ mod tests {
     fn test_poll_vad_event_returns_buffered_events_in_order() {
         let mut capture = AudioCapture::new();
         let (event_tx, _stopped) = attach_running_capture(&mut capture);
+        let epoch = capture.capture_fence.begin();
         event_tx
-            .send(AudioCaptureEvent::SpeechStart)
+            .send((epoch, AudioCaptureEvent::SpeechStart))
             .expect("test event send should succeed");
         event_tx
-            .send(AudioCaptureEvent::SpeechEnd)
+            .send((epoch, AudioCaptureEvent::SpeechEnd))
             .expect("test event send should succeed");
 
         assert!(matches!(
@@ -2603,6 +2742,180 @@ mod tests {
             Some(AudioCaptureEvent::SpeechEnd)
         ));
         assert!(capture.poll_vad_event().is_none());
+    }
+
+    #[test]
+    fn stale_vad_events_cannot_stop_a_new_recording_or_a_paused_capture() {
+        let mut capture = AudioCapture::new();
+        assert!(capture.poll_vad_event().is_none());
+        let (event_tx, _stopped) = attach_running_capture(&mut capture);
+        let previous = capture.capture_fence.begin();
+        event_tx
+            .send((previous, AudioCaptureEvent::SpeechEnd))
+            .unwrap();
+        capture.capture_fence.stop();
+        assert!(capture.poll_vad_event().is_none());
+        let current = capture.capture_fence.begin();
+        event_tx.send((0, AudioCaptureEvent::SpeechEnd)).unwrap();
+        event_tx
+            .send((previous, AudioCaptureEvent::SpeechEnd))
+            .unwrap();
+        event_tx
+            .send((current, AudioCaptureEvent::SpeechStart))
+            .unwrap();
+        assert!(matches!(
+            capture.poll_vad_event(),
+            Some(AudioCaptureEvent::SpeechStart)
+        ));
+        assert!(capture.poll_vad_event().is_none());
+    }
+
+    #[test]
+    fn vad_queue_preserves_epoch_audio_and_reclaims_buffers_when_consumers_close() {
+        let pool = ArrayQueue::new(1);
+        pool.push(Vec::with_capacity(4)).unwrap();
+        let (tx, rx) = mpsc::channel();
+        enqueue_vad_chunk(&tx, &pool, 7, &[0.25, 0.75, -0.5, 0.5], 2);
+        let (epoch, mut samples) = rx.try_recv().unwrap();
+        assert_eq!(epoch, 7);
+        assert_eq!(samples, [0.5, 0.0]);
+        enqueue_vad_chunk(&tx, &pool, 9, &[1.0], 1);
+        assert!(rx.try_recv().is_err());
+        samples.clear();
+        pool.push(samples).unwrap();
+        drop(rx);
+        enqueue_vad_chunk(&tx, &pool, 11, &[1.0], 1);
+        assert_eq!(pool.len(), 1);
+        assert!(pool.pop().unwrap().is_empty());
+        let (tx, rx) = mpsc::channel();
+        forward_vad_events(
+            &tx,
+            13,
+            vec![
+                VadEvent::None,
+                VadEvent::SpeechStart {
+                    pre_roll: Vec::new(),
+                },
+                VadEvent::SpeechEnd,
+            ],
+        );
+        let (epoch, event) = rx.try_recv().unwrap();
+        assert_eq!(epoch, 13);
+        assert!(matches!(event, AudioCaptureEvent::SpeechStart));
+        let (epoch, event) = rx.try_recv().unwrap();
+        assert_eq!(epoch, 13);
+        assert!(matches!(event, AudioCaptureEvent::SpeechEnd));
+        assert!(rx.try_recv().is_err());
+        drop(rx);
+        forward_vad_events(&tx, 15, vec![VadEvent::SpeechEnd]);
+    }
+
+    #[test]
+    fn capture_workers_are_joined_when_startup_fails_even_with_vad_enabled() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let (vad_tx, vad_rx) = mpsc::channel();
+        let producer = vad_tx.clone();
+        let (started, ready) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut started = Some(started);
+            while !stopped.load(Ordering::Relaxed) {
+                thread::yield_now();
+                if let Some(started) = started.take() {
+                    started.send(()).unwrap();
+                }
+            }
+            producer.send((7, vec![0.25])).unwrap();
+        });
+        // Exercise shutdown of an already-running worker, not a scheduling
+        // accident where the stop flag was set before its first instruction.
+        ready.recv().unwrap();
+        let received = Arc::new(StdMutex::new(Vec::new()));
+        let final_audio = received.clone();
+        let vad = thread::spawn(move || {
+            while let Ok(chunk) = vad_rx.recv() {
+                final_audio.lock().unwrap().push(chunk);
+            }
+        });
+        let workers = CaptureWorkers {
+            stop: stop.clone(),
+            worker: Some(worker),
+            vad: Some(vad),
+            vad_sender: Some(vad_tx),
+        };
+        drop(workers);
+        assert!(stop.load(Ordering::Relaxed));
+        assert_eq!(*received.lock().unwrap(), [(7, vec![0.25])]);
+        // Disabled VAD and already-retired workers also have an idempotent exit.
+        drop(CaptureWorkers {
+            stop,
+            worker: None,
+            vad: None,
+            vad_sender: None,
+        });
+    }
+
+    #[test]
+    fn vad_processing_rejects_stale_audio_and_resets_each_recording() {
+        let fence = CaptureFence::default();
+        let mut processor = VadFrameProcessor::new(VadConfig::default(), 16000);
+        let mut processor_epoch = 0;
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            0,
+            &[0.0; 160]
+        )
+        .is_empty());
+        assert_eq!(processor_epoch, 0);
+        let first = fence.begin();
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            first,
+            &[0.0; 80]
+        )
+        .is_empty());
+        assert_eq!(processor_epoch, first);
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            first,
+            &[0.0; 80]
+        )
+        .is_empty());
+        fence.stop();
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            first,
+            &[0.0; 160]
+        )
+        .is_empty());
+        let second = fence.begin();
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            first,
+            &[1.0; 160]
+        )
+        .is_empty());
+        assert_eq!(processor_epoch, first);
+        assert!(process_owned_vad_chunk(
+            &mut processor,
+            &mut processor_epoch,
+            &fence,
+            second,
+            &[0.0; 160]
+        )
+        .is_empty());
+        assert_eq!(processor_epoch, second);
+        assert!(!processor.is_speaking());
     }
 
     #[test]

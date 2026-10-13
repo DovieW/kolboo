@@ -844,6 +844,7 @@ describe("settings contract: Rust defaults vs TS getSettings", () => {
 		};
 
 		const sample: AvailableProvidersResponse = {
+			live_text_insertion_supported: true,
 			stt: [provider],
 			llm: [provider],
 			ocr: { available: true, reason: null },

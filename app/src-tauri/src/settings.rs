@@ -31,6 +31,15 @@ pub const WINDOWS_CLIPBOARD_FALLBACK_FOR_CONTEXT_CAPTURE_KEY: &str =
 // Network / proxy settings (stored in settings.json)
 // ============================================================================
 
+/// Input transport is independent of preview and text-insertion preferences.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SttInputMode {
+    #[default]
+    Auto,
+    AfterRecording,
+}
+
 /// Proxy mode for outgoing HTTP requests.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -191,6 +200,7 @@ pub enum HotkeyAction {
     Retry,
     QuickAskHold,
     QuickAskToggle,
+    ShowWindow,
 }
 
 /// Card-based hotkey entry (stored in settings.json).
@@ -382,6 +392,12 @@ impl CleanupPromptSectionsSetting {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewriteProgramPromptProfile {
+    /// Atomic per-action choices. An absent action retains legacy inheritance.
+    #[serde(
+        default,
+        deserialize_with = "crate::model_selection::deserialize_selections"
+    )]
+    pub model_selections: crate::model_selection::ModelSelections,
     pub id: String,
     pub name: String,
     #[serde(
@@ -431,6 +447,8 @@ pub struct RewriteProgramPromptProfile {
     pub stt_model: Option<String>,
     #[serde(default)]
     pub stt_language: Option<String>,
+    #[serde(default)]
+    pub stt_input_mode: Option<SttInputMode>,
     #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]
@@ -542,6 +560,11 @@ pub fn filter_enabled_rewrite_profiles(
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RewritePreset {
+    #[serde(
+        default,
+        deserialize_with = "crate::model_selection::deserialize_selections"
+    )]
+    pub model_selections: crate::model_selection::ModelSelections,
     #[serde(default)]
     pub id: String,
     #[serde(default)]
@@ -574,6 +597,8 @@ pub struct RewritePreset {
     pub stt_model: Option<String>,
     #[serde(default)]
     pub stt_language: Option<String>,
+    #[serde(default)]
+    pub stt_input_mode: Option<SttInputMode>,
     #[serde(default)]
     pub stt_timeout_seconds: Option<f64>,
     #[serde(default)]

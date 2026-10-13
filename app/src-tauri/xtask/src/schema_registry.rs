@@ -30,6 +30,10 @@ fn gen_export_audio_capture_diagnostics_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AudioCaptureDiagnostics)
 }
 
+fn gen_export_update_status_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::UpdateStatus)
+}
+
 fn gen_export_audio_level_stats_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::AudioLevelStats)
 }
@@ -44,6 +48,22 @@ fn gen_export_available_providers_response_schema() -> RootSchema {
 
 fn gen_export_custom_provider_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::CustomProvider)
+}
+
+fn gen_export_model_selection_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::ModelSelection)
+}
+
+fn gen_export_model_action_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::ModelAction)
+}
+
+fn gen_export_stt_input_mode_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::SttInputMode)
+}
+
+fn gen_export_model_settings_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::LoadedModelSettings)
 }
 
 fn gen_export_cache_router_embeddings_response_schema() -> RootSchema {
@@ -124,6 +144,10 @@ fn gen_export_llm_complete_response_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::LlmCompleteResponse)
 }
 
+fn gen_export_llm_complete_args_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::LlmCompleteArgs)
+}
+
 fn gen_export_llm_provider_info_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::LlmProviderInfo)
 }
@@ -186,6 +210,10 @@ fn gen_export_pipeline_routing_started_schema() -> RootSchema {
 
 fn gen_export_pipeline_state_changed_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::PipelineStateEvent)
+}
+
+fn gen_export_stt_partial_transcript_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::SttPartialTranscriptPayload)
 }
 
 fn gen_export_pipeline_transcript_ready_schema() -> RootSchema {
@@ -285,6 +313,7 @@ fn gen_export_windows_internet_proxy_settings_schema() -> RootSchema {
 }
 
 pub(crate) const SCHEMAS: &[SchemaSpec] = &[
+    schema_spec!("update-status.schema.json", "UpdateStatus", gen_export_update_status_schema),
     SchemaSpec::new("license-state.schema.json", "LicenseState", || schemars::schema_for!(kolboo_lib::LicenseState)),
     schema_spec!(
         "audio-capture-diagnostics.schema.json",
@@ -307,6 +336,10 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         gen_export_available_providers_response_schema
     ),
     schema_spec!("custom-provider.schema.json", "CustomProvider", gen_export_custom_provider_schema),
+    schema_spec!("model-selection.schema.json", "ModelSelection", gen_export_model_selection_schema),
+    schema_spec!("model-action.schema.json", "ModelAction", gen_export_model_action_schema),
+    schema_spec!("stt-input-mode.schema.json", "SttInputMode", gen_export_stt_input_mode_schema),
+    schema_spec!("model-settings.schema.json", "LoadedModelSettings", gen_export_model_settings_schema),
     schema_spec!(
         "cache-router-embeddings-response.schema.json",
         "CacheRouterEmbeddingsResponse",
@@ -408,6 +441,11 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         gen_export_llm_complete_response_schema
     ),
     schema_spec!(
+        "llm-complete-args.schema.json",
+        "LlmCompleteArgs",
+        gen_export_llm_complete_args_schema
+    ),
+    schema_spec!(
         "llm-provider-info.schema.json",
         "LlmProviderInfo",
         gen_export_llm_provider_info_schema
@@ -481,6 +519,11 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "pipeline-routing-started.schema.json",
         stringify!(kolboo_lib::events::EVENT_PIPELINE_ROUTING_STARTED),
         gen_export_pipeline_routing_started_schema
+    ),
+    schema_spec!(
+        "stt-partial-transcript.schema.json",
+        "SttPartialTranscriptPayload",
+        gen_export_stt_partial_transcript_schema
     ),
     schema_spec!(
         "pipeline-state-changed.schema.json",

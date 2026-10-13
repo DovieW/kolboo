@@ -1,3 +1,4 @@
+import { ActionModelPicker } from "../../ActionModelPicker";
 import {
 	Accordion,
 	ActionIcon,
@@ -20,13 +21,13 @@ import type {
 	RewriteProgramPromptProfile,
 } from "../../../lib/tauri";
 import { llmAPI } from "../../../lib/tauri";
+import { resolveModelPreference } from "../../../lib/modelSelection";
 import { HintSelect } from "../../HintSelect";
 import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 import { SettingsInheritanceIndicator } from "../SettingsInheritance";
 
 type LlmOption = { value: string; label: string };
-type LlmOptionGroup = { group: string; items: LlmOption[] };
 
 type Mutation<Variables> = {
 	mutate: (variables: Variables, options?: { onSuccess?: () => void }) => void;
@@ -53,8 +54,6 @@ export function QuickAskPanel({
 	localProfileQuickAskActiveWindowOcrMode,
 	quickAskActiveWindowOcrModeInheriting,
 	quickAskIncludeClipboardContextInheriting,
-	quickAskProviderInheriting,
-	quickAskModelInheriting,
 	quickAskOpenAiReasoningEffortInheriting,
 	quickAskGeminiThinkingLevelInheriting,
 	quickAskGeminiThinkingBudgetInheriting,
@@ -70,7 +69,6 @@ export function QuickAskPanel({
 	localProfileQuickAskGeminiThinkingBudget,
 	localProfileQuickAskAnthropicThinkingBudget,
 	localQuickAskSystemPrompt,
-	quickAskModelOptions,
 	selectedQuickAskModelForUi,
 	quickAskOpenAiThinkingOptions,
 	quickAskGeminiThinkingLevelOptions,
@@ -81,8 +79,6 @@ export function QuickAskPanel({
 	supportsQuickAskGeminiThinkingBudget,
 	supportsQuickAskAnthropicThinkingBudget,
 	quickAskModelForThinking,
-	llmProviderOptions,
-	llmProviderDisabled,
 	updateQuickAskIncludeSelectedText,
 	updateQuickAskConversationHistoryEnabled,
 	updateQuickAskConversationHistoryCount,
@@ -94,8 +90,6 @@ export function QuickAskPanel({
 	updateQuickAskDismissMode,
 	setQuickAskIncludeClipboardContextInheriting,
 	setQuickAskActiveWindowOcrModeInheriting,
-	setQuickAskProviderInheriting,
-	setQuickAskModelInheriting,
 	setQuickAskOpenAiReasoningEffortInheriting,
 	setQuickAskGeminiThinkingLevelInheriting,
 	setQuickAskGeminiThinkingBudgetInheriting,
@@ -104,19 +98,14 @@ export function QuickAskPanel({
 	setQuickAskDismissModeInheriting,
 	setLocalProfileQuickAskIncludeClipboardContext,
 	setLocalProfileQuickAskActiveWindowOcrMode,
-	setLocalProfileQuickAskProvider,
-	setLocalProfileQuickAskModel,
 	setLocalProfileQuickAskDismissMode,
 	setLocalProfileQuickAskOpenAiReasoningEffort,
 	setLocalProfileQuickAskGeminiThinkingLevel,
 	setLocalProfileQuickAskGeminiThinkingBudget,
 	setLocalProfileQuickAskAnthropicThinkingBudget,
 	setLocalQuickAskSystemPrompt,
-	handleDefaultQuickAskProviderChange,
-	handleDefaultQuickAskModelChange,
 	openDisableOverrideDialog,
 	saveProfileMetadata,
-	getLlmModelOptionsForProvider,
 	isOpenAiReasoningEffort,
 	isGeminiThinkingLevel,
 	openAiDefaultReasoningEffortForModel,
@@ -152,8 +141,6 @@ export function QuickAskPanel({
 	localProfileQuickAskActiveWindowOcrMode: ActiveWindowOcrMode;
 	quickAskActiveWindowOcrModeInheriting: boolean;
 	quickAskIncludeClipboardContextInheriting: boolean;
-	quickAskProviderInheriting: boolean;
-	quickAskModelInheriting: boolean;
 	quickAskOpenAiReasoningEffortInheriting: boolean;
 	quickAskGeminiThinkingLevelInheriting: boolean;
 	quickAskGeminiThinkingBudgetInheriting: boolean;
@@ -169,7 +156,6 @@ export function QuickAskPanel({
 	localProfileQuickAskGeminiThinkingBudget: string;
 	localProfileQuickAskAnthropicThinkingBudget: string;
 	localQuickAskSystemPrompt: string;
-	quickAskModelOptions: LlmOption[];
 	selectedQuickAskModelForUi: string | null;
 	quickAskOpenAiThinkingOptions: LlmOption[];
 	quickAskGeminiThinkingLevelOptions: LlmOption[];
@@ -180,8 +166,6 @@ export function QuickAskPanel({
 	supportsQuickAskGeminiThinkingBudget: boolean;
 	supportsQuickAskAnthropicThinkingBudget: boolean;
 	quickAskModelForThinking: string | null;
-	llmProviderOptions: LlmOptionGroup[];
-	llmProviderDisabled: boolean;
 	updateQuickAskIncludeSelectedText: Mutation<boolean>;
 	updateQuickAskConversationHistoryEnabled: Mutation<boolean>;
 	updateQuickAskConversationHistoryCount: Mutation<number>;
@@ -195,8 +179,6 @@ export function QuickAskPanel({
 		SetStateAction<boolean>
 	>;
 	setQuickAskActiveWindowOcrModeInheriting: Dispatch<SetStateAction<boolean>>;
-	setQuickAskProviderInheriting: Dispatch<SetStateAction<boolean>>;
-	setQuickAskModelInheriting: Dispatch<SetStateAction<boolean>>;
 	setQuickAskOpenAiReasoningEffortInheriting: Dispatch<SetStateAction<boolean>>;
 	setQuickAskGeminiThinkingLevelInheriting: Dispatch<SetStateAction<boolean>>;
 	setQuickAskGeminiThinkingBudgetInheriting: Dispatch<SetStateAction<boolean>>;
@@ -211,8 +193,6 @@ export function QuickAskPanel({
 	setLocalProfileQuickAskActiveWindowOcrMode: Dispatch<
 		SetStateAction<ActiveWindowOcrMode>
 	>;
-	setLocalProfileQuickAskProvider: Dispatch<SetStateAction<string | null>>;
-	setLocalProfileQuickAskModel: Dispatch<SetStateAction<string | null>>;
 	setLocalProfileQuickAskDismissMode: Dispatch<
 		SetStateAction<QuickAskDismissMode>
 	>;
@@ -225,14 +205,11 @@ export function QuickAskPanel({
 		SetStateAction<string>
 	>;
 	setLocalQuickAskSystemPrompt: Dispatch<SetStateAction<string>>;
-	handleDefaultQuickAskProviderChange: (value: string) => void;
-	handleDefaultQuickAskModelChange: (value: string) => void;
 	openDisableOverrideDialog: (args: {
 		title: string;
 		onConfirm: () => void;
 	}) => void;
 	saveProfileMetadata: (next: Partial<RewriteProgramPromptProfile>) => void;
-	getLlmModelOptionsForProvider: (provider: string | null) => LlmOption[];
 	isOpenAiReasoningEffort: (value: unknown) => value is OpenAiReasoningEffort;
 	isGeminiThinkingLevel: (value: unknown) => value is GeminiThinkingLevel;
 	openAiDefaultReasoningEffortForModel: (model: string) => string;
@@ -449,7 +426,7 @@ export function QuickAskPanel({
 							<Select
 								data={[
 									{ value: "off", label: "Off" },
-									{ value: "auto", label: "Auto" },
+									{ value: "auto", label: "Always" },
 									{ value: "manual", label: "Manual" },
 								]}
 								value={localProfileQuickAskActiveWindowOcrMode}
@@ -549,159 +526,7 @@ export function QuickAskPanel({
 				</div>
 			</div>
 
-			<div className="settings-row">
-				<div>
-					<p className="settings-label">Quick Ask Provider</p>
-					<p className="settings-description">
-						AI service used to answer Quick Ask questions
-					</p>
-				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && quickAskProviderInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !quickAskProviderInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Ask Provider override?",
-										onConfirm: () => {
-											setQuickAskProviderInheriting(true);
-											setQuickAskModelInheriting(true);
-											setLocalProfileQuickAskProvider(
-												settings?.quick_ask_provider ??
-													settings?.llm_provider ??
-													null,
-											);
-											setLocalProfileQuickAskModel(
-												settings?.quick_ask_model ??
-													settings?.llm_model ??
-													null,
-											);
-											saveProfileMetadata({
-												quick_ask_provider: null,
-												quick_ask_model: null,
-											});
-										},
-									})
-								}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={llmProviderOptions}
-						value={effectiveQuickAskProvider}
-						onChange={(value) => {
-							if (!value) return;
-							if (isDefaultScope) {
-								handleDefaultQuickAskProviderChange(value);
-								return;
-							}
-
-							setQuickAskProviderInheriting(false);
-							setQuickAskModelInheriting(false);
-							setLocalProfileQuickAskProvider(value);
-							const models = getLlmModelOptionsForProvider(value);
-							const firstModel = models[0]?.value ?? null;
-							setLocalProfileQuickAskModel(firstModel);
-							saveProfileMetadata({
-								quick_ask_provider: value,
-								quick_ask_model: firstModel,
-							});
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={llmProviderDisabled}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
-			</div>
-
-			{quickAskModelOptions.length > 0 ? (
-				<div className="settings-row">
-					<div>
-						<p className="settings-label">Quick Ask Model</p>
-						<p className="settings-description">
-							LLM model used to answer Quick Ask questions.
-						</p>
-					</div>
-					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-						{!isDefaultScope && quickAskModelInheriting && (
-							<Tooltip label={inheritTooltip} withArrow>
-								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-							</Tooltip>
-						)}
-						{!isDefaultScope && !quickAskModelInheriting && (
-							<Tooltip
-								label="Disable override (inherit from Default)"
-								withArrow
-							>
-								<ActionIcon
-									variant="subtle"
-									color="gray"
-									size="sm"
-									onClick={() =>
-										openDisableOverrideDialog({
-											title: "Disable Quick Ask Model override?",
-											onConfirm: () => {
-												setQuickAskModelInheriting(true);
-												setLocalProfileQuickAskModel(
-													settings?.quick_ask_model ??
-														settings?.llm_model ??
-														null,
-												);
-												saveProfileMetadata({ quick_ask_model: null });
-											},
-										})
-									}
-								>
-									<RotateCcw size={14} style={{ opacity: 0.65 }} />
-								</ActionIcon>
-							</Tooltip>
-						)}
-						<Select
-							data={quickAskModelOptions}
-							value={selectedQuickAskModelForUi}
-							onChange={(value) => {
-								if (!value) return;
-								if (isDefaultScope) {
-									handleDefaultQuickAskModelChange(value);
-									return;
-								}
-
-								setQuickAskModelInheriting(false);
-								setLocalProfileQuickAskModel(value);
-								saveProfileMetadata({ quick_ask_model: value });
-							}}
-							placeholder="Select model"
-							withCheckIcon={false}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								},
-							}}
-						/>
-					</div>
-				</div>
-			) : null}
+			<div className="settings-row"><ActionModelPicker action="quick_ask" label="Quick Ask model" profileId={activeProfileId} /></div>
 
 			{supportsQuickAskOpenAiThinking && (
 				<div className="settings-row">
@@ -1442,6 +1267,9 @@ export function QuickAskPanel({
 
 											try {
 												const res = await llmAPI.complete({
+													action: "quick_ask",
+													profileId: activeProfileId,
+													modelSelection: resolveModelPreference("quick_ask", settings, isDefaultScope ? null : activeProfile).selection,
 													provider: effectiveQuickAskProvider,
 													model:
 														selectedQuickAskModelForUi ??

@@ -28,6 +28,7 @@ pub(super) struct SttResult {
 ///
 /// Returns the transcribed text and duration, or an error.
 /// If `timeout` is None, no timeout is applied (useful for test endpoints).
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_stt_transcription(
     stt_provider: Arc<dyn SttProvider>,
     wav_bytes: &[u8],
@@ -35,6 +36,7 @@ pub(super) async fn run_stt_transcription(
     timeout: Option<Duration>,
     cancel_token: &CancellationToken,
     log_prefix: &str,
+    upload_context: Option<&crate::stt::SttUploadContext>,
 ) -> Result<SttResult, PipelineError> {
     let format = AudioFormat::default();
     let wav = Arc::new(wav_bytes.to_vec());
@@ -44,7 +46,17 @@ pub(super) async fn run_stt_transcription(
             let provider = stt_provider.clone();
             let wav = wav.clone();
             let format = format.clone();
-            async move { provider.transcribe_detailed(wav.as_slice(), &format).await }
+            let upload_context = upload_context.cloned();
+            async move {
+                match upload_context {
+                    Some(context) => {
+                        provider
+                            .transcribe_upload(wav.as_slice(), &format, &context)
+                            .await
+                    }
+                    None => provider.transcribe_detailed(wav.as_slice(), &format).await,
+                }
+            }
         })
         .await
     };
@@ -225,6 +237,7 @@ mod tests {
             Some(Duration::from_secs(1)),
             &cancel_token,
             "test retry telemetry",
+            None,
         )
         .await
         .expect("STT should eventually succeed");
@@ -250,6 +263,7 @@ mod tests {
             Some(Duration::from_secs(1)),
             &cancel_token,
             "test non retryable",
+            None,
         )
         .await;
 
@@ -275,6 +289,7 @@ mod tests {
             None,
             &cancel_token,
             "test no timeout",
+            None,
         )
         .await
         .expect("no-timeout STT should complete");
@@ -297,6 +312,7 @@ mod tests {
             Some(Duration::from_millis(1)),
             &cancel_token,
             "test timeout",
+            None,
         )
         .await;
 
@@ -319,6 +335,7 @@ mod tests {
             Some(Duration::ZERO),
             &cancel_token,
             "test cancellation",
+            None,
         )
         .await;
 

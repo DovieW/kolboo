@@ -113,12 +113,12 @@
 			"docs/Dev Docs/DESKTOP_QOL_BATCH.md"
 		],
 		"lines": [
-			640, 641, 642, 643, 644, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787,
-			809, 810, 811, 812, 813, 814, 815, 816, 817, 818
+			642, 643, 644, 645, 646, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789,
+			811, 812, 813, 814, 815, 816, 817, 818, 819, 820
 		],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "d28e45c5829e687b5661c2dc583dc77dafbcc27ffac4f68cf6fbc286771b33a4"
+		"sha256": "2178d48e55b2535bbd5ee8967781e98117105df775e8fefb55b5635783cf9cad"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",
@@ -135,16 +135,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Re-reviewed and approved 2026-09-30: concrete Wry live-output dispatch selects a blocking Linux/Windows worker or the macOS main thread. Streaming and cancellation semantics are tested without an OS clipboard; actual key delivery remains native acceptance. No Wayland live partial injection is enabled.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/stt/streaming.rs",
 			"app/src-tauri/src/text/tests/output_ownership.rs"
 		],
-		"lines": [1360, 1361, 1362, 1363, 1364, 1365, 1366, 1367, 1369, 1373, 1374],
+		"lines": [1502, 2057],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "77f3a9e302b06a7f3ac0155cbd1a1165809e9430fc6ecccf382082db40d28d55"
+		"sha256": "8aceb03432672817d797629d8e00c4e3b69ad40ea6ebdeec799586fcfee50ca3"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",
@@ -229,15 +229,6 @@
 		"sha256": "1447d466ced5a687a8b8dcb8d8737f00249041309da061042b1ea41a89aff47d"
 	},
 	{
-		"filePath": "app/src-tauri/src/shortcuts/mod.rs",
-		"reason": "Window-manager hide callback; tested may_hide predicate prevents active recording from disappearing.",
-		"evidence": ["app/src-tauri/src/overlay/mod.rs"],
-		"lines": [497, 498, 499],
-		"functions": [],
-		"instantiations": [],
-		"sha256": "3a8df3d94cd1ab316b43dbd4fd1590a66dacfc0d489ee2ce305761834f916266"
-	},
-	{
 		"filePath": "app/src-tauri/src/shortcuts/paste_last.rs",
 		"reason": "Re-reviewed and approved 2026-09-30: native shortcut callback starts asynchronous app-owned output, requiring Wry/history stores. Release debounce, profile resolution, portal reuse and keyboard chords are deterministically tested.",
 		"evidence": [
@@ -283,27 +274,6 @@
 		"sha256": "f12141cd96fc8bcbd02d30fccc61d774ccafd01f48e5905bb2dbd741fe94667f"
 	},
 	{
-		"filePath": "app/src-tauri/src/text/inject.rs",
-		"reason": "Re-reviewed and approved 2026-09-30: real Wry state capture, worker/main-thread dispatch, OS clipboard and native keyboard calls cannot safely execute in headless tests. Actual pipeline leases, portal permission/delivery lifecycle, chord cleanup, fallback policy and clipboard barriers are tested. No exception covers the lease comparison or controller protocol bodies.",
-		"evidence": [
-			"app/src-tauri/src/text/tests/key_inject.rs",
-			"app/src-tauri/src/text/clipboard/tests.rs",
-			"app/src-tauri/src/platform_capabilities.rs",
-			"app/src-tauri/src/text/tests/output_ownership.rs",
-			"app/src-tauri/src/text/tests/wayland_input.rs"
-		],
-		"lines": [
-			45, 46, 47, 48, 49, 50, 51, 52, 53, 162, 163, 164, 165, 166, 167, 168,
-			169, 170, 172, 175, 176, 177, 178, 179, 180, 181, 182, 190, 191, 192, 193,
-			194, 195, 196, 197, 199, 201, 202, 203, 204, 205, 217, 225, 226, 227, 228,
-			229, 230, 231, 232, 233, 236, 237, 238, 239, 240, 241, 242, 243, 244, 246,
-			247, 248, 280, 288, 341, 360, 361, 365, 366, 372, 377
-		],
-		"functions": [45, 48, 51, 175, 194, 225, 232, 236, 248, 361],
-		"instantiations": [],
-		"sha256": "c1eb8504d80870ebff243a3faedc7eaad408f04fe592b3537b093015a1d7f1be"
-	},
-	{
 		"filePath": "app/src-tauri/src/adapters/media_controls.rs",
 		"reason": "Approved 2026-09-30: native media dispatch requires Wry and real keyboard input. The tested portal controller never prompts for optional media, reuses an approved grant and releases keys after failure; recording-side native invocation remains manual acceptance.",
 		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs"],
@@ -326,10 +296,13 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/text/mod.rs",
-		"reason": "Approved 2026-09-30: only the target-gated module declaration has no executable coverage records. The declared portal implementation is measured and tested; this is not a module-body exclusion.",
-		"evidence": ["app/src-tauri/src/text/tests/wayland_input.rs"],
-		"unmeasuredLines": [5, 6],
-		"sha256": "348724972015d3e51f1c07e6b10eca3d51cdaed4669c360fb1b6340f53c1fa7b"
+		"reason": "Re-reviewed and explicitly approved 2026-10-12: only the non-executable live_target module declaration and shifted previously approved Linux portal declarations lack coverage records. Both module bodies have measured executable coverage and deterministic/native tests. No implementation or platform behavior is exempted by this declaration snapshot.",
+		"evidence": [
+			"app/src-tauri/src/text/tests/wayland_input.rs",
+			"app/src-tauri/src/text/tests/live_target.rs"
+		],
+		"unmeasuredLines": [4, 6, 7],
+		"sha256": "577cf9b8621ca4b1a2da58f63b4e32a2ac23488782a6329931af6085d28e9e79"
 	},
 	{
 		"filePath": "app/src-tauri/src/text/selection_probe.rs",
@@ -415,5 +388,66 @@
 		"unmeasuredLines": [
 			1, 280, 344, 354, 355, 356, 357, 358, 359, 360, 361, 375, 376, 380
 		]
+	},
+	{
+		"filePath": "app/src-tauri/src/audio_capture.rs",
+		"reason": "Explicitly approved 2026-10-12: only forwarding the owned CaptureDispatch at two cold native microphone-watchdog rebuild/rebind calls is exempt. F32/I16/U16 callbacks, unsupported-format startup cleanup, capture/VAD epoch ownership, queue failure and worker shutdown execute in deterministic and isolated null-PCM tests. No callback, provider protocol or frontend implementation is waived; real hot-plug/stall recovery remains native acceptance.",
+		"evidence": [
+			"app/src-tauri/src/audio_capture/dispatch.rs",
+			"app/src-tauri/src/audio_capture.rs",
+			"app/src-tauri/src/bootstrap/main_window/tests.rs",
+			"docs/Dev Docs/TESTING.md"
+		],
+		"lines": [2117, 2163],
+		"functions": [],
+		"instantiations": [],
+		"sha256": "1ec0992acbfbd31d15b27108bd3c44e058372cc7f9f73675a6cfc386d3d5dc86"
+	},
+	{
+		"filePath": "app/src-tauri/src/stt/mod.rs",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after adding cfg(test) to the fixture-only File variant: only the same 21 named, unused compiler-generated default-method/vtable copies for cfg(test) fixture types are exempt. Definitions shifted by three lines; names and scope are unchanged. The shared upload and credential-renewal definitions and every real adapter's changed executable code are measured. Exact record names prevent a new untested production adapter instance from inheriting this waiver; a compiler/name change requires review.",
+		"evidence": [
+			"app/src-tauri/src/stt/tests/managed_selection.rs",
+			"app/src-tauri/src/stt/elevenlabs/tests/realtime_contract.rs",
+			"app/src-tauri/src/stt/speechmatics/tests/realtime_contract.rs",
+			"app/src-tauri/src/pipeline/tests.rs",
+			"app/src-tauri/src/commands/licensing/tests/native.rs"
+		],
+		"lines": [],
+		"functions": [],
+		"functionInstances": [
+			{
+				"line": 205,
+				"names": [
+					"_RNvYNtNCNvNtNtNtCsdl1dz0YQn0P_10kolboo_lib8commands9licensing12native_tests48owned_stt_refresh_preserves_gateway_and_identity011CannotRenewNtNtBe_3stt11SttProvider17transcribe_uploadBe_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt19simulated_streaming5tests22CumulativeFakeProviderNtB8_11SttProvider17transcribe_uploadBa_",
+					"_RNvYNtNCNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests18native_live_output08ProviderNtNtBc_3stt11SttProvider17transcribe_uploadBc_",
+					"_RNvYNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests15MockSttProviderNtNtB8_3stt11SttProvider17transcribe_uploadB8_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline21stt_provider_resolver5tests15FakeSttProviderNtNtBa_3stt11SttProvider17transcribe_uploadBa_",
+					"_RNvYNtNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests25native_streaming_consumer17StreamingProviderNtNtBa_3stt11SttProvider17transcribe_uploadBa_",
+					"_RNvYNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt5tests12MockProviderNtB6_11SttProvider17transcribe_uploadB8_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests13FlakyProviderNtNtBa_3stt11SttProvider17transcribe_uploadBa_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests15DelayedProviderNtNtBa_3stt11SttProvider17transcribe_uploadBa_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests19ConfigErrorProviderNtNtBa_3stt11SttProvider17transcribe_uploadBa_"
+				]
+			},
+			{
+				"line": 215,
+				"names": [
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt19simulated_streaming5tests22CumulativeFakeProviderNtB8_11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNCNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests18native_live_output08ProviderNtNtBc_3stt11SttProvider26with_renewed_managed_tokenBc_",
+					"_RNvYNtNCNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5testss_82meeting_uploads_receive_owned_job_context_and_completed_chunks_are_not_resubmitted011UploadedJobNtNtBc_3stt11SttProvider26with_renewed_managed_tokenBc_",
+					"_RNvYNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests15MockSttProviderNtNtB8_3stt11SttProvider26with_renewed_managed_tokenB8_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline21stt_provider_resolver5tests15FakeSttProviderNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests25native_streaming_consumer17StreamingProviderNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests29native_completed_upload_retry3JobNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt5tests12MockProviderNtB6_11SttProvider26with_renewed_managed_tokenB8_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests13FlakyProviderNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests15DelayedProviderNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_",
+					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline8stt_flow5tests19ConfigErrorProviderNtNtBa_3stt11SttProvider26with_renewed_managed_tokenBa_"
+				]
+			}
+		],
+		"sha256": "92b34f3cb748e3ae7f7b9d60fa2e5fbc425f65d528337932ff19908d3943637d"
 	}
 ]

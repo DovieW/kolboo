@@ -5,6 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { useModelNavigation } from "./components/ModelNavigation";
 
 const resolveTelemetryDisclosure = vi.hoisted(() =>
 	vi.fn(async () => undefined),
@@ -29,7 +30,13 @@ vi.mock("./components/LogsView", () => ({
 vi.mock("./components/MicStatusCard", () => ({ MicStatusCard: () => null }));
 vi.mock("./components/RecordingBar", () => ({ RecordingBar: () => null }));
 vi.mock("./components/settings", () => ({
-	SettingsShell: () => <div>Settings page</div>,
+	SettingsShell: ({navigationRequest}:{navigationRequest:{tab:string;id:number}|null}) => {
+		const navigation=useModelNavigation();
+		return <div>Settings page <output>{navigationRequest?.tab}:{navigationRequest?.id}</output>
+			{["openai","ollama","whisper-server","local-whisper"].map(provider=><button key={provider} type="button" onClick={()=>navigation?.setup({source:"byok",provider_id:provider})}>Set up {provider}</button>)}
+			<button type="button" onClick={()=>navigation?.account()}>Model account access</button>
+		</div>;
+	},
 }));
 vi.mock("./components/settings/SettingsGuideOverlay", () => ({
 	SettingsGuideOverlay: () => null,
@@ -89,12 +96,6 @@ vi.mock("./lib/tauri", () => ({
 vi.mock("./lib/tauri/events", () => ({
 	listenTyped: vi.fn(async () => vi.fn()),
 }));
-vi.mock("./lib/updates", () => ({
-	checkSignedUpdateVersion: vi.fn(),
-	compareSemver: vi.fn(() => 0),
-	installSignedUpdate: vi.fn(),
-	signedUpdaterEnabled: false,
-}));
 
 let host: HTMLDivElement;
 let root: Root;
@@ -117,6 +118,7 @@ beforeEach(async () => {
 	);
 });
 afterEach(async () => {
+	vi.unstubAllEnvs();
 	await act(async () => root.unmount());
 	client.clear();
 	host.remove();
@@ -130,6 +132,25 @@ async function navigate(label: string) {
 }
 
 describe("Desktop navigation", () => {
+	it("routes picker setup to keys/local endpoints and opens account guidance without changing a model",async()=>{
+		await navigate("Settings");
+		for(const [index,provider] of ["openai","ollama","whisper-server","local-whisper"].entries()) {
+			const button=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent===`Set up ${provider}`);
+			expect(button).not.toBeUndefined();await act(async()=>button?.click());
+			expect(host.querySelector("output")?.textContent).toBe(`${provider==="openai"?"api-keys":"ai"}:${index+1}`);
+		}
+		const account=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Model account access");
+		await act(async()=>account?.click());expect(host.querySelector("main")?.textContent).toContain("Account page");
+	});
+	it("describes the packaged update policy without a disruptive install button", async () => {
+		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
+			.toBe("View releases and download an update.");
+		vi.stubEnv("VITE_SIGNED_UPDATER_ENABLED", "true");
+		await navigate("Settings");
+		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
+			.toBe("Updates download automatically and install when you quit Kolboo.");
+		expect(host.querySelector("footer a")?.getAttribute("target")).toBe("_blank");
+	});
 	it("routes the linked analytics choice to an enabled disclosure resolution", async () => {
 		await act(async () =>
 			[...host.querySelectorAll("button")]

@@ -13,6 +13,9 @@ const MAX_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 /// cannot be removed, and retain its mode until the audio has been removed.
 /// Missing files are harmless so interrupted cleanup can be retried.
 pub fn discard(path: &Path) -> io::Result<()> {
+    let _job_guards = crate::stt::yiddishlabs::delete_owned_checkpoints(path).map_err(|_| {
+        io::Error::other("Could not remove protected upload receipts; audio is retained")
+    })?;
     for file in [
         path.with_extension("transcripts"),
         path.with_extension("progress"),
@@ -235,6 +238,11 @@ mod tests {
         std::fs::create_dir(path.with_extension("transcripts")).unwrap();
         let unrelated = dir.path().join("another.pcm");
         std::fs::write(&unrelated, b"other audio").unwrap();
+        let receipt = crate::stt::yiddishlabs::checkpoint_path(&path, false, b"audio", 0).unwrap();
+        std::fs::write(receipt.parent().unwrap().join("foreign.txt"), b"not owned").unwrap();
+        assert!(discard(&path).is_err());
+        assert!(path.exists());
+        std::fs::remove_file(receipt.parent().unwrap().join("foreign.txt")).unwrap();
         assert!(discard(&path).is_err());
         assert!(path.exists());
         assert!(path.with_extension("options.json").exists());

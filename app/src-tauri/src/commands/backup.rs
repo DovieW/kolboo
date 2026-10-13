@@ -138,21 +138,25 @@ pub(crate) fn import_settings_from_value(
     app: &AppHandle,
     value: serde_json::Value,
 ) -> CommandResult<()> {
-    let settings_obj = match value {
+    let mut settings_obj = match value {
         serde_json::Value::Object(o) => o,
         _ => return Err("Backup settings must be an object".to_string().into()),
     };
 
     let store = get_settings_store_or_err(app, SettingsReadMode::Cached)?;
 
-    for (k, v) in settings_obj {
-        if should_exclude_setting_key_from_backup(k.as_str()) {
-            continue;
-        }
-        store.set(k, v);
+    settings_obj.retain(|key, _| !should_exclude_setting_key_from_backup(key));
+    {
+        let _guard = crate::settings::patch::WRITE_LOCK
+            .lock()
+            .map_err(|_| CommandError::unknown("Settings write lock is unavailable"))?;
+        let deletes = crate::settings::patch::model_import_delete_keys(&settings_obj, store.keys());
+        crate::settings::patch::persist_settings_patch(&store, settings_obj, deletes, || {
+            store
+                .save()
+                .map_err(|_| CommandError::unknown("Imported settings could not be saved"))
+        })?;
     }
-
-    store.save().map_err(|e| e.to_string())?;
 
     // Seed any newly-added defaults (and migrate legacy secrets best-effort).
     let _ = crate::settings::defaults::ensure_default_settings(app);

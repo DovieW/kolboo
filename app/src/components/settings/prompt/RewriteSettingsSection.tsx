@@ -1,5 +1,5 @@
+import { ActionModelPicker } from "../../ActionModelPicker";
 import { Select, Switch, Text, Tooltip } from "@mantine/core";
-import type { ModelOption } from "../../../lib/modelOptions";
 import type { ActiveWindowOcrMode, AppSettings } from "../../../lib/tauri";
 import { HintSelect } from "../../HintSelect";
 import { HintSelectWithDefaultHint } from "../../HintSelectWithDefaultHint";
@@ -10,6 +10,7 @@ import { SettingsRow } from "../SettingsRow";
 const SELECT_DEFAULT = "default";
 
 type RewriteSettingsSectionProps = {
+	activeProfileId: string;
 	isDefaultScope: boolean;
 	inheritTooltip: string;
 	ocrProviderAvailable: boolean;
@@ -32,23 +33,8 @@ type RewriteSettingsSectionProps = {
 	onRewriteActiveWindowOcrModeChange: (mode: ActiveWindowOcrMode) => void;
 	onDisableRewriteActiveWindowOcrModeOverride: () => void;
 	// LLM provider
-	effectiveLlmProvider: string | null;
-	llmProviderOptions: Array<{
-		group: string;
-		items: Array<{ value: string; label: string }>;
-	}>;
-	isLlmProviderDisabled: boolean;
-	llmProviderInheriting: boolean;
-	onLlmProviderChange: (value: string | null) => void;
-	onDisableLlmProviderOverride: () => void;
 	// LLM model
-	llmModelOptions: ModelOption[];
-	llmModelInheriting: boolean;
-	localProfileLlmModel: string | null;
-	llmPricingLabel: string | null;
 	settings: AppSettings | undefined;
-	onLlmModelChange: (value: string | null) => void;
-	onDisableLlmModelOverride: () => void;
 	// OpenAI thinking
 	supportsOpenAiThinking: boolean;
 	openAiReasoningEffortInheriting: boolean;
@@ -84,15 +70,10 @@ type RewriteSettingsSectionProps = {
 	onAnthropicThinkingBudgetChange: (value: string | null) => void;
 	onDisableAnthropicThinkingBudgetOverride: () => void;
 	formatThinkingBudgetShort: (budget: number) => string;
-	managedAccessEnabled: boolean;
-	managedModelCompatible: boolean;
-	usingOwnKey: boolean;
-	ownKeyAvailable: boolean;
-	ownKeyConfigured: boolean;
-	onUseOwnKeyChange: (useOwnKey: boolean) => void;
 };
 
 export function RewriteSettingsSection({
+	activeProfileId,
 	isDefaultScope,
 	inheritTooltip,
 	ocrProviderAvailable,
@@ -115,20 +96,8 @@ export function RewriteSettingsSection({
 	onRewriteActiveWindowOcrModeChange,
 	onDisableRewriteActiveWindowOcrModeOverride,
 	// LLM provider
-	effectiveLlmProvider,
-	llmProviderOptions,
-	isLlmProviderDisabled,
-	llmProviderInheriting,
-	onLlmProviderChange,
-	onDisableLlmProviderOverride,
 	// LLM model
-	llmModelOptions,
-	llmModelInheriting,
-	localProfileLlmModel,
-	llmPricingLabel,
 	settings,
-	onLlmModelChange,
-	onDisableLlmModelOverride,
 	// OpenAI thinking
 	supportsOpenAiThinking,
 	openAiReasoningEffortInheriting,
@@ -161,12 +130,6 @@ export function RewriteSettingsSection({
 	onAnthropicThinkingBudgetChange,
 	onDisableAnthropicThinkingBudgetOverride,
 	formatThinkingBudgetShort,
-	managedAccessEnabled,
-	managedModelCompatible,
-	usingOwnKey,
-	ownKeyAvailable,
-	ownKeyConfigured,
-	onUseOwnKeyChange,
 }: RewriteSettingsSectionProps) {
 	const ocrModeDisabled = !ocrProviderAvailable;
 	const ocrModeDisabledTooltip =
@@ -265,7 +228,7 @@ export function RewriteSettingsSection({
 								<Select
 									data={[
 										{ value: "off", label: "Off" },
-										{ value: "auto", label: "Auto" },
+										{ value: "auto", label: "Always" },
 										{ value: "manual", label: "Manual" },
 									]}
 									value={localProfileRewriteActiveWindowOcrMode}
@@ -296,122 +259,7 @@ export function RewriteSettingsSection({
 				}
 			/>
 
-			{/* LLM Provider */}
-			<SettingsRow
-				label="Language Model Provider"
-				description="AI service for text formatting"
-				right={
-					<>
-						<SettingsInheritanceIndicator
-							isDefaultScope={isDefaultScope}
-							inheriting={llmProviderInheriting}
-							inheritTooltip={inheritTooltip}
-							onDisableOverride={onDisableLlmProviderOverride}
-						/>
-						<Select
-							data={llmProviderOptions}
-							value={effectiveLlmProvider}
-							onChange={onLlmProviderChange}
-							placeholder="Select provider"
-							withCheckIcon={false}
-							disabled={isLlmProviderDisabled}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								},
-							}}
-						/>
-					</>
-				}
-			/>
-
-			{/* LLM Model */}
-			{llmModelOptions.length > 0 ? (
-				<SettingsRow
-					label="Rewrite LLM Model"
-					description="LLM Model used to rewrite the transcription."
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={llmModelInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={onDisableLlmModelOverride}
-							/>
-							{llmPricingLabel ? (
-								<Text
-									size="xs"
-									c="dimmed"
-									style={{ whiteSpace: "nowrap", lineHeight: 1 }}
-								>
-									{llmPricingLabel}
-								</Text>
-							) : null}
-							<div
-								style={{
-									display: "flex",
-									flexDirection: "column",
-									alignItems: "flex-end",
-									gap: 6,
-								}}
-							>
-								<Select
-									data={llmModelOptions}
-									value={
-										isDefaultScope
-											? (settings?.llm_model ??
-												llmModelOptions[0]?.value ??
-												null)
-											: localProfileLlmModel
-									}
-									onChange={onLlmModelChange}
-									placeholder="Select model"
-									withCheckIcon={false}
-									styles={{
-										input: {
-											backgroundColor: "var(--bg-elevated)",
-											borderColor: "var(--border-default)",
-											color: "var(--text-primary)",
-											minWidth: 200,
-										},
-									}}
-								/>
-								{managedAccessEnabled && managedModelCompatible ? (
-									<>
-										<Switch
-											label="Use your own API key"
-											checked={usingOwnKey}
-											disabled={!ownKeyAvailable}
-											onChange={(event) =>
-												onUseOwnKeyChange(event.currentTarget.checked)
-											}
-											color="gray"
-											size="sm"
-										/>
-										{!ownKeyAvailable ? (
-											<Text size="xs" c="dimmed">
-												This model is available only through Kolboo Managed.
-											</Text>
-										) : usingOwnKey && !ownKeyConfigured ? (
-											<Text size="xs" c="yellow">
-												Add this provider's API key in Providers before use.
-											</Text>
-										) : null}
-									</>
-								) : managedAccessEnabled ? (
-									<Text size="xs" c="yellow">
-										This model is not available through Kolboo Managed. It
-										requires your own API key.
-									</Text>
-								) : null}
-							</div>
-						</>
-					}
-				/>
-			) : null}
+			<div className="settings-row"><ActionModelPicker action="rewrite" label="Rewrite model" profileId={activeProfileId} /></div>
 
 			{/* OpenAI Thinking */}
 			{supportsOpenAiThinking && (

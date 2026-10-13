@@ -1,5 +1,5 @@
+import { ActionModelPicker } from "../ActionModelPicker";
 import { Accordion, Select, Switch, Tooltip } from "@mantine/core";
-import { RotateCcw } from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
 import type {
 	ActiveWindowOcrMode,
@@ -7,10 +7,8 @@ import type {
 } from "../../lib/tauri";
 import { PromptSectionEditor } from "./PromptSectionEditor";
 import { SettingsInheritanceIndicator } from "./SettingsInheritance";
-import { SettingsIconButton, SettingsRow } from "./SettingsRow";
+import { SettingsRow } from "./SettingsRow";
 
-type LlmOption = { value: string; label: string };
-type LlmOptionGroup = { group: string; items: LlmOption[] };
 
 export function QuickReplaceSettings({
 	activeProfileId,
@@ -26,37 +24,21 @@ export function QuickReplaceSettings({
 	quickReplaceActiveWindowOcrModeInheriting,
 	setQuickReplaceActiveWindowOcrModeInheriting,
 	setLocalProfileQuickReplaceActiveWindowOcrMode,
-	defaultQuickReplaceProvider,
-	defaultQuickReplaceModel,
 	defaultQuickReplaceSystemPrompt,
-	effectiveQuickReplaceProvider,
-	llmProviderOptions,
-	llmProviderDisabled,
-	quickReplaceModelOptions,
-	selectedQuickReplaceModelForUi,
 	localProfileQuickReplaceEnabled,
 	localProfileQuickReplaceIncludeClipboardContext,
 	localQuickReplaceSystemPrompt,
 	quickReplaceEnabledInheriting,
 	quickReplaceIncludeClipboardContextInheriting,
-	quickReplaceProviderInheriting,
-	quickReplaceModelInheriting,
 	quickReplaceSystemPromptInheriting,
 	setQuickReplaceEnabledInheriting,
 	setQuickReplaceIncludeClipboardContextInheriting,
-	setQuickReplaceProviderInheriting,
-	setQuickReplaceModelInheriting,
 	setQuickReplaceSystemPromptInheriting,
 	setLocalProfileQuickReplaceEnabled,
 	setLocalProfileQuickReplaceIncludeClipboardContext,
-	setLocalProfileQuickReplaceProvider,
-	setLocalProfileQuickReplaceModel,
 	setLocalQuickReplaceSystemPrompt,
 	saveProfileMetadata,
 	openDisableOverrideDialog,
-	getLlmModelOptionsForProvider,
-	rewriteProvider,
-	rewriteModel,
 	isSaving,
 }: {
 	activeProfileId: string;
@@ -76,44 +58,28 @@ export function QuickReplaceSettings({
 	setLocalProfileQuickReplaceActiveWindowOcrMode: Dispatch<
 		SetStateAction<ActiveWindowOcrMode>
 	>;
-	defaultQuickReplaceProvider: string | null;
-	defaultQuickReplaceModel: string | null;
 	defaultQuickReplaceSystemPrompt: string;
-	effectiveQuickReplaceProvider: string | null;
-	llmProviderOptions: LlmOptionGroup[];
-	llmProviderDisabled: boolean;
-	quickReplaceModelOptions: LlmOption[];
-	selectedQuickReplaceModelForUi: string | null;
 	localProfileQuickReplaceEnabled: boolean;
 	localProfileQuickReplaceIncludeClipboardContext: boolean;
 	localQuickReplaceSystemPrompt: string;
 	quickReplaceEnabledInheriting: boolean;
 	quickReplaceIncludeClipboardContextInheriting: boolean;
-	quickReplaceProviderInheriting: boolean;
-	quickReplaceModelInheriting: boolean;
 	quickReplaceSystemPromptInheriting: boolean;
 	setQuickReplaceEnabledInheriting: Dispatch<SetStateAction<boolean>>;
 	setQuickReplaceIncludeClipboardContextInheriting: Dispatch<
 		SetStateAction<boolean>
 	>;
-	setQuickReplaceProviderInheriting: Dispatch<SetStateAction<boolean>>;
-	setQuickReplaceModelInheriting: Dispatch<SetStateAction<boolean>>;
 	setQuickReplaceSystemPromptInheriting: Dispatch<SetStateAction<boolean>>;
 	setLocalProfileQuickReplaceEnabled: Dispatch<SetStateAction<boolean>>;
 	setLocalProfileQuickReplaceIncludeClipboardContext: Dispatch<
 		SetStateAction<boolean>
 	>;
-	setLocalProfileQuickReplaceProvider: Dispatch<SetStateAction<string | null>>;
-	setLocalProfileQuickReplaceModel: Dispatch<SetStateAction<string | null>>;
 	setLocalQuickReplaceSystemPrompt: Dispatch<SetStateAction<string>>;
 	saveProfileMetadata: (next: Partial<RewriteProgramPromptProfile>) => void;
 	openDisableOverrideDialog: (args: {
 		title: string;
 		onConfirm: () => void;
 	}) => void;
-	getLlmModelOptionsForProvider: (provider: string | null) => LlmOption[];
-	rewriteProvider: string | null;
-	rewriteModel: string | null;
 	isSaving: boolean;
 }) {
 	const ocrModeDisabled = !ocrProviderAvailable;
@@ -130,10 +96,6 @@ export function QuickReplaceSettings({
 		: activeProfile?.quick_replace_system_prompt !== null &&
 			activeProfile?.quick_replace_system_prompt !== undefined;
 
-	const showRewriteProviderReset =
-		isDefaultScope &&
-		(activeProfile?.quick_replace_provider != null ||
-			activeProfile?.quick_replace_model != null);
 
 	return (
 		<>
@@ -270,7 +232,7 @@ export function QuickReplaceSettings({
 								<Select
 									data={[
 										{ value: "off", label: "Off" },
-										{ value: "auto", label: "Auto" },
+									{ value: "auto", label: "Always" },
 										{ value: "manual", label: "Manual" },
 									]}
 									value={localProfileQuickReplaceActiveWindowOcrMode}
@@ -307,131 +269,7 @@ export function QuickReplaceSettings({
 				}
 			/>
 
-			<SettingsRow
-				label="Provider"
-				description="AI service used to rewrite the highlighted text."
-				right={
-					<>
-						<SettingsInheritanceIndicator
-							isDefaultScope={isDefaultScope}
-							inheriting={quickReplaceProviderInheriting}
-							inheritTooltip={inheritTooltip}
-							onDisableOverride={() =>
-								openDisableOverrideDialog({
-									title: "Disable Quick Replace Provider override?",
-									onConfirm: () => {
-										setQuickReplaceProviderInheriting(true);
-										setQuickReplaceModelInheriting(true);
-										setLocalProfileQuickReplaceProvider(
-											defaultQuickReplaceProvider,
-										);
-										setLocalProfileQuickReplaceModel(defaultQuickReplaceModel);
-										saveProfileMetadata({
-											quick_replace_provider: null,
-											quick_replace_model: null,
-										});
-									},
-								})
-							}
-						/>
-						{showRewriteProviderReset && (
-							<SettingsIconButton
-								label="Use Rewrite provider/model"
-								onClick={() => {
-									setLocalProfileQuickReplaceProvider(rewriteProvider);
-									setLocalProfileQuickReplaceModel(rewriteModel);
-									saveProfileMetadata({
-										quick_replace_provider: null,
-										quick_replace_model: null,
-									});
-								}}
-							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</SettingsIconButton>
-						)}
-						<Select
-							data={llmProviderOptions}
-							value={effectiveQuickReplaceProvider}
-							onChange={(value) => {
-								if (!value) return;
-
-								if (!isDefaultScope) {
-									setQuickReplaceProviderInheriting(false);
-									setQuickReplaceModelInheriting(false);
-								}
-
-								setLocalProfileQuickReplaceProvider(value);
-								const models = getLlmModelOptionsForProvider(value);
-								const firstModel = models[0]?.value ?? null;
-								setLocalProfileQuickReplaceModel(firstModel);
-								saveProfileMetadata({
-									quick_replace_provider: value,
-									quick_replace_model: firstModel,
-								});
-							}}
-							placeholder="Select provider"
-							withCheckIcon={false}
-							disabled={llmProviderDisabled}
-							styles={{
-								input: {
-									backgroundColor: "var(--bg-elevated)",
-									borderColor: "var(--border-default)",
-									color: "var(--text-primary)",
-									minWidth: 200,
-								},
-							}}
-						/>
-					</>
-				}
-			/>
-
-			{quickReplaceModelOptions.length > 0 ? (
-				<SettingsRow
-					label="Model"
-					description="LLM model used to rewrite the highlighted text."
-					right={
-						<>
-							<SettingsInheritanceIndicator
-								isDefaultScope={isDefaultScope}
-								inheriting={quickReplaceModelInheriting}
-								inheritTooltip={inheritTooltip}
-								onDisableOverride={() =>
-									openDisableOverrideDialog({
-										title: "Disable Quick Replace Model override?",
-										onConfirm: () => {
-											setQuickReplaceModelInheriting(true);
-											setLocalProfileQuickReplaceModel(
-												defaultQuickReplaceModel,
-											);
-											saveProfileMetadata({ quick_replace_model: null });
-										},
-									})
-								}
-							/>
-							<Select
-								data={quickReplaceModelOptions}
-								value={selectedQuickReplaceModelForUi}
-								onChange={(value) => {
-									if (!value) return;
-									if (!isDefaultScope) setQuickReplaceModelInheriting(false);
-									setLocalProfileQuickReplaceModel(value);
-									saveProfileMetadata({ quick_replace_model: value });
-								}}
-								placeholder="Select model"
-								withCheckIcon={false}
-								styles={{
-									input: {
-										backgroundColor: "var(--bg-elevated)",
-										borderColor: "var(--border-default)",
-										color: "var(--text-primary)",
-										minWidth: 200,
-									},
-								}}
-							/>
-						</>
-					}
-				/>
-			) : null}
+			<div className="settings-row"><ActionModelPicker action="quick_replace" label="Quick Replace model" profileId={activeProfileId} /></div>
 
 			<div
 				className="settings-accordion-block"

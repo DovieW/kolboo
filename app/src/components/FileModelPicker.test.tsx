@@ -12,11 +12,13 @@ const source = vi.hoisted(() => ({
 	empty: false,
 	refetch: vi.fn(),
 }));
-vi.mock("../lib/queries/transcriptionModels", () => ({
-	useTranscriptionModels: () => ({
+vi.mock("../lib/queries/modelChoices", () => ({
+	useModelChoices: () => ({
 		loading: source.loading,
 		failedSources: source.fail ? [{ query: { refetch: source.refetch } }] : [],
-		options: new Map(
+		managedMessage:"Sign in to view Managed models",
+		retry:source.refetch,
+		choices:
 			(source.empty
 				? []
 				: [
@@ -35,8 +37,7 @@ vi.mock("../lib/queries/transcriptionModels", () => ({
 							use_managed: true,
 						},
 					]
-			).map((model) => [model.value, model]),
-		),
+			).map(model => ({selection:{source:model.use_managed?"managed":"byok",provider_id:model.provider,model_id:model.model},displayName:model.label,providerName:model.provider,ready:true,capabilities:["After recording",...(model.model === "gpt-4o-transcribe-diarize" ? ["Speaker labels"]:[])]})),
 	}),
 }));
 let host: HTMLDivElement;
@@ -78,8 +79,8 @@ async function render(
 async function open() {
 	await act(async () =>
 		host
-			.querySelector<HTMLInputElement>(
-				'input[aria-label="Transcription model"]',
+			.querySelector<HTMLButtonElement>(
+				'button[aria-label="Transcription model"]',
 			)
 			?.click(),
 	);
@@ -105,10 +106,10 @@ it("requires explicit choices, filters speaker models, and preserves managed rou
 	expect(ready).toHaveBeenLastCalledWith(false);
 	await open();
 	expect(
-		[...document.querySelectorAll('[role="option"]')].map(
-			(el) => el.textContent,
+		[...document.querySelectorAll('[role="option"]')].map((el) =>
+			JSON.parse(el.getAttribute("value") ?? "null"),
 		),
-	).toEqual(["Whisper · OpenAI · Your key"]);
+	).toEqual([["byok", "openai", "whisper-1"]]);
 	await act(async () =>
 		document.querySelector<HTMLElement>('[role="option"]')?.click(),
 	);
@@ -133,11 +134,16 @@ it("requires explicit choices, filters speaker models, and preserves managed rou
 	expect(change).toHaveBeenLastCalledWith(null);
 	expect(ready).toHaveBeenLastCalledWith(false);
 	await open();
+	await act(async () =>
+		[...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+			.find((el) => el.textContent === "Kolboo Managed")
+			?.click(),
+	);
 	expect(
-		[...document.querySelectorAll('[role="option"]')].map(
-			(el) => el.textContent,
+		[...document.querySelectorAll('[role="option"]')].map((el) =>
+			JSON.parse(el.getAttribute("value") ?? "null"),
 		),
-	).toEqual(["Speakers · OpenAI · Managed"]);
+	).toEqual([["managed", "openai", "gpt-4o-transcribe-diarize"]]);
 	await act(async () =>
 		document.querySelector<HTMLElement>('[role="option"]')?.click(),
 	);
@@ -159,8 +165,8 @@ it("distinguishes loading, empty and failed sources and offers retry", async () 
 	source.empty = true;
 	await render();
 	expect(
-		host.querySelector('input[placeholder="Loading models…"]'),
-	).not.toBeNull();
+		host.querySelector('button[aria-label="Transcription model"]')?.textContent,
+	).toContain("Loading models…");
 	expect(host.textContent).not.toContain("Add a provider");
 	source.loading = false;
 	await render();
@@ -195,8 +201,8 @@ it("reflects a saved diarization choice and locks options during processing", as
 		host.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled,
 	).toBe(true);
 	expect(
-		host.querySelector<HTMLInputElement>(
-			'input[aria-label="Transcription model"]',
+		host.querySelector<HTMLButtonElement>(
+			'button[aria-label="Transcription model"]',
 		)?.disabled,
 	).toBe(true);
 });

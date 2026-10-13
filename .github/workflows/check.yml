@@ -83,12 +83,21 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libayatana-appindicator3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev mold sccache xvfb openbox x11-utils xauth
+          sudo apt-get install -y libglib2.0-dev libasound2-dev pkg-config libgtk-3-dev libayatana-appindicator3-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev mold sccache xvfb openbox x11-utils xauth keyutils
 
       - name: Setup Rust coverage toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           components: llvm-tools-preview
+
+      - name: Verify native namespace isolation before Rust compilation
+        shell: bash
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'native_namespace_*_test.py'
+          export KOLBOO_NATIVE_PARENT_USER_NAMESPACE=$(readlink /proc/self/ns/user)
+          export KOLBOO_NATIVE_EXPECTED_UID=$(id -u)
+          export KOLBOO_NATIVE_EXPECTED_GID=$(id -g)
+          sudo -n --preserve-env=KOLBOO_NATIVE_PARENT_USER_NAMESPACE,KOLBOO_NATIVE_EXPECTED_UID,KOLBOO_NATIVE_EXPECTED_GID /usr/bin/python3 .github/scripts/native_namespace_launch.py /usr/bin/python3 .github/scripts/native_namespace_check.py
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # main
@@ -105,14 +114,11 @@ jobs:
       - name: Generate Rust coverage
         working-directory: app
         run: |
-          # Isolate only the acceptance app's networking. Keep its normal UID,
-          # without relaxing the host's unprivileged-namespace security policy.
-          runner_uid=$(id -u)
-          runner_gid=$(id -g)
-          # sudo must retain the isolated display/storage paths and LLVM output
-          # path, rather than launching with root's HOME or dropping coverage.
-          native_env="HOME,DISPLAY,XAUTHORITY,XDG_DATA_HOME,XDG_CONFIG_HOME,XDG_CACHE_HOME,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,GDK_BACKEND,WINIT_UNIX_BACKEND,GDK_SCALE,GDK_DPI_SCALE,WAYLAND_DISPLAY,GTK_MODULES,GTK_A11Y,KOLBOO_NATIVE_WINDOW_TEST,KOLBOO_NATIVE_WINDOW_DIRECTORY,LLVM_PROFILE_FILE"
-          export KOLBOO_NATIVE_WINDOW_RUNNER="sudo -n --preserve-env=$native_env unshare --net --setuid=$runner_uid --setgid=$runner_gid --"
+          # The privileged parent maps only the blocked child to the original
+          # runner IDs. Fixtures never run as host root or alter host policy.
+          native_env="HOME,DISPLAY,XAUTHORITY,XDG_DATA_HOME,XDG_CONFIG_HOME,XDG_CACHE_HOME,XDG_RUNTIME_DIR,GNOME_KEYRING_CONTROL,DBUS_SESSION_BUS_ADDRESS,GDK_BACKEND,WINIT_UNIX_BACKEND,GDK_SCALE,GDK_DPI_SCALE,WAYLAND_DISPLAY,GTK_MODULES,GTK_A11Y,NO_AT_BRIDGE,ALSA_CONFIG_PATH,KOLBOO_NATIVE_WINDOW_TEST,KOLBOO_NATIVE_WINDOW_DIRECTORY,KOLBOO_NATIVE_PARENT_USER_NAMESPACE,KOLBOO_NATIVE_EXPECTED_UID,KOLBOO_NATIVE_EXPECTED_GID,KOLBOO_NATIVE_WINDOW_RUNNER,LLVM_PROFILE_FILE"
+          export KOLBOO_NATIVE_WINDOW_RUNNER="unshare --net --"
+          export KOLBOO_NATIVE_USER_NAMESPACE_RUNNER=$(node -e 'console.log(JSON.stringify(["sudo", "-n", "--preserve-env=" + process.argv[1], "/usr/bin/env", "PATH=" + process.env.PATH, "/usr/bin/python3", process.argv[2]]))' "$native_env" "$GITHUB_WORKSPACE/.github/scripts/native_namespace_launch.py")
           pnpm cargo:coverage -- --lcov --output-path coverage/rust-lcov.info
 
       - name: Enforce 100% patch coverage

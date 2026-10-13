@@ -179,6 +179,32 @@ pub(crate) struct RequestProfileContext {
 }
 
 impl RequestProfileContext {
+    pub(crate) fn live_insertion_compatible(
+        &self,
+        global_rewrite: bool,
+        global_replace: bool,
+    ) -> bool {
+        let Some(profile) = self.active_profile.as_ref() else {
+            return !global_rewrite && !global_replace;
+        };
+        if router_enabled(profile) || profile.quick_replace_enabled.unwrap_or(global_replace) {
+            return false;
+        }
+        let rewriting = profile
+            .rewrite_llm_enabled
+            .unwrap_or(if profile.id == "default" {
+                global_rewrite
+            } else {
+                true
+            });
+        !rewriting
+            || (!profile.default_target_rewrite_llm_enabled
+                && profile
+                    .presets
+                    .iter()
+                    .all(|preset| !preset.rewrite_llm_enabled))
+    }
+
     pub(crate) fn active_profile(&self) -> Option<&ProgramPromptProfile> {
         self.active_profile.as_ref()
     }
@@ -263,8 +289,67 @@ mod tests {
     use crate::llm::PromptSections;
     use crate::settings::IntentRouterSettings;
 
+    #[test]
+    fn live_insertion_never_runs_when_a_profile_can_rewrite_or_replace() {
+        let context = |profile: Option<ProgramPromptProfile>| {
+            resolve_request_profile_context(
+                &LlmConfig {
+                    program_prompt_profiles: profile.into_iter().collect(),
+                    ..Default::default()
+                },
+                Some("default"),
+                None,
+                ActiveWindowOcrModeFallbacks {
+                    rewrite: "off",
+                    quick_ask: "off",
+                    quick_replace: "off",
+                },
+                DefaultProfileSelectionPolicy::UseDefaultAsActiveFallback,
+            )
+        };
+        let empty = context(None);
+        assert!(empty.live_insertion_compatible(false, false));
+        assert!(!empty.live_insertion_compatible(true, false));
+        assert!(!empty.live_insertion_compatible(false, true));
+        let custom = resolve_request_profile_context(
+            &LlmConfig {
+                program_prompt_profiles: vec![profile("custom", vec![])],
+                ..Default::default()
+            },
+            Some("custom"),
+            None,
+            ActiveWindowOcrModeFallbacks {
+                rewrite: "off",
+                quick_ask: "off",
+                quick_replace: "off",
+            },
+            DefaultProfileSelectionPolicy::KeepDefaultAsFallbackOnly,
+        );
+        assert!(
+            !custom.live_insertion_compatible(false, false),
+            "an unknown profile rewrite policy must fail closed"
+        );
+        let mut p = profile("default", vec![]);
+        assert!(!context(Some(p.clone())).live_insertion_compatible(true, false));
+        assert!(context(Some(p.clone())).live_insertion_compatible(false, false));
+        p.rewrite_llm_enabled = Some(true);
+        assert!(!context(Some(p.clone())).live_insertion_compatible(false, false));
+        p.default_target_rewrite_llm_enabled = false;
+        assert!(context(Some(p.clone())).live_insertion_compatible(true, false));
+        p.presets.push(preset("q"));
+        assert!(!context(Some(p.clone())).live_insertion_compatible(true, false));
+        p.presets[0].rewrite_llm_enabled = false;
+        assert!(context(Some(p.clone())).live_insertion_compatible(true, false));
+        p.quick_replace_enabled = Some(true);
+        assert!(!context(Some(p.clone())).live_insertion_compatible(false, false));
+        p.quick_replace_enabled = Some(false);
+        p.rewrite_llm_enabled = Some(false);
+        assert!(context(Some(p)).live_insertion_compatible(true, true));
+    }
+
     fn preset(id: &str) -> ProgramPreset {
         ProgramPreset {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             routing_hints: vec![],
@@ -273,6 +358,7 @@ mod tests {
             stt_provider: None,
             stt_model: None,
             stt_language: None,
+            stt_input_mode: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,
@@ -285,6 +371,7 @@ mod tests {
 
     fn profile(id: &str, presets: Vec<ProgramPreset>) -> ProgramPromptProfile {
         ProgramPromptProfile {
+            model_selections: Default::default(),
             id: id.to_string(),
             name: id.to_string(),
             program_paths: vec![],
@@ -299,6 +386,7 @@ mod tests {
             stt_provider: None,
             stt_model: None,
             stt_language: None,
+            stt_input_mode: None,
             stt_timeout_seconds: None,
             llm_provider: None,
             llm_model: None,

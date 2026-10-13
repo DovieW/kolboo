@@ -1,28 +1,27 @@
 //! AssemblyAI pricing tables and cost estimation helpers.
 //!
-//! Source (fetched 2025-12-28):
+//! Source (reviewed 2026-10-08):
 //! - https://www.assemblyai.com/pricing
 //!
 //! Notes:
 //! - AssemblyAI Speech-to-Text pricing is listed as USD per hour (billed per second).
-//! - The API supports `speech_models` with enum values `universal`, `slam-1`, and `best`.
-//!   The pricing page lists Universal and Slam-1. `best` is treated as a legacy alias
-//!   and mapped to the Universal rate for estimation.
+//! - Base rates only, without optional paid features.
+//! - Legacy aliases can route between models; their price is unknown until the
+//!   server reports the model actually used. Never present them as free.
 
 use crate::cost::math::mul_div_round_u128;
 use crate::cost::openai::UsdMicros;
 
 /// Returns AssemblyAI pre-recorded STT pricing in USD micros per hour.
 ///
-/// Models used in this app:
-/// - universal: $0.15 / hour
-/// - slam-1: $0.27 / hour
-/// - best: legacy alias (mapped to universal)
+/// Returns None for unpriced or server-selected legacy models.
 pub fn asr_usd_micros_per_hour(model: &str) -> Option<UsdMicros> {
     match model.trim() {
-        "universal" => Some(150_000),
-        "slam-1" => Some(270_000),
-        "best" => Some(150_000),
+        "universal-3-5-pro" => Some(210_000),
+        "universal-2" | "universal-streaming-english" | "universal-streaming-multilingual" => {
+            Some(150_000)
+        }
+        "universal-3-6-pro" => Some(450_000),
         _ => None,
     }
 }
@@ -48,16 +47,27 @@ mod tests {
 
     #[test]
     fn rates_exist_for_known_models() {
-        assert!(asr_usd_micros_per_hour("universal").is_some());
-        assert!(asr_usd_micros_per_hour("slam-1").is_some());
-        assert!(asr_usd_micros_per_hour("best").is_some());
+        assert_eq!(asr_usd_micros_per_hour("universal-3-5-pro"), Some(210_000));
+        assert_eq!(asr_usd_micros_per_hour("universal-2"), Some(150_000));
+        assert_eq!(
+            asr_usd_micros_per_hour("universal-streaming-english"),
+            Some(150_000)
+        );
+        assert_eq!(
+            asr_usd_micros_per_hour("universal-streaming-multilingual"),
+            Some(150_000)
+        );
+        assert_eq!(asr_usd_micros_per_hour("universal-3-6-pro"), Some(450_000));
+        for alias in ["universal", "slam-1", "best"] {
+            assert!(asr_usd_micros_per_hour(alias).is_none());
+        }
         assert!(asr_usd_micros_per_hour("unknown").is_none());
     }
 
     #[test]
     fn estimate_scales_with_duration() {
-        let c1 = estimate_stt_cost_from_audio_secs("universal", 10.0).unwrap();
-        let c2 = estimate_stt_cost_from_audio_secs("universal", 20.0).unwrap();
+        let c1 = estimate_stt_cost_from_audio_secs("universal-3-5-pro", 10.0).unwrap();
+        let c2 = estimate_stt_cost_from_audio_secs("universal-3-5-pro", 20.0).unwrap();
         assert!(c2 >= c1);
     }
 }

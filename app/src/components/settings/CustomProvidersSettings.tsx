@@ -6,7 +6,6 @@ import {
 	Modal,
 	Stack,
 	Text,
-	Textarea,
 	TextInput,
 } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,15 +13,12 @@ import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { type CustomProvider, configAPI } from "../../lib/tauri/commands";
 import { ApiKeyField } from "./ApiKeyField";
-
-const models = (value: string) => [
-	...new Set(
-		value
-			.split("\n")
-			.map((v) => v.trim())
-			.filter(Boolean),
-	),
-];
+import {
+	CustomModelEditor,
+	type CustomModelRow,
+	customModelMetadata,
+	customModelRows,
+} from "./CustomModelEditor";
 export function isLocalProviderHost(host: string): boolean {
 	const name = host.toLowerCase().replace(/^\[|\]$/g, "");
 	if (name === "localhost" || name === "::1") return true;
@@ -47,8 +43,8 @@ export function CustomProvidersSettings() {
 		retry: false,
 	});
 	const [draft, setDraft] = useState<CustomProvider | null>(null);
-	const [llm, setLlm] = useState("");
-	const [stt, setStt] = useState("");
+	const [llm, setLlm] = useState<CustomModelRow[]>([]);
+	const [stt, setStt] = useState<CustomModelRow[]>([]);
 	const [removing, setRemoving] = useState<CustomProvider | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -56,8 +52,8 @@ export function CustomProvidersSettings() {
 	const edit = (provider: CustomProvider) => {
 		setError(null);
 		setDraft(provider);
-		setLlm(provider.llm_models.join("\n"));
-		setStt(provider.stt_models.join("\n"));
+		setLlm(customModelRows(provider.llm_models, provider.llm_model_names));
+		setStt(customModelRows(provider.stt_models, provider.stt_model_names));
 	};
 	const save = async () => {
 		if (!draft || inFlight.current) return;
@@ -86,19 +82,25 @@ export function CustomProvidersSettings() {
 			);
 			return;
 		}
-		if (!draft.name.trim() || (!models(llm).length && !models(stt).length)) {
-			setError("Add a name and at least one model.");
+		let textModels: ReturnType<typeof customModelMetadata>;
+		let speechModels: ReturnType<typeof customModelMetadata>;
+		try {
+			textModels = customModelMetadata(llm);
+			speechModels = customModelMetadata(stt);
+		} catch (error) {
+			setError((error as Error).message);
 			return;
 		}
 		if (
-			draft.name.trim().length > 100 ||
-			draft.base_url.trim().length > 2048 ||
-			[models(llm), models(stt)].some(
-				(list) => list.length > 100 || list.some((id) => id.length > 200),
-			)
+			!draft.name.trim() ||
+			(!textModels.ids.length && !speechModels.ids.length)
 		) {
+			setError("Add a name and at least one model.");
+			return;
+		}
+		if (draft.name.trim().length > 100 || draft.base_url.trim().length > 2048) {
 			setError(
-				"Use up to 100 models per type, with model IDs under 201 characters.",
+				"Use a provider name up to 100 characters and a URL up to 2048 characters.",
 			);
 			return;
 		}
@@ -110,8 +112,10 @@ export function CustomProvidersSettings() {
 				...draft,
 				name: draft.name.trim(),
 				base_url: draft.base_url.trim().replace(/\/+$/, ""),
-				llm_models: models(llm),
-				stt_models: models(stt),
+				llm_models: textModels.ids,
+				stt_models: speechModels.ids,
+				llm_model_names: textModels.names,
+				stt_model_names: speechModels.names,
 			});
 			setDraft(null);
 			for (const key of [
@@ -222,6 +226,7 @@ export function CustomProvidersSettings() {
 			))}
 			<Modal
 				opened={!!draft}
+				size="lg"
 				onClose={() => {
 					if (!inFlight.current) setDraft(null);
 				}}
@@ -257,25 +262,20 @@ export function CustomProvidersSettings() {
 							}
 						/>
 						<Text size="xs" c="dimmed">
-							OpenAI-compatible endpoint. Add model IDs, one per line.
+							OpenAI-compatible endpoint. Model IDs are sent to the provider;
+							display names are only for you.
 						</Text>
-						<Textarea
-							label="Text models"
-							value={llm}
-							onChange={(e) => setLlm(e.currentTarget.value)}
+						<CustomModelEditor
+							label="Text"
+							rows={llm}
+							onChange={setLlm}
 							disabled={busy}
-							autosize
-							minRows={2}
-							maxRows={5}
 						/>
-						<Textarea
-							label="Transcription models"
-							value={stt}
-							onChange={(e) => setStt(e.currentTarget.value)}
+						<CustomModelEditor
+							label="Transcription"
+							rows={stt}
+							onChange={setStt}
 							disabled={busy}
-							autosize
-							minRows={2}
-							maxRows={5}
 						/>
 						{error && (
 							<Text c="red" size="sm" role="alert">

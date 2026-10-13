@@ -1,15 +1,17 @@
 import { normalizeSttLanguageOverride } from "../../sttLanguages";
+import { normalizeModelSelections } from "../../modelSelection";
 import {
 	normalizeRewritePreset as normalizeCanonicalRewritePreset,
 	normalizePresetRoutingHints,
+	type NormalizedRewritePreset,
 } from "../presetDefaults";
-import type { CleanupPromptSectionsOverride, RewritePreset } from "../types";
+import type { CleanupPromptSectionsOverride } from "../types";
 import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
 	normalizeWidgetPosition,
 } from "./appBehavior";
-import { normalizePlayingAudioHandling } from "./audio";
+import { normalizePlayingAudioHandling, normalizeSttInputMode } from "./audio";
 import {
 	normalizeAnthropicThinkingBudget,
 	normalizeGeminiThinkingBudget,
@@ -32,7 +34,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
  */
 export function normalizeRawRewritePreset(
 	value: unknown,
-): RewritePreset | null {
+): NormalizedRewritePreset | null {
 	const p = isRecord(value) ? value : null;
 	if (!p) return null;
 	const id = typeof p.id === "string" ? p.id : "";
@@ -48,6 +50,7 @@ export function normalizeRawRewritePreset(
 		: null;
 
 	return normalizeCanonicalRewritePreset({
+		model_selections: normalizeModelSelections(p.model_selections),
 		id,
 		name,
 		description,
@@ -60,6 +63,7 @@ export function normalizeRawRewritePreset(
 		stt_provider: typeof p.stt_provider === "string" ? p.stt_provider : null,
 		stt_model: typeof p.stt_model === "string" ? p.stt_model : null,
 		stt_language: normalizeSttLanguageOverride(p.stt_language),
+		stt_input_mode: normalizeSttInputMode(p.stt_input_mode),
 		stt_timeout_seconds:
 			typeof p.stt_timeout_seconds === "number" &&
 			Number.isFinite(p.stt_timeout_seconds)

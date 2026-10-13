@@ -226,11 +226,17 @@ pub fn delete_custom_provider(app: AppHandle, id: String) -> CommandResult<()> {
 /// Information about a provider
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ProviderInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub configured: Option<bool>,
     pub value: String,
     pub label: String,
     pub is_local: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub models: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_names: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_configured: Option<std::collections::BTreeMap<String, bool>>,
 }
 
 /// OCR provider availability status
@@ -243,21 +249,27 @@ pub struct OcrProviderStatus {
 /// Response listing available providers
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AvailableProvidersResponse {
+    pub live_text_insertion_supported: bool,
     pub stt: Vec<ProviderInfo>,
     pub llm: Vec<ProviderInfo>,
     pub ocr: OcrProviderStatus,
+}
+
+#[tauri::command]
+pub fn get_model_selection_settings(app: AppHandle) -> crate::model_selection::LoadedModelSettings {
+    crate::model_selection::read_model_settings(&app)
 }
 
 /// STT provider definitions
 const STT_PROVIDERS: &[(&str, &str, bool)] = &[
     ("groq", "Groq", false),
     ("openai", "OpenAI", false),
-    ("fireworks", "Fireworks", false),
     ("aquavoice", "Aquavoice", false),
     ("assemblyai", "AssemblyAI", false),
     ("speechmatics", "Speechmatics", false),
     ("elevenlabs", "ElevenLabs", false),
     ("deepgram", "Deepgram", false),
+    ("yiddishlabs", "YiddishLabs", false),
     // Self-hosted/local network endpoint.
     ("whisper-server", "Whisper Server", true),
     ("whisper", "Local Whisper", true),
@@ -363,7 +375,11 @@ fn get_api_key(app: &AppHandle, key: &str) -> String {
 /// Get list of available STT and LLM providers (those with API keys configured)
 #[cfg(desktop)]
 #[tauri::command]
-pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
+pub fn get_available_providers(
+    app: AppHandle,
+    include_unconfigured: Option<bool>,
+) -> AvailableProvidersResponse {
+    let include_unconfigured = include_unconfigured.unwrap_or(false);
     let mut stt_providers = Vec::new();
     let mut llm_providers = Vec::new();
 
@@ -376,18 +392,43 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
 
         // Whisper Server requires a configured base URL; without it, selecting the provider
         // deterministically fails at init time.
-        if *id == "whisper-server" && !has_valid_url_setting(&app, "whisper_server_base_url") {
+        if *id == "whisper-server"
+            && !include_unconfigured
+            && !has_valid_url_setting(&app, "whisper_server_base_url")
+        {
             continue;
         }
 
         let key_name = format!("{}_api_key", id);
+        let model_configured = (*id == "yiddishlabs").then(|| {
+            std::collections::BTreeMap::from([
+                (
+                    crate::stt::yiddishlabs::FLASH_MODEL.to_owned(),
+                    has_api_key(&app, "yiddishlabs_flash_api_key"),
+                ),
+                (
+                    crate::stt::yiddishlabs::STANDARD_MODEL.to_owned(),
+                    has_api_key(&app, "yiddishlabs_standard_api_key"),
+                ),
+            ])
+        });
         // Local providers don't need API keys, remote ones do
-        if *is_local || has_api_key(&app, &key_name) {
+        let configured = if *id == "whisper-server" {
+            has_valid_url_setting(&app, "whisper_server_base_url")
+        } else if let Some(models) = &model_configured {
+            models.values().any(|configured| *configured)
+        } else {
+            *is_local || has_api_key(&app, &key_name)
+        };
+        if include_unconfigured || configured {
             stt_providers.push(ProviderInfo {
+                configured: include_unconfigured.then_some(configured),
                 value: id.to_string(),
                 label: label.to_string(),
                 is_local: *is_local,
                 models: None,
+                model_names: None,
+                model_configured,
             });
         }
     }
@@ -396,44 +437,61 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
     for (id, label, is_local) in LLM_PROVIDERS {
         // Only show Ollama when the user has configured its server URL.
         // This keeps the provider dropdown clean on fresh installs.
-        if *id == "ollama" && !has_nonempty_setting(&app, "ollama_url") {
+        if *id == "ollama" && !include_unconfigured && !has_nonempty_setting(&app, "ollama_url") {
             continue;
         }
 
         let key_name = format!("{}_api_key", id);
         // Local providers don't need API keys, remote ones do
-        if *is_local || has_api_key(&app, &key_name) {
+        let configured = if *id == "ollama" {
+            has_nonempty_setting(&app, "ollama_url")
+        } else {
+            *is_local || has_api_key(&app, &key_name)
+        };
+        if include_unconfigured || configured {
             llm_providers.push(ProviderInfo {
+                configured: include_unconfigured.then_some(configured),
                 value: id.to_string(),
                 label: label.to_string(),
                 is_local: *is_local,
                 models: None,
+                model_names: None,
+                model_configured: None,
             });
         }
     }
 
     for provider in crate::custom_providers::load(&app) {
-        if !has_api_key(&app, &provider.key_name()) {
+        let configured = has_api_key(&app, &provider.key_name());
+        if !include_unconfigured && !configured {
             continue;
         }
         if !provider.stt_models.is_empty() {
             stt_providers.push(ProviderInfo {
+                configured: include_unconfigured.then_some(configured),
                 value: provider.id.clone(),
                 label: provider.name.clone(),
                 is_local: false,
                 models: Some(provider.stt_models),
+                model_names: Some(provider.stt_model_names),
+                model_configured: None,
             });
         }
         if !provider.llm_models.is_empty() {
             llm_providers.push(ProviderInfo {
+                configured: include_unconfigured.then_some(configured),
                 value: provider.id,
                 label: provider.name,
                 is_local: false,
                 models: Some(provider.llm_models),
+                model_names: Some(provider.llm_model_names),
+                model_configured: None,
             });
         }
     }
     AvailableProvidersResponse {
+        live_text_insertion_supported:
+            crate::platform_capabilities::automatic_text_injection_supported(),
         stt: stt_providers,
         llm: llm_providers,
         ocr: get_ocr_provider_status(&app),
@@ -443,8 +501,12 @@ pub fn get_available_providers(app: AppHandle) -> AvailableProvidersResponse {
 /// Stub for non-desktop platforms
 #[cfg(not(desktop))]
 #[tauri::command]
-pub fn get_available_providers(_app: AppHandle) -> AvailableProvidersResponse {
+pub fn get_available_providers(
+    _app: AppHandle,
+    _include_unconfigured: Option<bool>,
+) -> AvailableProvidersResponse {
     AvailableProvidersResponse {
+        live_text_insertion_supported: false,
         stt: vec![],
         llm: vec![],
         ocr: OcrProviderStatus {
@@ -626,6 +688,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         "assemblyai",
         "speechmatics",
         "deepgram",
+        "yiddishlabs_flash",
+        "yiddishlabs_standard",
     ] {
         let key_name = format!("{}_api_key", provider);
         let key: String = get_api_key(&app, &key_name);
@@ -754,14 +818,6 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         llm_api_key
     };
 
-    // IMPORTANT: `enabled` is only the global toggle. The effective provider/key is resolved
-    // per transcription based on the active profile.
-    // Keep a persisted Managed selection ready for the next authenticated
-    // session, but do not let it break Community/BYOK transcription after
-    // logout or entitlement loss. The user can select a BYOK provider again.
-    let llm_enabled = rewrite_llm_enabled
-        && (managed_mode_active || llm_provider_effective.as_str() != "managed");
-
     // Read all available LLM API keys (for per-profile provider overrides at runtime)
     let mut llm_api_keys: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -801,105 +857,17 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .map(|o| o.apply_to(&crate::llm::PromptSections::default()))
         .unwrap_or_default();
 
-    let rewrite_program_prompt_profiles: Vec<crate::settings::RewriteProgramPromptProfile> = app
-        .store("settings.json")
-        .ok()
-        .and_then(|store| store.get("rewrite_program_prompt_profiles"))
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default();
+    let loaded_model_settings = crate::model_selection::read_model_settings(&app);
+    let model_selections = loaded_model_settings.selections;
+    let model_selection_error = loaded_model_settings.error;
+    let rewrite_program_prompt_profiles = loaded_model_settings.profiles;
     let rewrite_program_prompt_profiles =
         crate::settings::filter_enabled_rewrite_profiles(rewrite_program_prompt_profiles);
 
-    let program_prompt_profiles: Vec<crate::llm::ProgramPromptProfile> =
-        rewrite_program_prompt_profiles
-            .into_iter()
-            .map(|p| {
-                let profile_prompts = p
-                    .cleanup_prompt_sections
-                    .as_ref()
-                    .map(|o| o.apply_to(&base_prompts))
-                    .unwrap_or_else(|| base_prompts.clone());
-
-                let presets = p
-                    .presets
-                    .into_iter()
-                    .map(|preset| {
-                        let preset_prompts = preset
-                            .cleanup_prompt_sections
-                            .as_ref()
-                            .map(|o| o.apply_to(&profile_prompts))
-                            .unwrap_or_else(|| profile_prompts.clone());
-
-                        crate::llm::ProgramPreset {
-                            id: preset.id,
-                            name: preset.name,
-                            routing_hints: preset.routing_hints,
-                            prompts: preset_prompts,
-                            rewrite_llm_enabled: preset.rewrite_llm_enabled,
-                            stt_provider: preset.stt_provider,
-                            stt_model: preset.stt_model,
-                            stt_language: preset.stt_language,
-                            stt_timeout_seconds: preset.stt_timeout_seconds,
-                            llm_provider: preset.llm_provider,
-                            llm_model: preset.llm_model,
-                            openai_reasoning_effort: preset.openai_reasoning_effort,
-                            gemini_thinking_budget: preset.gemini_thinking_budget,
-                            gemini_thinking_level: preset.gemini_thinking_level,
-                            anthropic_thinking_budget: preset.anthropic_thinking_budget,
-                        }
-                    })
-                    .collect();
-
-                crate::llm::ProgramPromptProfile {
-                    id: p.id,
-                    name: p.name,
-                    program_paths: p.program_paths,
-                    prompts: profile_prompts,
-
-                    presets,
-                    default_preset_id: p.default_preset_id,
-                    default_preset_description: p.default_preset_description,
-                    default_target_rewrite_llm_enabled: p.default_target_rewrite_llm_enabled,
-                    active_preset_id: p.active_preset_id,
-                    router: p.router,
-
-                    rewrite_llm_enabled: p.rewrite_llm_enabled,
-                    stt_provider: p.stt_provider,
-                    stt_model: p.stt_model,
-                    stt_language: p.stt_language,
-                    stt_timeout_seconds: p.stt_timeout_seconds,
-                    llm_provider: p.llm_provider,
-                    llm_model: p.llm_model,
-                    openai_reasoning_effort: p.openai_reasoning_effort,
-                    gemini_thinking_budget: p.gemini_thinking_budget,
-                    gemini_thinking_level: p.gemini_thinking_level,
-                    anthropic_thinking_budget: p.anthropic_thinking_budget,
-
-                    quick_ask_provider: p.quick_ask_provider,
-                    quick_ask_model: p.quick_ask_model,
-                    quick_ask_system_prompt: p.quick_ask_system_prompt,
-                    context_grab_method: p.context_grab_method,
-
-                    rewrite_include_clipboard_context: p.rewrite_include_clipboard_context,
-                    quick_replace_include_clipboard_context: p
-                        .quick_replace_include_clipboard_context,
-                    quick_ask_include_clipboard_context: p.quick_ask_include_clipboard_context,
-
-                    rewrite_active_window_ocr_mode: p.rewrite_active_window_ocr_mode,
-                    quick_replace_active_window_ocr_mode: p.quick_replace_active_window_ocr_mode,
-                    quick_ask_active_window_ocr_mode: p.quick_ask_active_window_ocr_mode,
-
-                    quick_replace_enabled: p.quick_replace_enabled,
-                    quick_replace_provider: p.quick_replace_provider,
-                    quick_replace_model: p.quick_replace_model,
-                    quick_replace_system_prompt: p.quick_replace_system_prompt,
-                    quick_ask_openai_reasoning_effort: p.quick_ask_openai_reasoning_effort,
-                    quick_ask_gemini_thinking_budget: p.quick_ask_gemini_thinking_budget,
-                    quick_ask_gemini_thinking_level: p.quick_ask_gemini_thinking_level,
-                    quick_ask_anthropic_thinking_budget: p.quick_ask_anthropic_thinking_budget,
-                }
-            })
-            .collect();
+    let program_prompt_profiles = crate::llm::profile_conversion::build_program_prompt_profiles(
+        rewrite_program_prompt_profiles,
+        &base_prompts,
+    );
 
     // Read VAD settings from store
     let vad_settings: VadSettings = app
@@ -1207,6 +1175,8 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         .unwrap_or_else(|| default_pipeline_config.ocr_config.resize_filter.clone());
 
     let config = PipelineConfig {
+        model_selection_error: model_selection_error.clone(),
+        model_selections: model_selections.clone(),
         input_device_name,
         stt_provider: effective_stt_provider.clone(),
         stt_api_key: effective_stt_api_key,
@@ -1219,6 +1189,7 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         managed_inference_fallback_llm_provider,
         stt_model: stt_model.clone(),
         stt_language,
+        stt_input_mode: loaded_model_settings.stt_input_mode,
         stt_transcription_prompt,
         whisper_server_base_url,
         max_duration_secs: 300.0,
@@ -1249,8 +1220,17 @@ pub fn sync_pipeline_config(app: AppHandle) -> CommandResult<()> {
         mic_auto_recover_enabled,
 
         llm_config: crate::llm::LlmConfig {
+            model_selections: model_selections.clone(),
+            selection_error: model_selection_error,
+            selection: model_selections
+                .get(&crate::model_selection::ModelAction::Rewrite)
+                .cloned(),
+            managed_access_token: managed_access_token.clone(),
             custom_providers: crate::custom_providers::load(&app),
-            enabled: llm_enabled,
+            // The user toggle is independent of account access. Actual route
+            // readiness is checked after profile/preset resolution, otherwise an
+            // unavailable global Managed route suppresses a usable scoped BYOK one.
+            enabled: rewrite_llm_enabled,
             provider: effective_llm_provider.clone(),
             api_key: effective_llm_api_key,
             model: llm_model_effective.clone(),

@@ -14,6 +14,28 @@ use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+// Imported files and meeting chunks must preserve the ordinary adapter's
+// request contract. They neither create Standard-job receipts nor allow a BYOK
+// provider to become Managed merely because a refreshed token is available.
+async fn transcribe_uploaded<P: SttProvider>(
+    provider: &P,
+    audio: &[u8],
+    format: &AudioFormat,
+) -> Result<String, SttError> {
+    assert!(provider
+        .with_renewed_managed_token("must-not-promote-byok")
+        .is_none());
+    let directory = tempfile::tempdir().unwrap();
+    let context = crate::stt::SttUploadContext {
+        purpose: crate::stt::UploadPurpose::File,
+        chunk_offset: 0,
+        checkpoint_path: directory.path().join("unused-job-receipt"),
+    };
+    let result = provider.transcribe_upload(audio, format, &context).await?;
+    assert!(!context.checkpoint_path.exists());
+    Ok(result.text)
+}
+
 #[test]
 fn test_groq_provider_implements_trait() {
     let provider = GroqSttProvider::new("test_key".to_string(), None, None, None);
@@ -241,7 +263,7 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello deepgram");
 
     let received = guard.received_requests().await;
@@ -298,90 +320,92 @@ async fn test_deepgram_non_success_is_surface_as_api_error() {
 
 #[tokio::test]
 async fn test_assemblyai_transcribe_sends_expected_requests() {
-    let mock_server = MockServer::start().await;
-    let upload_url = format!("{}/upload/abc", mock_server.uri());
+    for model in [None, Some("universal-3-5-pro"), Some("universal-2")] {
+        let mock_server = MockServer::start().await;
+        let upload_url = format!("{}/upload/abc", mock_server.uri());
 
-    let upload_guard = Mock::given(method("POST"))
-        .and(path("/v2/upload"))
-        .and(header("authorization", "test_key"))
-        .and(header("content-type", "application/octet-stream"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "upload_url": upload_url
-        })))
-        .expect(1)
-        .mount_as_scoped(&mock_server)
-        .await;
+        let upload_guard = Mock::given(method("POST"))
+            .and(path("/v2/upload"))
+            .and(header("authorization", "test_key"))
+            .and(header("content-type", "application/octet-stream"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "upload_url": upload_url
+            })))
+            .expect(1)
+            .mount_as_scoped(&mock_server)
+            .await;
 
-    let submit_guard = Mock::given(method("POST"))
-        .and(path("/v2/transcript"))
-        .and(header("authorization", "test_key"))
-        .and(header("content-type", "application/json"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "id": "transcript_123"
-        })))
-        .expect(1)
-        .mount_as_scoped(&mock_server)
-        .await;
+        let submit_guard = Mock::given(method("POST"))
+            .and(path("/v2/transcript"))
+            .and(header("authorization", "test_key"))
+            .and(header("content-type", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "transcript_123"
+            })))
+            .expect(1)
+            .mount_as_scoped(&mock_server)
+            .await;
 
-    let get_guard = Mock::given(method("GET"))
-        .and(path("/v2/transcript/transcript_123"))
-        .and(header("authorization", "test_key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-            "status": "completed",
-            "text": "hello assemblyai"
-        })))
-        .expect(1)
-        .mount_as_scoped(&mock_server)
-        .await;
+        let get_guard = Mock::given(method("GET"))
+            .and(path("/v2/transcript/transcript_123"))
+            .and(header("authorization", "test_key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "status": "completed",
+                "text": "hello assemblyai"
+            })))
+            .expect(1)
+            .mount_as_scoped(&mock_server)
+            .await;
 
-    let provider = AssemblyAiSttProvider::with_client(
-        reqwest::Client::new(),
-        "test_key".to_string(),
-        None,
-        None,
-    )
-    .with_api_base_url(mock_server.uri());
+        let provider = AssemblyAiSttProvider::with_client(
+            reqwest::Client::new(),
+            "test_key".to_string(),
+            model.map(str::to_string),
+            None,
+        )
+        .with_api_base_url(mock_server.uri());
 
-    let wav_data = create_test_wav_silence(0.1);
-    let format = AudioFormat {
-        sample_rate: 16000,
-        channels: 1,
-        encoding: AudioEncoding::Wav,
-    };
+        let wav_data = create_test_wav_silence(0.1);
+        let format = AudioFormat {
+            sample_rate: 16000,
+            channels: 1,
+            encoding: AudioEncoding::Wav,
+        };
 
-    let result = provider.transcribe(&wav_data, &format).await;
-    assert_eq!(result.unwrap(), "hello assemblyai");
+        let result = transcribe_uploaded(&provider, &wav_data, &format).await;
+        assert_eq!(result.unwrap(), "hello assemblyai");
 
-    let upload_received = upload_guard.received_requests().await;
-    assert_eq!(upload_received.len(), 1);
+        let upload_received = upload_guard.received_requests().await;
+        assert_eq!(upload_received.len(), 1);
 
-    let upload_req = &upload_received[0];
-    let content_type = upload_req
-        .headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    assert_eq!(content_type, "application/octet-stream");
-    assert_eq!(upload_req.body.len(), wav_data.len());
+        let upload_req = &upload_received[0];
+        let content_type = upload_req
+            .headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(content_type, "application/octet-stream");
+        assert_eq!(upload_req.body.len(), wav_data.len());
 
-    let submit_received = submit_guard.received_requests().await;
-    assert_eq!(submit_received.len(), 1);
+        let submit_received = submit_guard.received_requests().await;
+        assert_eq!(submit_received.len(), 1);
 
-    let submit_body: serde_json::Value =
-        serde_json::from_slice(&submit_received[0].body).expect("valid JSON body");
-    assert_eq!(
-        submit_body["audio_url"].as_str(),
-        Some(format!("{}/upload/abc", mock_server.uri()).as_str())
-    );
-    assert_eq!(
-        submit_body["speech_models"].get(0).and_then(|v| v.as_str()),
-        Some("universal")
-    );
-    assert_eq!(submit_body["punctuate"].as_bool(), Some(true));
-    assert_eq!(submit_body["format_text"].as_bool(), Some(true));
+        let submit_body: serde_json::Value =
+            serde_json::from_slice(&submit_received[0].body).expect("valid JSON body");
+        assert_eq!(
+            submit_body["audio_url"].as_str(),
+            Some(format!("{}/upload/abc", mock_server.uri()).as_str())
+        );
+        assert_eq!(
+            submit_body["speech_models"].get(0).and_then(|v| v.as_str()),
+            Some(model.unwrap_or("universal"))
+        );
+        assert_eq!(submit_body["punctuate"].as_bool(), Some(true));
+        assert_eq!(submit_body["format_text"].as_bool(), Some(true));
 
-    let get_received = get_guard.received_requests().await;
-    assert_eq!(get_received.len(), 1);
+        let get_received = get_guard.received_requests().await;
+        assert_eq!(get_received.len(), 1);
+    }
 }
 
 #[tokio::test]
@@ -454,7 +478,7 @@ async fn test_groq_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello groq");
 
     let received = guard.received_requests().await;
@@ -550,7 +574,7 @@ async fn test_fireworks_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello fireworks");
 
     let received = guard.received_requests().await;
@@ -621,7 +645,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
     let mock_server = MockServer::start().await;
 
     let guard = Mock::given(method("POST"))
-        .and(path("/api/v1/audio/transcriptions"))
+        .and(path("/v1/audio/transcriptions"))
         .and(header("authorization", "Bearer test_key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "text": "hello aquavoice"
@@ -637,7 +661,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
         None,
         Some("hello prompt".to_string()),
     )
-    .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
+    .with_api_base_url(format!("{}/v1", mock_server.uri()));
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -646,7 +670,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello aquavoice");
 
     let received = guard.received_requests().await;
@@ -665,7 +689,7 @@ async fn test_aquavoice_transcribe_sends_expected_request() {
 
     let body = String::from_utf8_lossy(&req.body);
     assert!(body.contains("name=\"model\""));
-    assert!(body.contains("avalon-v1-en"));
+    assert!(body.contains("avalon-v1.5"));
     assert!(body.contains("name=\"prompt\""));
     assert!(body.contains("hello prompt"));
     assert!(body.contains("filename=\"audio.wav\""));
@@ -676,7 +700,7 @@ async fn test_aquavoice_non_success_is_surface_as_api_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/api/v1/audio/transcriptions"))
+        .and(path("/v1/audio/transcriptions"))
         .respond_with(ResponseTemplate::new(403).set_body_string("nope"))
         .expect(1)
         .mount(&mock_server)
@@ -689,7 +713,7 @@ async fn test_aquavoice_non_success_is_surface_as_api_error() {
         None,
         None,
     )
-    .with_api_base_url(format!("{}/api/v1", mock_server.uri()));
+    .with_api_base_url(format!("{}/v1", mock_server.uri()));
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -742,7 +766,7 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello elevenlabs");
 
     let received = guard.received_requests().await;
@@ -986,7 +1010,7 @@ async fn test_whisper_server_transcribe_sends_expected_multipart_and_prompt_is_c
         encoding: AudioEncoding::Wav,
     };
 
-    let result = provider.transcribe(&wav_data, &format).await;
+    let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello from mock");
 
     let received = guard.received_requests().await;
@@ -1103,6 +1127,172 @@ async fn test_openai_whisper_transcribe_sends_expected_multipart_and_prompt_is_c
     assert!(body.contains("name=\"prompt\""));
     assert!(body.contains(&expected_prompt));
     assert!(body.contains("filename=\"audio.wav\""));
+}
+
+#[tokio::test]
+async fn test_openai_current_transcription_language_contract_and_log() {
+    for (model, language) in [
+        ("gpt-transcribe", Some("he")),
+        ("gpt-transcribe", None),
+        ("gpt-4o-transcribe", Some("en")),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .and(header("authorization", "Bearer synthetic-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"text":"test"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let store = crate::request_log::RequestLogStore::new();
+        store.start_request("openai".into(), Some(model.into()));
+        let provider = OpenAiSttProvider::new(
+            "synthetic-key".into(),
+            Some(model.into()),
+            language.map(str::to_string),
+            Some("test vocabulary".into()),
+        )
+        .with_api_base_url(server.uri())
+        .with_request_log_store(Some(store.clone()));
+        let format = AudioFormat {
+            sample_rate: 16000,
+            channels: 1,
+            encoding: AudioEncoding::Wav,
+        };
+        assert_eq!(
+            provider
+                .transcribe(&create_test_wav_silence(0.1), &format)
+                .await
+                .unwrap(),
+            "test"
+        );
+        let requests = server.received_requests().await.unwrap();
+        let body = String::from_utf8_lossy(&requests[0].body);
+        assert!(body.contains(model));
+        assert!(body.contains("test vocabulary"));
+        assert_eq!(
+            body.contains("name=\"languages[]\""),
+            model == "gpt-transcribe" && language.is_some()
+        );
+        assert_eq!(
+            body.contains("name=\"language\""),
+            model != "gpt-transcribe" && language.is_some()
+        );
+        let logs = store.get_logs(None);
+        let fields = &logs[0].stt_request_json.as_ref().unwrap()["fields"];
+        if model == "gpt-transcribe" {
+            assert!(fields.get("language").is_none());
+            assert_eq!(fields["languages"], json!(language.map(|v| vec![v])));
+        } else {
+            assert_eq!(fields["language"], json!(language));
+        }
+    }
+}
+
+#[tokio::test]
+#[allow(clippy::result_large_err)]
+async fn test_openai_live_transcription_ga_websocket_contract() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{
+        handshake::server::{Request, Response},
+        Message,
+    };
+    for model in ["gpt-live-transcribe", "gpt-4o-realtime-transcribe"] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                socket,
+                move |request: &Request, response: Response| {
+                    assert_eq!(
+                        request.uri().to_string(),
+                        "/v1/realtime?intent=transcription"
+                    );
+                    assert_eq!(request.headers()["authorization"], "Bearer synthetic-key");
+                    assert_eq!(
+                        request
+                            .headers()
+                            .get("openai-beta")
+                            .and_then(|v| v.to_str().ok()),
+                        if model == "gpt-live-transcribe" {
+                            None
+                        } else {
+                            Some("realtime=v1")
+                        }
+                    );
+                    Ok(response)
+                },
+            )
+            .await
+            .unwrap();
+            let update = ws.next().await.unwrap().unwrap().into_text().unwrap();
+            let update: serde_json::Value = serde_json::from_str(&update).unwrap();
+            if model == "gpt-live-transcribe" {
+                assert_eq!(update["type"], "session.update");
+                assert_eq!(update["session"]["type"], "transcription");
+                let input = &update["session"]["audio"]["input"];
+                assert_eq!(input["format"], json!({"type":"audio/pcm", "rate":24000}));
+                assert_eq!(
+                    input["transcription"],
+                    json!({"model":"gpt-live-transcribe", "languages":["he"], "prompt":"test vocabulary"})
+                );
+                assert!(input["turn_detection"].is_null());
+            } else {
+                assert_eq!(update["type"], "transcription_session.update");
+                assert_eq!(
+                    update["session"]["input_audio_transcription"],
+                    json!({"model":"gpt-4o-transcribe", "language":"he", "prompt":"test vocabulary"})
+                );
+                assert_eq!(update["session"]["turn_detection"]["type"], "server_vad");
+            }
+            let mut audio_bytes = 0;
+            while let Some(message) = ws.next().await {
+                let message = message.unwrap();
+                if let Message::Text(text) = message {
+                    let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                    if value["type"] == "input_audio_buffer.append" {
+                        use base64::Engine;
+                        audio_bytes += base64::engine::general_purpose::STANDARD
+                            .decode(value["audio"].as_str().unwrap())
+                            .unwrap()
+                            .len();
+                    } else if value["type"] == "input_audio_buffer.commit" {
+                        assert_eq!(audio_bytes, 4800);
+                        for event in [
+                            json!({"type":"input_audio_buffer.committed", "item_id":"item-1", "previous_item_id":null}),
+                            json!({"type":"conversation.item.input_audio_transcription.delta", "item_id":"item-1", "event_id":"delta-1", "delta":"hello"}),
+                            json!({"type":"conversation.item.input_audio_transcription.completed", "item_id":"item-1", "transcript":"hello world"}),
+                        ] {
+                            ws.send(Message::Text(event.to_string().into()))
+                                .await
+                                .unwrap();
+                        }
+                        break;
+                    }
+                }
+            }
+            assert!(audio_bytes > 0);
+        });
+        let provider = OpenAiSttProvider::new(
+            "synthetic-key".into(),
+            Some(model.into()),
+            Some("he".into()),
+            Some("test vocabulary".into()),
+        )
+        .with_api_base_url(format!("http://{address}"));
+        assert!(provider.requires_streaming());
+        let mut session = provider.start_streaming(16000).await.unwrap();
+        let mut partials = session.take_partial_rx().unwrap();
+        session.audio_tx.send(vec![0.0; 1600]).await.unwrap();
+        assert_eq!(session.finalize().await.unwrap(), "hello world");
+        assert_eq!(partials.recv().await.unwrap().text, "hello");
+        assert_eq!(
+            partials.recv().await.unwrap().committed_text.as_deref(),
+            Some("hello world")
+        );
+        server.await.unwrap();
+    }
 }
 
 #[tokio::test]

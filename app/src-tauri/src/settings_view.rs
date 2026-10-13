@@ -175,6 +175,18 @@ pub(crate) fn read_quick_ask_global_config(
     mode: SettingsReadMode,
 ) -> QuickAskGlobalConfig {
     QuickAskGlobalConfig {
+        selection: read_setting(
+            app,
+            mode,
+            "model_selection_quick_ask",
+            None::<crate::model_selection::ModelSelection>,
+        ),
+        fallback_selection: read_setting(
+            app,
+            mode,
+            "model_selection_rewrite",
+            None::<crate::model_selection::ModelSelection>,
+        ),
         provider: read_setting(app, mode, "quick_ask_provider", None::<String>),
         model: read_setting(app, mode, "quick_ask_model", None::<String>),
         system_prompt: read_setting(app, mode, "quick_ask_system_prompt", None::<String>),

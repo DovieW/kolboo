@@ -3,6 +3,10 @@ name: Build (Windows)
 on:
   workflow_call:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration; Community builds remain the default"
+        type: boolean
+        default: false
       build_local_whisper:
         description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
@@ -25,6 +29,10 @@ on:
         value: ${{ jobs.build-windows.outputs.publisher-signed }}
   workflow_dispatch:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration"
+        type: boolean
+        default: false
       build_local_whisper:
         description: "Manually opt in to the extra local-whisper Windows bundle artifact"
         required: false
@@ -158,9 +166,14 @@ jobs:
       # Use a local sccache directory and cache it via actions/cache.
       # This avoids relying on GitHub's artifact cache service, which can be flaky.
       SCCACHE_DIR: ${{ github.workspace }}\\.sccache
-      # 0.3.2 ships Community/BYOK only; service rollout remains separate.
-      TAURI_CLOUD_ENV: community
-      VITE_CLOUD_SERVICE_ENABLED: "false"
+      # Service releases retain account-free BYOK; never embed server credentials.
+      TAURI_CLOUD_ENV: ${{ inputs.service_enabled && 'production' || 'community' }}
+      VITE_CLOUD_SERVICE_ENABLED: ${{ inputs.service_enabled && 'true' || 'false' }}
+      TAURI_API_BASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_API_BASE_URL || '' }}
+      TAURI_MANAGED_INFERENCE_GATEWAY_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_MANAGED_INFERENCE_GATEWAY_URL || '' }}
+      TAURI_SUPABASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_URL || '' }}
+      TAURI_SUPABASE_PUBLISHABLE_KEY: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_PUBLISHABLE_KEY || '' }}
+      TAURI_PUBLIC_AUTH_PAGE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_PUBLIC_AUTH_PAGE_URL || '' }}
       TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
       TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 

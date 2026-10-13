@@ -35,6 +35,14 @@ export function useSettings() {
 	});
 }
 
+export function useUpdateModelSelection() {
+	const queryClient = useQueryClient();
+	return useSettingsInvalidatingMutation((params: {action: import("../tauri/types").ModelAction; selection: import("../tauri/types").ModelSelection | null; scope?: {profileId: string; presetId?: string | null}}) =>
+		tauriAPI.updateModelSelection(params.action, params.selection, params.scope),
+		{onError: () => { void queryClient.invalidateQueries({queryKey: ["settings"]}); }},
+	);
+}
+
 export function useAudioInputDevices() {
 	return useQuery<AudioInputDevicesQueryData>({
 		queryKey: ["audioInputDevices"],
@@ -157,6 +165,12 @@ export function useUpdateAccentColor() {
 export function useUpdateMainWindowCloseBehavior() {
 	return useSettingsInvalidatingMutation((behavior: MainWindowCloseBehavior) =>
 		tauriAPI.updateMainWindowCloseBehavior(behavior),
+	);
+}
+
+export function useUpdateMainWindowShowOnLaunch() {
+	return useSettingsInvalidatingMutation((enabled: boolean) =>
+		tauriAPI.updateMainWindowShowOnLaunch(enabled),
 	);
 }
 

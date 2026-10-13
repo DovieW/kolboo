@@ -16,7 +16,7 @@ export function conservativeCargoJobs(cpuCount = os.cpus().length) {
 // symbols. Merge only identical demangled functions, retaining generic types,
 // closure indices and the source-file boundary. Keep a raw symbol as the alias
 // so the gate's strict Tauri-wrapper checks still recognize LLVM record shapes.
-export function mergeRustBuildIdentities(lcov, demangle) {
+export function mergeRustBuildIdentities(lcov, demangle, reviewedNames = []) {
 	const names = [
 		...new Set(
 			lcov
@@ -26,12 +26,23 @@ export function mergeRustBuildIdentities(lcov, demangle) {
 		),
 	];
 	if (names.length === 0) return lcov;
-	const decoded = demangle(names);
-	if (decoded.length !== names.length || decoded.some((name) => !name))
+	const allNames = [...new Set([...names, ...reviewedNames])];
+	const decoded = demangle(allNames);
+	if (decoded.length !== allNames.length || decoded.some((name) => !name))
 		throw new Error("Incomplete Rust coverage demangling");
 	const identities = new Map(
-		names.map((name, index) => [name, decoded[index]]),
+		allNames.map((name, index) => [name, decoded[index]]),
 	);
+	// Preserve the reviewed raw alias across version/build changes, but only
+	// after full Rust demangling proves the concrete type/method/closure match.
+	// This changes record spelling, not hits, source boundaries or exemptions.
+	const reviewedAliases = new Map();
+	for (const name of reviewedNames) {
+		const identity = identities.get(name);
+		if (!name.startsWith("_R") || identity === name)
+			throw new Error("Reviewed Rust alias must have a decoded identity");
+		reviewedAliases.set(identity, name);
+	}
 	const files = new Map();
 	let aliases = new Map();
 	let definitions = new Map();
@@ -54,7 +65,7 @@ export function mergeRustBuildIdentities(lcov, demangle) {
 			if (!location)
 				throw new Error("Rust function count lacks a source location");
 			const key = `${location}:${identity}`;
-			const alias = aliases.get(key) ?? raw;
+			const alias = aliases.get(key) ?? reviewedAliases.get(identity) ?? raw;
 			aliases.set(key, alias);
 			return line.slice(0, separator + 1) + alias;
 		})
@@ -222,6 +233,14 @@ export function runRustCoverageCli(argv = process.argv.slice(2)) {
 						);
 					return result.stdout.trimEnd().split("\n");
 				},
+				JSON.parse(
+					readFileSync(
+						new URL("./patch-coverage-exceptions.json", import.meta.url),
+						"utf8",
+					),
+				).flatMap((entry) =>
+					(entry.functionInstances ?? []).flatMap((instance) => instance.names),
+				),
 			);
 			writeFileSync(options.outputPath, merged);
 		}

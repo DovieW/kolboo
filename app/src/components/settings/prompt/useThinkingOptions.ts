@@ -28,8 +28,17 @@ const GEMINI3_PRO_THINKING_LEVEL_OPTIONS: SelectOption[] = [
 	{ value: "high", label: "High" },
 ];
 
-function gemini3ThinkingLevelOptions(isFlash: boolean): SelectOption[] {
-	return isFlash
+function gemini3ThinkingLevelOptions(model: string | null): SelectOption[] {
+	if (
+		model?.includes("gemini-3.8-flash") ||
+		model?.includes("gemini-3.7-flash") ||
+		model?.includes("gemini-3.1-pro")
+	) {
+		return GEMINI3_FLASH_THINKING_LEVEL_OPTIONS.filter(
+			(option) => option.value !== "minimal",
+		);
+	}
+	return model?.includes("-flash")
 		? GEMINI3_FLASH_THINKING_LEVEL_OPTIONS
 		: GEMINI3_PRO_THINKING_LEVEL_OPTIONS;
 }
@@ -61,6 +70,12 @@ function withAnthropicCustomThinkingBudgetOption(
  * - gpt-5-pro defaults to and only supports `high`
  */
 export function openAiThinkingEffortsForModel(model: string): string[] {
+	if (model.startsWith("gpt-6-luna") || model.startsWith("gpt-6-sol")) {
+		return ["none", "low", "medium", "high", "xhigh", "max"];
+	}
+	if (model.startsWith("gpt-6")) {
+		return ["low", "medium", "high", "xhigh", "max"];
+	}
 	if (model.startsWith("gpt-5-pro")) {
 		return ["high"];
 	}
@@ -191,7 +206,8 @@ export function useThinkingOptions({
 	const supportsOpenAiThinking =
 		effectiveLlmProvider === "openai" &&
 		!!effectiveLlmModel &&
-		(effectiveLlmModel.startsWith("gpt-5") ||
+		(effectiveLlmModel.startsWith("gpt-6") ||
+			effectiveLlmModel.startsWith("gpt-5") ||
 			effectiveLlmModel.startsWith("o"));
 
 	const supportsGeminiThinkingLevel =
@@ -223,7 +239,8 @@ export function useThinkingOptions({
 	const supportsQuickAskOpenAiThinking =
 		effectiveQuickAskProvider === "openai" &&
 		!!quickAskModelForThinking &&
-		(quickAskModelForThinking.startsWith("gpt-5") ||
+		(quickAskModelForThinking.startsWith("gpt-6") ||
+			quickAskModelForThinking.startsWith("gpt-5") ||
 			quickAskModelForThinking.startsWith("o"));
 
 	const supportsQuickAskGeminiThinkingLevel =
@@ -277,25 +294,25 @@ export function useThinkingOptions({
 	const isGemini3Flash =
 		supportsGeminiThinkingLevel &&
 		!!effectiveLlmModel &&
-		effectiveLlmModel.includes("gemini-3-flash");
+		effectiveLlmModel.includes("-flash");
 
 	const isGemini3Pro =
 		supportsGeminiThinkingLevel &&
 		!!effectiveLlmModel &&
-		effectiveLlmModel.includes("gemini-3-pro");
+		effectiveLlmModel.includes("-pro");
 
 	const isQuickAskGemini3Flash =
 		supportsQuickAskGeminiThinkingLevel &&
 		!!quickAskModelForThinking &&
-		quickAskModelForThinking.includes("gemini-3-flash");
+		quickAskModelForThinking.includes("-flash");
 
 	const geminiThinkingLevelOptions = useMemo<SelectOption[]>(() => {
-		return gemini3ThinkingLevelOptions(isGemini3Flash);
-	}, [isGemini3Flash]);
+		return gemini3ThinkingLevelOptions(effectiveLlmModel);
+	}, [effectiveLlmModel]);
 
 	const quickAskGeminiThinkingLevelOptions = useMemo<SelectOption[]>(() => {
-		return gemini3ThinkingLevelOptions(isQuickAskGemini3Flash);
-	}, [isQuickAskGemini3Flash]);
+		return gemini3ThinkingLevelOptions(quickAskModelForThinking);
+	}, [quickAskModelForThinking]);
 
 	// ─────────────────────────────────────────────────────────────────────────
 	// Gemini thinking budget options (gemini-2.5)

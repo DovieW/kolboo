@@ -54,6 +54,7 @@ pub struct ManagedLlmProvider {
     api_url: String,
     timeout: Option<Duration>,
     request_log_store: Option<RequestLogStore>,
+    selected_provider: Option<String>,
 }
 
 impl ManagedLlmProvider {
@@ -70,6 +71,7 @@ impl ManagedLlmProvider {
             api_url,
             timeout: Some(DEFAULT_LLM_TIMEOUT),
             request_log_store: None,
+            selected_provider: None,
         }
     }
 
@@ -80,6 +82,13 @@ impl ManagedLlmProvider {
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
+        self
+    }
+
+    /// Pin an atomic choice at the authenticated Edge boundary. Legacy callers
+    /// omit the hint and retain the existing catalog-default behavior.
+    pub fn with_selected_provider(mut self, provider: Option<String>) -> Self {
+        self.selected_provider = provider;
         self
     }
 
@@ -108,12 +117,15 @@ impl LlmProvider for ManagedLlmProvider {
 
         let request = ManagedChatRequest::new(self.model.clone(), system_prompt, user_message);
         let idempotency_key = format!("desktop-llm-{}", uuid::Uuid::new_v4());
-        let req = self
+        let mut req = self
             .client
             .post(&self.api_url)
             .bearer_auth(&self.access_token)
             .header("x-idempotency-key", idempotency_key)
             .json(&request);
+        if let Some(provider) = self.selected_provider.as_ref() {
+            req = req.header("x-kolboo-model-provider", provider);
+        }
 
         let response_json = http_json::send_json_request_logged_with_error_parser(
             "Kolboo Managed",

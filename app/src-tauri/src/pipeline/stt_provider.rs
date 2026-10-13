@@ -28,9 +28,6 @@ pub(crate) struct SttProviderParams {
     pub managed_gateway_url: Option<String>,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
-    /// When true, streaming providers should use server-side VAD to auto-commit
-    /// speech segments during recording (enables live output).
-    pub stt_live_output: bool,
 }
 
 /// Create an HTTP client configured for STT requests.
@@ -57,7 +54,6 @@ pub(crate) fn create_cloud_stt_provider(
         managed_gateway_url,
         transcription_prompt,
         request_log_store,
-        stt_live_output,
     } = params;
 
     if api_key.trim().is_empty() {
@@ -76,7 +72,12 @@ pub(crate) fn create_cloud_stt_provider(
 
     let provider: Arc<dyn SttProvider> =
         adapter.build(stt_cloud_adapters::CloudSttProviderBuildContext {
-            client,
+            client: if provider_id == "yiddishlabs" {
+                crate::network::build_custom_provider_client(&proxy_settings)
+                    .map_err(PipelineError::Config)?
+            } else {
+                client
+            },
             model,
             language,
             api_key,
@@ -84,7 +85,6 @@ pub(crate) fn create_cloud_stt_provider(
             managed_gateway_url,
             transcription_prompt,
             request_log_store,
-            stt_live_output,
         });
 
     Ok(provider)

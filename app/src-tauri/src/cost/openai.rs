@@ -297,6 +297,9 @@ pub fn audio_token_rates(model: &str) -> Option<AudioTokenRates> {
 pub fn transcription_usd_micros_per_minute(model: &str) -> Option<UsdMicros> {
     match model.trim() {
         "whisper" | "whisper-1" => Some(6_000),
+        // Duration pricing reviewed 2026-10-08 against the current model pages.
+        "gpt-transcribe" => Some(4_500),
+        "gpt-live-transcribe" => Some(17_000),
         "gpt-4o-transcribe" | "gpt-4o-transcribe-diarize" | "gpt-4o-realtime-transcribe" => {
             Some(6_000)
         }
@@ -384,4 +387,29 @@ pub fn estimate_transcription_cost_from_audio_secs(
     let audio_millis = (audio_secs * 1000.0).round().max(0.0) as u128;
     let micros = mul_div_round_u128(rate_per_min, audio_millis, 60_000);
     Some(micros.min(u128::from(u64::MAX)) as u64)
+}
+
+#[cfg(test)]
+mod current_transcription_tests {
+    use super::*;
+
+    #[test]
+    fn current_transcription_models_have_distinct_duration_estimates() {
+        assert_eq!(
+            estimate_transcription_cost_from_audio_secs("gpt-transcribe", 60.0),
+            Some(4500)
+        );
+        assert_eq!(
+            estimate_transcription_cost_from_audio_secs("gpt-live-transcribe", 60.0),
+            Some(17000)
+        );
+        assert_eq!(
+            estimate_transcription_cost_from_audio_secs("gpt-live-transcribe", 0.0),
+            Some(0)
+        );
+        assert_eq!(
+            estimate_transcription_cost_from_audio_secs("unknown", 60.0),
+            None
+        );
+    }
 }

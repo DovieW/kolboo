@@ -236,7 +236,8 @@ impl SttProvider for DeepgramSttProvider {
     }
 
     fn supports_streaming(&self) -> bool {
-        true
+        !self.detect_language
+            || matches!(self.model.as_str(), "nova-2" | "nova-3" | "nova-3-medical")
     }
 
     async fn start_streaming(&self, sample_rate: u32) -> Result<StreamingSttSession, SttError> {

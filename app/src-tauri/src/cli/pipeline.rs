@@ -537,7 +537,6 @@ fn handle_stream(
             managed_gateway_url: None,
             transcription_prompt: None,
             request_log_store: request_log_store.clone(),
-            stt_live_output: true,
         },
     )
     .map_err(|e| CliError::Runtime(format!("Failed to create STT provider: {e}")))?;

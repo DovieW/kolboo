@@ -1,6 +1,7 @@
 //! User-owned OpenAI-compatible endpoints. Only non-secret metadata lives here.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -10,6 +11,10 @@ pub struct CustomProvider {
     pub base_url: String,
     pub stt_models: Vec<String>,
     pub llm_models: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub stt_model_names: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub llm_model_names: BTreeMap<String, String>,
 }
 
 impl CustomProvider {
@@ -78,6 +83,23 @@ impl CustomProvider {
         if self.stt_models.is_empty() && self.llm_models.is_empty() {
             return Err("Add at least one model".into());
         }
+        for (models, names) in [
+            (&self.stt_models, &mut self.stt_model_names),
+            (&self.llm_models, &mut self.llm_model_names),
+        ] {
+            if names.keys().any(|id| !models.contains(id)) {
+                return Err("Model names must belong to configured model IDs".into());
+            }
+            for name in names.values_mut() {
+                *name = name.trim().to_string();
+                if name.chars().count() > 100 || name.chars().any(char::is_control) {
+                    return Err(
+                        "Use display names up to 100 characters without control characters".into(),
+                    );
+                }
+            }
+            names.retain(|_, name| !name.is_empty());
+        }
         Ok(self)
     }
     pub fn key_name(&self) -> String {
@@ -117,6 +139,8 @@ mod tests {
             base_url: url.into(),
             stt_models: vec![],
             llm_models: vec!["model".into()],
+            stt_model_names: BTreeMap::new(),
+            llm_model_names: BTreeMap::new(),
         }
     }
     #[test]
@@ -138,5 +162,42 @@ mod tests {
         let mut invalid = p;
         invalid.id = "openai".into();
         assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_metadata_and_names_keep_wire_identifiers_unchanged() {
+        let legacy = serde_json::to_value(provider("https://example.test/v1")).unwrap();
+        assert!(legacy.get("llm_model_names").is_none());
+        let mut p: CustomProvider = serde_json::from_value(legacy).unwrap();
+        p.stt_models = vec!["speech".into()];
+        p.stt_model_names
+            .insert("speech".into(), "  My speech model  ".into());
+        p.llm_model_names.insert("model".into(), " ".into());
+        let normalized = p.validate().unwrap();
+        assert_eq!(normalized.stt_models, ["speech"]);
+        assert_eq!(normalized.llm_models, ["model"]);
+        assert_eq!(normalized.stt_model_names["speech"], "My speech model");
+        assert!(normalized.llm_model_names.is_empty());
+        let mut unicode_name = normalized.clone();
+        unicode_name
+            .llm_model_names
+            .insert("model".into(), "א".repeat(100));
+        assert_eq!(
+            unicode_name.validate().unwrap().llm_model_names["model"],
+            "א".repeat(100)
+        );
+        let mut unknown = normalized.clone();
+        unknown
+            .llm_model_names
+            .insert("other".into(), "Other".into());
+        assert!(unknown
+            .validate()
+            .unwrap_err()
+            .contains("configured model IDs"));
+        for bad in ["x".repeat(101), "unsafe\nname".into()] {
+            let mut invalid = normalized.clone();
+            invalid.stt_model_names.insert("speech".into(), bad);
+            assert!(invalid.validate().is_err());
+        }
     }
 }

@@ -7,7 +7,11 @@ import { tauriLicenseAPI } from "./license";
 import { managedInferenceAPI } from "./managedInference";
 import { tauriPolicyAPI } from "./policy";
 import { applySettingsRuntimeSyncPolicy } from "./settingsSync";
-import type { CustomProvider } from "./types.generated";
+import type {
+	AvailableProvidersResponse,
+	CustomProvider,
+	OcrProviderStatus,
+} from "./types.generated";
 
 export type { CustomProvider } from "./types.generated";
 
@@ -35,6 +39,8 @@ import type {
 	LlmProviderInfo,
 	LocalWhisperBackendStatus,
 	ModelOption,
+	ModelAction,
+	ModelSelection,
 	ModelPricing,
 	ModelPricingKind,
 	OpenAiReasoningEffort,
@@ -485,6 +491,9 @@ export const llmAPI = {
 	complete: (params: {
 		provider: string;
 		model?: string | null;
+		action?: ModelAction;
+		modelSelection?: ModelSelection | null;
+		profileId?: string | null;
 		systemPrompt: string;
 		userPrompt: string;
 
@@ -497,6 +506,11 @@ export const llmAPI = {
 		invoke<LlmCompleteResponse>("llm_complete", {
 			// Rust signature: llm_complete(pipeline, args: LlmCompleteArgs)
 			args: {
+				...(params.action ? { action: params.action } : {}),
+				...(params.modelSelection
+					? { modelSelection: params.modelSelection }
+					: {}),
+				...(params.profileId ? { profileId: params.profileId } : {}),
 				provider: params.provider,
 				model: params.model ?? null,
 
@@ -513,6 +527,7 @@ export const llmAPI = {
 
 	iterateRewritePrompt: (params: {
 		profileId?: string | null;
+		presetId?: string | null;
 		mode?: "fixed" | "new";
 		transcript: string;
 		problemOutput: string;
@@ -536,6 +551,7 @@ export const llmAPI = {
 					: null,
 			currentPrompt: params.currentPrompt,
 			profileId: params.profileId ?? null,
+			...(params.presetId ? { presetId: params.presetId } : {}),
 			mode: params.mode ?? null,
 
 			llmProvider: params.llmProvider ?? null,
@@ -556,6 +572,7 @@ export const llmAPI = {
 
 	testRewriteWithPrompt: (params: {
 		profileId?: string | null;
+		presetId?: string | null;
 		transcript: string;
 		prompt: string;
 	}) =>
@@ -563,6 +580,7 @@ export const llmAPI = {
 			transcript: params.transcript,
 			prompt: params.prompt,
 			profileId: params.profileId ?? null,
+			...(params.presetId ? { presetId: params.presetId } : {}),
 		}),
 
 	/**
@@ -609,18 +627,6 @@ export const audioSettingsTestAPI = {
 		),
 };
 
-interface ProviderInfo {
-	value: string;
-	label: string;
-	is_local: boolean;
-	models?: string[] | null;
-}
-
-interface OcrProviderStatus {
-	available: boolean;
-	reason?: string | null;
-}
-
 export interface OverlayPipelineState {
 	pipeline_state: string;
 	ocr_session_id: string | null;
@@ -629,12 +635,6 @@ export interface OverlayPipelineState {
 	ocr_provider: OcrProviderStatus;
 	/** True when STT is done (before LLM / output). Use with ocr_status == "running" to show "waiting for OCR". */
 	stt_complete: boolean;
-}
-
-interface AvailableProvidersResponse {
-	stt: ProviderInfo[];
-	llm: ProviderInfo[];
-	ocr: OcrProviderStatus;
 }
 
 export const configAPI = {
@@ -652,8 +652,12 @@ export const configAPI = {
 		invoke<DefaultSectionsResponse>("get_default_sections"),
 
 	// Available providers (from Tauri, based on configured API keys)
-	getAvailableProviders: () =>
-		invoke<AvailableProvidersResponse>("get_available_providers"),
+	getAvailableProviders: (includeUnconfigured = false) =>
+		includeUnconfigured
+			? invoke<AvailableProvidersResponse>("get_available_providers", {
+					includeUnconfigured: true,
+				})
+			: invoke<AvailableProvidersResponse>("get_available_providers"),
 
 	// Sync pipeline config when settings change
 	syncPipelineConfig: () => invoke<void>("sync_pipeline_config"),
@@ -715,7 +719,8 @@ export const policyAPI = {
 
 export const licenseAPI = {
 	requestEmailCode: (email: string) => tauriLicenseAPI.requestEmailCode(email),
-	verifyEmailCode: (email: string, code: string) => tauriLicenseAPI.verifyEmailCode(email, code),
+	verifyEmailCode: (email: string, code: string) =>
+		tauriLicenseAPI.verifyEmailCode(email, code),
 	cancelLogin: () => tauriLicenseAPI.cancelLogin(),
 	getState: () => tauriLicenseAPI.getState(),
 	getAuthContext: () => tauriLicenseAPI.getAuthContext(),

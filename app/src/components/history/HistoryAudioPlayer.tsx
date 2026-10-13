@@ -59,7 +59,8 @@ export function HistoryAudioPlayer({
 				barWidth: 2,
 				barGap: 2,
 				barRadius: 2,
-				normalize: false,
+				// Scale only the drawing, never the recording or playback volume.
+				normalize: true,
 				interact: true,
 				dragToSeek: true,
 			});

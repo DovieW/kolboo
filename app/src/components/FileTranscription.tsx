@@ -5,6 +5,7 @@ import {
 	Button,
 	Group,
 	Loader,
+	Select,
 	Stack,
 	Text,
 	Title,
@@ -13,6 +14,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FileAudio, FolderOpen, History, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
+import {
+	normalizeSttLanguage,
+	sttLanguageOptionsForModel,
+} from "../lib/sttLanguages";
 import {
 	audioFileName,
 	audioFilesAPI,
@@ -223,9 +228,36 @@ export function FileTranscription({
 							disabled={!preferences || disabled || !!recoveryId || complete}
 							onReadyChange={setModelReady}
 							onChange={(meeting_model) => {
-								setPreferences({ mode: "meeting", meeting_model });
+								setPreferences({
+									...preferences,
+									mode: "meeting",
+									meeting_model,
+								});
 							}}
 						/>
+						{preferences && (
+							<Select
+								label="Language hint"
+								aria-label="File language hint"
+								description="Auto-detect unless you choose a hint. Retries keep this choice."
+								data={sttLanguageOptionsForModel(
+									preferences.meeting_model?.provider,
+									preferences.meeting_model?.model,
+									preferences.language_hint,
+								)}
+								value={preferences.language_hint ?? "auto"}
+								allowDeselect={false}
+								disabled={disabled || !!recoveryId || complete}
+								onChange={(value) =>
+									setPreferences({
+										...preferences,
+										mode: "meeting",
+										meeting_model: preferences.meeting_model,
+										language_hint: normalizeSttLanguage(value),
+									})
+								}
+							/>
+						)}
 						{initial.isError && !preferences && (
 							<Alert color="red">
 								Couldn’t load transcription options.{" "}

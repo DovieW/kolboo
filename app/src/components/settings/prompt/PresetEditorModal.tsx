@@ -11,6 +11,11 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { Trash2 } from "lucide-react";
+import { ActionModelPicker } from "../../ActionModelPicker";
+import { TranscriptionInputModeControl } from "./TranscriptionInputModeControl";
+import { useSettings } from "../../../lib/queries/settings";
+import { resolveModelPreference } from "../../../lib/modelSelection";
+import { isStreamingOnlySttModel } from "../../../lib/modelOptions";
 import type { CleanupPromptSections, RewritePreset } from "../../../lib/tauri";
 import { PromptSectionEditor } from "../PromptSectionEditor";
 import type { PresetRuntimeFallbackViews } from "./effectivePromptSettings";
@@ -141,6 +146,18 @@ export function PresetEditorModal({
 	isSavingCleanupSections,
 	isSavingRewriteEnabled,
 }: PresetEditorModalProps) {
+	const { data: settings } = useSettings();
+	const profile = settings?.rewrite_program_prompt_profiles.find(
+		(profile) => profile.id === activeProfileId,
+	);
+	const transcription = resolveModelPreference(
+		"transcription",
+		settings,
+		profile,
+		selectedPreset,
+	);
+	const inheritedInputMode =
+		profile?.stt_input_mode ?? settings?.stt_input_mode ?? "auto";
 	const formatSource = (
 		source: PresetRuntimeFallbackViews[keyof PresetRuntimeFallbackViews]["source"],
 	) => {
@@ -331,6 +348,47 @@ export function PresetEditorModal({
 							}}
 						/>
 
+						<ActionModelPicker
+							action="transcription"
+							label="Preset transcription model"
+							profileId={activeProfileId}
+							presetId={selectedPreset.id}
+							disabled={isSavingProfiles}
+						/>
+						<ActionModelPicker
+							action="rewrite"
+							label="Preset rewrite model"
+							profileId={activeProfileId}
+							presetId={selectedPreset.id}
+							disabled={isSavingProfiles}
+						/>
+						<ActionModelPicker
+							action="quick_ask"
+							label="Preset Quick Ask model"
+							profileId={activeProfileId}
+							presetId={selectedPreset.id}
+							disabled={isSavingProfiles}
+						/>
+						<ActionModelPicker
+							action="quick_replace"
+							label="Preset Quick Replace model"
+							profileId={activeProfileId}
+							presetId={selectedPreset.id}
+							disabled={isSavingProfiles}
+						/>
+						<TranscriptionInputModeControl
+							value={selectedPreset.stt_input_mode ?? null}
+							inheritedMode={inheritedInputMode}
+							canInherit
+							disabled={isSavingProfiles}
+							realtimeOnly={isStreamingOnlySttModel(
+								transcription.provider ?? "",
+								transcription.model ?? "",
+							)}
+							onChange={(mode) =>
+								onUpdatePreset(selectedPreset.id, { stt_input_mode: mode })
+							}
+						/>
 						<div>
 							<Text size="xs" c="dimmed" mb={4}>
 								Rewrite step

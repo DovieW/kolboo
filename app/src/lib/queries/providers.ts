@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
-import { LLM_MODELS, publishedManagedModels } from "../modelOptions";
+import {
+	configuredProviderModelOptions,
+	LLM_MODELS,
+	publishedManagedModels,
+} from "../modelOptions";
 import {
 	byokModelsWithLiveCatalog,
 	fetchModelsDevByokLlmCatalog,
@@ -77,12 +81,10 @@ export function useByokLlmModels(enabled = true) {
 		() => ({
 			...byokModelsWithLiveCatalog(LLM_MODELS, query.data),
 			...Object.fromEntries(
-				(providers.data?.llm ?? [])
-					.filter((p) => p.models)
-					.map((p) => [
-						p.value,
-						(p.models ?? []).map((value) => ({ value, label: value })),
-					]),
+				(providers.data?.llm ?? []).flatMap((p) => {
+					const models = configuredProviderModelOptions(p);
+					return models ? [[p.value, models]] : [];
+				}),
 			),
 		}),
 		[query.data, providers.data],
@@ -145,6 +147,13 @@ export function useUpdateSTTUseManagedInference() {
 export function useUpdateSTTLiveOutput() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateSTTLiveOutput(enabled),
+	);
+}
+
+export function useUpdateSTTInputMode() {
+	return useSettingsInvalidatingMutation(
+		(mode: import("../tauri").SttInputMode) =>
+			tauriAPI.updateSTTInputMode(mode),
 	);
 }
 

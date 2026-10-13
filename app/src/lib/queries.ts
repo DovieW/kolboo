@@ -18,3 +18,4 @@ export {
 	toManagedInferenceMessage,
 } from "./queries/shared";
 export * from "./queries/transcription";
+export * from "./queries/modelChoices";

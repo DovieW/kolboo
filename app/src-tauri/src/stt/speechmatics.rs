@@ -39,6 +39,8 @@ pub struct SpeechmaticsSttProvider {
     language: String,
     request_log_store: Option<RequestLogStore>,
     proxy_settings: ProxySettings,
+    batch_ws_url: String,
+    streaming_ws_url: String,
 }
 
 impl SpeechmaticsSttProvider {
@@ -55,6 +57,8 @@ impl SpeechmaticsSttProvider {
             language: Self::normalize_language(language),
             request_log_store: None,
             proxy_settings: ProxySettings::default(),
+            batch_ws_url: realtime::DEFAULT_WS_URL.into(),
+            streaming_ws_url: realtime::STREAMING_WS_URL.into(),
         }
     }
 
@@ -78,7 +82,7 @@ impl SpeechmaticsSttProvider {
     }
 
     fn normalize_language(language: Option<String>) -> String {
-        language::normalize_language_setting(language).unwrap_or_else(|| "en".to_string())
+        language::normalize_language_setting(language).unwrap_or_else(|| "auto".to_string())
     }
 
     fn decode_to_pcm_s16le(
@@ -139,36 +143,6 @@ impl SpeechmaticsSttProvider {
                 }
 
                 Ok((pcm, sample_rate, channels))
-            }
-        }
-    }
-
-    fn append_transcript_from_results(out: &mut String, results: &[JsonValue]) {
-        for r in results {
-            let t = r.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let content = r
-                .get("alternatives")
-                .and_then(|a| a.as_array())
-                .and_then(|a| a.first())
-                .and_then(|alt| alt.get("content"))
-                .and_then(|c| c.as_str());
-
-            let Some(content) = content else {
-                continue;
-            };
-
-            if t == "word" {
-                if !out.is_empty() {
-                    out.push(' ');
-                }
-                out.push_str(content);
-            } else {
-                // punctuation/end-of-utterance etc.
-                out.push_str(content);
-            }
-
-            if r.get("is_eos").and_then(|v| v.as_bool()).unwrap_or(false) {
-                out.push('\n');
             }
         }
     }

@@ -155,10 +155,19 @@ export function byokModelsWithLiveCatalog(
 ): ByokLlmModelCatalog {
 	if (!live) return bundled;
 	return Object.fromEntries(
-		Object.entries(bundled).map(([provider, models]) => [
-			provider,
-			live[provider]?.length ? live[provider] : models,
-		]),
+		Object.entries(bundled).map(([provider, models]) => {
+			const discovered = live[provider] ?? [];
+			const discoveredIds = new Set(discovered.map((model) => model.value));
+			// Third-party discovery can lag a vendor launch. Keep verified bundled
+			// models available, but prefer discovered names/pricing for duplicates.
+			return [
+				provider,
+				[
+					...discovered,
+					...models.filter((model) => !discoveredIds.has(model.value)),
+				],
+			];
+		}),
 	);
 }
 

@@ -1,4 +1,19 @@
 import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
+import type {
+	RecordingPreferences as GeneratedRecordingPreferences,
+	MeetingModel,
+	ModelAction,
+	ModelSelection,
+} from "./types.generated";
+
+export type {
+	ModelAction,
+	ModelSelection,
+	SttInputMode,
+	SttPartialTranscriptPayload,
+} from "./types.generated";
+import type { SttInputMode } from "./types.generated";
+export type ModelSelections = Partial<Record<ModelAction, ModelSelection>>;
 
 /**
  * Connection state for UI display (maps from pipeline state)
@@ -40,13 +55,10 @@ export interface SpeakerSegment {
 	end_seconds: number;
 	part: number;
 }
-export interface RecordingPreferences {
+export interface RecordingPreferences
+	extends Omit<GeneratedRecordingPreferences, "mode" | "meeting_model"> {
 	mode: "dictation" | "meeting";
-	meeting_model: {
-		provider: string;
-		model: string;
-		use_managed?: boolean;
-	} | null;
+	meeting_model: MeetingModel | null;
 }
 
 export interface FileImportResult {
@@ -168,6 +180,7 @@ export interface IntentRouterSettings {
 }
 
 export interface RewritePreset {
+	model_selections?: ModelSelections;
 	id: string;
 	name: string;
 
@@ -186,6 +199,7 @@ export interface RewritePreset {
 	stt_provider?: string | null;
 	stt_model?: string | null;
 	stt_language?: string | null;
+	stt_input_mode?: SttInputMode | null;
 	stt_timeout_seconds?: number | null;
 	llm_provider?: string | null;
 	llm_model?: string | null;
@@ -204,6 +218,7 @@ export interface RewritePreset {
 }
 
 export interface RewriteProgramPromptProfile {
+	model_selections?: ModelSelections;
 	id: string;
 	name: string;
 	program_paths: string[];
@@ -233,6 +248,7 @@ export interface RewriteProgramPromptProfile {
 	stt_provider?: string | null;
 	stt_model?: string | null;
 	stt_language?: string | null;
+	stt_input_mode?: SttInputMode | null;
 	stt_timeout_seconds?: number | null;
 	llm_provider?: string | null;
 	llm_model?: string | null;
@@ -435,10 +451,6 @@ export type PipelineTranscriptReadyPayload = string;
 
 export type EmptyEventPayload = null;
 
-export interface SttPartialTranscriptPayload {
-	text: string;
-}
-
 export interface PolicyConstraintViolation {
 	path: string;
 	reason?: string | null;
@@ -487,8 +499,16 @@ export interface OrgContext {
 }
 
 export interface LicenseState {
-    beta_access?: { source: "complimentary_beta"; status: "approved" | "revoked"; limits: TierLimits } | null;
-    usage_period?: { period_start: string; monthly_reset_at: string; daily_reset_at: string } | null;
+	beta_access?: {
+		source: "complimentary_beta";
+		status: "approved" | "revoked";
+		limits: TierLimits;
+	} | null;
+	usage_period?: {
+		period_start: string;
+		monthly_reset_at: string;
+		daily_reset_at: string;
+	} | null;
 	tier: LicenseTier;
 	status: LicenseStatus;
 	user_id: string | null;
@@ -837,6 +857,7 @@ export type LocalWhisperLoadMode = "manual" | "on_transcribe" | "on_launch";
 export type MainWindowCloseBehavior = "exit_program" | "minimize_to_tray";
 
 export interface AppSettings {
+	model_selections?: ModelSelections;
 	// Settings schema version (used for migrations).
 	settings_version: number;
 	policy_state: PolicyState;
@@ -870,6 +891,7 @@ export interface AppSettings {
 	stt_provider: string | null;
 	stt_model: string | null;
 	stt_language: string;
+	stt_input_mode: SttInputMode;
 	// Global STT prompt (applies to all transcriptions when supported by the selected provider/model)
 	stt_transcription_prompt: string | null;
 	// Prefer the managed STT transport for catalog-supported models when the
@@ -966,6 +988,8 @@ export interface AppSettings {
 
 	/** What the window close button does for the main/settings window. */
 	main_window_close_behavior: MainWindowCloseBehavior;
+	/** Show the main window on manual launch and at login, rather than tray-only. */
+	main_window_show_on_launch: boolean;
 
 	// Hallucination protection (quiet-audio gate)
 	quiet_audio_gate_enabled: boolean;

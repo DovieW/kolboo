@@ -3,12 +3,16 @@ name: Build (macOS)
 on:
   workflow_call:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration; Community builds remain the default"
+        type: boolean
+        default: false
       architecture:
         description: "Mac architecture to package"
         required: true
         type: string
       release_build:
-        description: "Use release Sentry configuration and require release telemetry assets"
+        description: "Require release telemetry assets and signed automatic-update packages"
         required: false
         type: boolean
         default: false
@@ -18,6 +22,10 @@ on:
         value: ${{ jobs.build-macos.outputs.artifact-name }}
   workflow_dispatch:
     inputs:
+      service_enabled:
+        description: "Embed public account configuration"
+        type: boolean
+        default: false
       architecture:
         description: "Architecture for the private test artifact"
         required: true
@@ -50,9 +58,14 @@ jobs:
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: packed
       CARGO_TERM_COLOR: always
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
-      # 0.3.2 ships Community/BYOK only; service rollout remains separate.
-      TAURI_CLOUD_ENV: community
-      VITE_CLOUD_SERVICE_ENABLED: "false"
+      # Service releases retain account-free BYOK; never embed server credentials.
+      TAURI_CLOUD_ENV: ${{ inputs.service_enabled && 'production' || 'community' }}
+      VITE_CLOUD_SERVICE_ENABLED: ${{ inputs.service_enabled && 'true' || 'false' }}
+      TAURI_API_BASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_API_BASE_URL || '' }}
+      TAURI_MANAGED_INFERENCE_GATEWAY_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_MANAGED_INFERENCE_GATEWAY_URL || '' }}
+      TAURI_SUPABASE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_URL || '' }}
+      TAURI_SUPABASE_PUBLISHABLE_KEY: ${{ inputs.service_enabled && vars.KOLBOO_PROD_SUPABASE_PUBLISHABLE_KEY || '' }}
+      TAURI_PUBLIC_AUTH_PAGE_URL: ${{ inputs.service_enabled && vars.KOLBOO_PROD_PUBLIC_AUTH_PAGE_URL || '' }}
       TAURI_POSTHOG_API_KEY: ${{ vars.POSTHOG_PUBLIC_PROJECT_TOKEN }}
       TAURI_POSTHOG_HOST: ${{ vars.POSTHOG_PUBLIC_HOST }}
 
@@ -157,14 +170,22 @@ jobs:
           TAURI_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
           VITE_SENTRY_ENV: ${{ steps.build-meta.outputs.environment }}
           VITE_SENTRY_RELEASE: ${{ steps.build-meta.outputs.release }}
-          VITE_SIGNED_UPDATER_ENABLED: "false"
+          VITE_SIGNED_UPDATER_ENABLED: ${{ inputs.release_build && 'true' || 'false' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.release_build && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.release_build && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
         shell: bash
         run: |
           set -euo pipefail
           export RUSTC_WRAPPER=sccache
+          config=src-tauri/tauri.macos-development.conf.json
+          if [[ "${{ inputs.release_build }}" == "true" ]]; then
+            test -n "$TAURI_SIGNING_PRIVATE_KEY"
+            test -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            config=src-tauri/tauri.macos-release.conf.json
+          fi
           pnpm tauri build \
             --target "$KOLBOO_BUILD_TARGET" \
-            --config src-tauri/tauri.macos-development.conf.json
+            --config "$config"
 
       - name: Verify and upload native symbols
         working-directory: app
@@ -254,6 +275,13 @@ jobs:
             "artifacts/Kolboo-${KOLBOO_ARTIFACT_SUFFIX}.app.zip"
           cp "${{ steps.bundles.outputs.dmg_path }}" \
             "artifacts/Kolboo-${KOLBOO_ARTIFACT_SUFFIX}.dmg"
+          if [[ "${{ inputs.release_build }}" == "true" ]]; then
+            archive="${{ steps.bundles.outputs.app_path }}.tar.gz"
+            test -s "$archive"
+            test -s "$archive.sig"
+            cp "$archive" "artifacts/Kolboo-${KOLBOO_ARTIFACT_SUFFIX}.app.tar.gz"
+            cp "$archive.sig" "artifacts/Kolboo-${KOLBOO_ARTIFACT_SUFFIX}.app.tar.gz.sig"
+          fi
 
           cat > artifacts/build-evidence.txt <<EOF
           architecture=${{ inputs.architecture }}
@@ -264,7 +292,7 @@ jobs:
           sentry_native_symbols_uploaded=${SENTRY_NATIVE_SYMBOLS_UPLOADED:-false}
           build_target=${KOLBOO_BUILD_TARGET}
           signing=ad-hoc
-          updater_enabled=false
+          updater_enabled=${{ inputs.release_build && 'true' || 'false' }}
           git_ref=${GITHUB_REF}
           git_sha=${GITHUB_SHA}
           run_id=${GITHUB_RUN_ID}

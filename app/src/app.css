@@ -344,15 +344,9 @@ body {
 	}
 }
 
-@media (prefers-reduced-motion: reduce) {
-	.overlay-wave-pulse {
-		animation: none;
-		opacity: 0;
-	}
-	.overlay-wave--processing .overlay-wave-base {
-		opacity: 0.45;
-	}
-}
+/* Keep this small processing/status indicator visible and animated even when
+ * the desktop requests reduced motion (including Windows remote sessions).
+ * This exception is specific to the loading wave, not other UI animations. */
 
 /* Hover-revealed preset controls (separate hover window).
 

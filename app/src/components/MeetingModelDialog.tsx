@@ -9,8 +9,20 @@ import {
 	Text,
 } from "@mantine/core";
 import { useState } from "react";
-import { useTranscriptionModels } from "../lib/queries/transcriptionModels";
+import {
+	modelSelectionKey,
+	recordingModelFromSelection,
+	recordingModelSelection,
+	submitModelChoice,
+} from "../lib/modelSelection";
+import { useModelChoices } from "../lib/queries/modelChoices";
+import {
+	normalizeSttLanguage,
+	sttLanguageOptionsForModel,
+} from "../lib/sttLanguages";
 import type { RecordingPreferences } from "../lib/tauri/types";
+import { useModelNavigation } from "./ModelNavigation";
+import { ModelPicker } from "./ModelPicker";
 
 export function MeetingModelDialog({
 	preferences,
@@ -25,13 +37,23 @@ export function MeetingModelDialog({
 	saving: boolean;
 	error?: string | null;
 }) {
-	const { options, loading, failedSources } = useTranscriptionModels();
+	const {
+		choices,
+		setupProviders,
+		loading,
+		failedSources,
+		managedMessage,
+		retry,
+	} = useModelChoices("meeting");
+	const navigation = useModelNavigation();
 	const [selection, setSelection] = useState(
-		preferences.meeting_model
-			? `${preferences.meeting_model.provider}::${preferences.meeting_model.model}::${preferences.meeting_model.use_managed ? "managed" : "byok"}`
-			: null,
+		recordingModelSelection(preferences.meeting_model),
 	);
-	const chosen = selection ? options.get(selection) : undefined;
+	const [language, setLanguage] = useState(preferences.language_hint ?? "auto");
+	const selectionKey = selection ? modelSelectionKey(selection) : "";
+	const chosen = choices.find(
+		(choice) => modelSelectionKey(choice.selection) === selectionKey,
+	);
 	return (
 		<Modal
 			opened
@@ -59,7 +81,9 @@ export function MeetingModelDialog({
 					<Alert color="orange" title="Some models couldn't load">
 						<Text size="sm">
 							Couldn't load {failedSources.map(({ label }) => label).join(", ")}
-							.{options.size > 0 && " You can still choose an available model."}
+							.
+							{choices.some((choice) => choice.ready) &&
+								" You can still choose an available model."}
 						</Text>
 						<Button
 							variant="subtle"
@@ -68,47 +92,59 @@ export function MeetingModelDialog({
 							disabled={
 								saving || failedSources.some(({ query }) => query.isFetching)
 							}
-							onClick={() => {
-								void Promise.allSettled(
-									failedSources.map(({ query }) => query.refetch()),
-								);
-							}}
+							onClick={retry}
 						>
 							Retry loading models
 						</Button>
 					</Alert>
 				)}
-				<Select
+				<ModelPicker
 					label="Model"
-					placeholder={
-						loading && !options.size ? "Loading models…" : "Choose a model"
-					}
-					nothingFoundMessage={
-						loading ? "Loading models…" : "No matching models"
-					}
-					searchable
-					data={[...options.values()]}
+					loading={loading}
+					choices={choices}
+					setupProviders={setupProviders}
 					value={selection}
 					onChange={setSelection}
 					disabled={saving}
+					managedMessage={managedMessage}
+					onRetry={retry}
+					onSetup={navigation?.setup}
+					onManagedAccess={navigation?.account}
+				/>
+				<Select
+					label="Language hint"
+					aria-label="Meeting language hint"
+					description="Auto-detect unless you choose a hint. Saved with the recording for retries."
+					data={sttLanguageOptionsForModel(
+						selection?.provider_id,
+						selection?.model_id,
+						language,
+					)}
+					value={language}
+					allowDeselect={false}
+					disabled={saving}
+					onChange={(value) => setLanguage(normalizeSttLanguage(value))}
 				/>
 				<Text size="xs" c="dimmed">
 					For speaker labels, select GPT-4o Transcribe · speaker labels. Managed
 					models must be enabled by Kolboo; other cloud models require your key
 					in Settings → Providers.
 				</Text>
-				{!options.size && !loading && failedSources.length === 0 && (
+				{choices.length === 0 && !loading && failedSources.length === 0 && (
 					<Text size="sm">
 						No models are available. Configure a provider in Settings, or
 						refresh your managed access.
 					</Text>
 				)}
-				{selection && !chosen && !loading && failedSources.length === 0 && (
-					<Alert color="orange">
-						Your saved model is no longer available. Choose another model to
-						change this setting; your saved choice has not been replaced.
-					</Alert>
-				)}
+				{selection &&
+					!chosen?.ready &&
+					!loading &&
+					failedSources.length === 0 && (
+						<Alert color="orange">
+							Your saved model is no longer available. Choose another model to
+							change this setting; your saved choice has not been replaced.
+						</Alert>
+					)}
 				{error && (
 					<Alert color="red" title="Could not save model">
 						{error}
@@ -119,18 +155,16 @@ export function MeetingModelDialog({
 						Cancel
 					</Button>
 					<Button
-						disabled={!chosen}
+						disabled={!chosen?.ready}
 						loading={saving}
 						onClick={() => {
-							if (chosen)
+							submitModelChoice(choices, selectionKey, saving, (model) =>
 								onSave({
 									...preferences,
-									meeting_model: {
-										provider: chosen.provider,
-										model: chosen.model,
-										use_managed: chosen.use_managed,
-									},
-								});
+									language_hint: language,
+									meeting_model: recordingModelFromSelection(model),
+								}),
+							);
 						}}
 					>
 						Save

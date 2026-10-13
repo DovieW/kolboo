@@ -21,6 +21,7 @@ mod audio_capture;
 mod audio_import;
 mod audio_mute;
 mod audio_normalization;
+mod automatic_updates;
 mod bootstrap;
 mod cli;
 mod clipboard_context;
@@ -34,6 +35,7 @@ mod history;
 mod history_request_lifecycle;
 mod http;
 mod licensing;
+mod model_selection;
 pub use licensing::{BetaAccess, LicenseState, UsagePeriod};
 mod llm;
 mod managed_inference;
@@ -83,11 +85,12 @@ pub use event_payloads::{
     OverlayAudioLevelPayload, OverlayOcrContextUnavailablePayload, PipelineErrorPayload,
     PipelineStateEvent, PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload,
     QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload,
-    SystemEvent,
+    SttPartialTranscriptPayload, SystemEvent,
 };
 
 pub use audio_capture::AudioCaptureDiagnostics;
 pub use audio_capture::AudioLevelStats;
+pub use automatic_updates::UpdateStatus;
 pub use commands::audio::MicTestAudioLevelPayload;
 pub use commands::config::AvailableProvidersResponse;
 pub use commands::config::DefaultSectionsResponse;
@@ -98,6 +101,7 @@ pub use commands::history::HistoryDeleteMode;
 pub use commands::history::HistoryDeleteOptions;
 pub use commands::history::HistoryDeleteResult;
 pub use commands::llm::IterateRewritePromptResponse;
+pub use commands::llm::LlmCompleteArgs;
 pub use commands::llm::LlmCompleteResponse;
 pub use commands::llm::LlmProviderInfo;
 pub use commands::llm::TestLlmRewriteResponse;
@@ -125,6 +129,9 @@ pub use history::HistoryActivity;
 pub use history::HistoryPageQuery;
 pub use history::HistoryPageResult;
 pub use history::{HistoryDetail, HistoryEdit, HistoryEditInput};
+pub use model_selection::{
+    LoadedModelSettings, ModelAction, ModelSelection, ModelSelections, ModelSource,
+};
 pub use recordings::options::{RecordingMode, RecordingPreferences};
 pub use recordings::RecordingWaveform;
 pub use recordings::RecordingsStats;
@@ -134,6 +141,7 @@ pub use settings::IntentRouterSettings;
 pub use settings::ProxySettings;
 pub use settings::RewritePreset;
 pub use settings::RewriteProgramPromptProfile;
+pub use settings::SttInputMode;
 pub use windows_apps::OpenWindowInfo;
 
 #[cfg(target_os = "windows")]
@@ -794,6 +802,7 @@ pub(crate) fn stop_recording(
                                 sessions::normal_dictation_output::execute_normal_dictation_output(
                                     &app_clone,
                                     sessions::normal_dictation_output::NormalDictationOutputRequest {
+                                        session: crate::text::inject::OutputSession { pipeline: pipeline_clone.clone(), epoch },
                                         output_value: output_value.as_str(),
                                         output_intent,
                                         live_output_completed: result.live_output_completed,
@@ -1116,12 +1125,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(automatic_updates::init())
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
         .manage(TrayKeepAlive::default())
         .manage(MicTestMeterState::default())
         .manage(commands::whisper::WhisperDownloadManager::default())
         .invoke_handler(tauri::generate_handler![
+            automatic_updates::get_update_status,
+            automatic_updates::check_for_updates,
+            automatic_updates::install_update,
             commands::audio::play_audio_cue_preview,
             commands::audio::list_audio_input_devices,
             commands::audio::list_audio_input_devices_v2,
@@ -1252,6 +1265,7 @@ pub fn run() {
             commands::config::get_runtime_config,
             commands::config::get_available_providers,
             commands::config::get_custom_providers,
+            commands::config::get_model_selection_settings,
             commands::config::save_custom_provider,
             commands::config::delete_custom_provider,
             commands::config::sync_pipeline_config,
@@ -1264,7 +1278,6 @@ pub fn run() {
             // LLM formatting commands
             commands::llm::get_llm_default_prompts,
             commands::llm::get_llm_providers,
-            commands::llm::update_llm_config,
             commands::llm::update_llm_prompts,
             commands::llm::get_llm_config,
             commands::llm::test_llm_rewrite,
@@ -1403,8 +1416,8 @@ pub fn run() {
             bootstrap::main_window::setup(app.handle());
 
             // Startup window visibility:
-            // - Show the main window only on first-run (when the setup guide is pending).
-            // - Otherwise, keep it hidden; the tray icon is the explicit entrypoint.
+            // First-run remains visible. Later manual/login launches follow
+            // the global UI preference (tray-only by default).
             #[cfg(desktop)]
             {
                 let guide_state: String = get_setting_from_store(
@@ -1413,10 +1426,15 @@ pub fn run() {
                     "pending".to_string(),
                 );
 
+                let show_on_launch: bool = get_setting_from_store(
+                    app.handle(),
+                    "main_window_show_on_launch",
+                    false,
+                );
                 if let Some(main) = app.get_webview_window("main") {
-                    if guide_state == "pending" {
+                    if bootstrap::startup::should_show_window(&guide_state, show_on_launch) {
                         log::info!(
-                            "Startup: settings guide is pending -> showing main window"
+                            "Startup: first-run or show-on-launch preference -> showing main window"
                         );
                         let _ = main.show();
                         let _ = main.unminimize();
@@ -1633,6 +1651,11 @@ pub fn run() {
 
             // Setup system tray
             bootstrap::setup_tray(app.handle())?;
+
+            automatic_updates::setup(
+                app.handle(),
+                option_env!("VITE_SIGNED_UPDATER_ENABLED") == Some("true"),
+            );
 
             Ok(())
         })

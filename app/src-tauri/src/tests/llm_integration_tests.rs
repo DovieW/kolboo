@@ -14,6 +14,115 @@ use serde_json::json;
 use wiremock::matchers::{body_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+#[tokio::test]
+async fn test_openai_current_models_reasoning_sampling_and_structured_contract() {
+    for (model, effort, expected, temperature) in [
+        ("gpt-6.1-sol", None, None, false),
+        ("gpt-6-astra", Some("max"), Some("max"), false),
+        ("gpt-6.1-sol", Some("none"), None, false),
+        ("gpt-6-luna", Some("none"), Some("none"), true),
+        ("gpt-6-sol", Some("high"), Some("high"), false),
+        ("gpt-6-luna", Some("minimal"), None, false),
+        ("gpt-5.1", Some("none"), Some("none"), true),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .and(header("authorization", "Bearer test_key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "output_text": "{\"rewritten_text\":\"edited\"}"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let provider = OpenAiLlmProvider::with_model("test_key".into(), model.into())
+            .with_api_base_url(server.uri())
+            .with_reasoning_effort(effort.map(str::to_string));
+        assert_eq!(provider.complete("sys", "user").await.unwrap(), "edited");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["model"], model);
+        assert_eq!(body["reasoning"]["effort"].as_str(), expected);
+        assert_eq!(body.get("temperature").is_some(), temperature);
+        assert_eq!(body["text"]["format"]["type"], "json_schema");
+        assert_eq!(body["text"]["format"]["strict"], true);
+        assert_eq!(body["input"][0]["role"], "system");
+        assert_eq!(body["input"][1]["content"], "user");
+    }
+}
+
+#[tokio::test]
+async fn test_gemini_current_models_thinking_and_structured_contract() {
+    for (model, level, expected) in [
+        ("gemini-3.8-flash", "minimal", None),
+        ("gemini-3.8-flash", "medium", Some("medium")),
+        ("gemini-3.7-flash", "low", Some("low")),
+        ("gemini-3.1-pro-preview", "medium", Some("medium")),
+        ("gemini-3.1-pro-preview", "minimal", None),
+        ("gemini-3.6-flash", "minimal", Some("minimal")),
+        ("gemini-3.5-flash-lite", "minimal", Some("minimal")),
+        ("models/gemini-3-pro-preview", "medium", None),
+        ("models/gemini-3-flash-preview", "medium", Some("medium")),
+    ] {
+        let server = MockServer::start().await;
+        let name = model.strip_prefix("models/").unwrap_or(model);
+        Mock::given(method("POST"))
+            .and(path(format!("/v1beta/models/{name}:generateContent")))
+            .and(header("x-goog-api-key", "test_key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "{\"rewritten_text\":\"edited\"}"}]}}]
+            })))
+            .expect(1).mount(&server).await;
+        let provider = GeminiLlmProvider::with_client(
+            reqwest::Client::new(),
+            "test_key".into(),
+            Some(model.into()),
+        )
+        .with_api_base_url(format!("{}/v1beta", server.uri()))
+        .with_thinking_level(Some(level.into()));
+        assert_eq!(provider.complete("sys", "user").await.unwrap(), "edited");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        let config = &body["generationConfig"];
+        assert_eq!(config["thinkingConfig"]["thinkingLevel"].as_str(), expected);
+        assert!(config.get("temperature").is_none());
+        assert!(config.get("thinkingBudget").is_none());
+        assert_eq!(config["responseMimeType"], "application/json");
+        assert_eq!(
+            config["responseJsonSchema"]["required"],
+            json!(["rewritten_text"])
+        );
+        assert_eq!(body["contents"][0]["role"], "user");
+    }
+}
+
+#[tokio::test]
+async fn test_anthropic_current_models_ignore_legacy_budget_and_extract_only_text() {
+    for model in [
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "thinking", "thinking": "", "signature": "synthetic"}, {"type": "text", "text": "edited"}],
+                "model": model, "role": "assistant"
+            })))
+            .expect(1).mount(&server).await;
+        let provider = AnthropicLlmProvider::with_model("test_key".into(), model.into())
+            .with_api_base_url(format!("{}/v1/messages", server.uri()))
+            .with_thinking_budget(Some(4000));
+        assert_eq!(provider.complete("sys", "user").await.unwrap(), "edited");
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(body["model"], model);
+        assert!(body.get("thinking").is_none());
+    }
+}
+
 #[test]
 fn test_openai_llm_provider_implements_trait() {
     let provider = OpenAiLlmProvider::new("test_key".to_string());
@@ -25,7 +134,7 @@ fn test_openai_llm_provider_implements_trait() {
 fn test_anthropic_llm_provider_implements_trait() {
     let provider = AnthropicLlmProvider::new("test_key".to_string());
     assert_eq!(provider.name(), "anthropic");
-    assert_eq!(provider.model(), "claude-3-haiku-20240307");
+    assert_eq!(provider.model(), "claude-haiku-5-5");
 }
 
 #[test]
@@ -266,6 +375,26 @@ async fn test_managed_complete_parses_stable_api_edge_error() {
 }
 
 #[tokio::test]
+async fn managed_atomic_choice_sends_exact_provider_hint_and_raw_model() {
+    let server = MockServer::start().await;
+    let model = "raw/model-ID";
+    Mock::given(method("POST"))
+        .and(header("x-kolboo-model-provider","groq"))
+        .and(header("authorization","Bearer synthetic-session"))
+        .and(body_json(json!({"model":model,"messages":[{"role":"system","content":"sys"},{"role":"user","content":"user"}]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"choices":[{"message":{"content":"synthetic output"}}]})))
+        .expect(1).mount(&server).await;
+    let provider =
+        ManagedLlmProvider::new("synthetic-session".into(), Some(model.into()), server.uri())
+            .with_selected_provider(Some("groq".into()));
+    assert_eq!(
+        provider.complete("sys", "user").await.unwrap(),
+        "synthetic output"
+    );
+    assert_eq!(provider.model(), model);
+}
+
+#[tokio::test]
 async fn test_ollama_complete_sends_expected_request_body() {
     let mock_server = MockServer::start().await;
 
@@ -420,7 +549,7 @@ async fn test_fireworks_complete_sends_expected_request_body() {
     let mock_server = MockServer::start().await;
 
     let expected_request = json!({
-        "model": "test-model",
+        "model": "accounts/fireworks/models/deepseek-v4p1-flash",
         "messages": [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "user"}
@@ -435,19 +564,21 @@ async fn test_fireworks_complete_sends_expected_request_body() {
         .and(body_json(&expected_request))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "choices": [
-                { "message": { "content": "hello from fireworks mock" } }
+                { "message": { "content": "hello from fireworks mock", "reasoning_content": "not user output" } }
             ]
         })))
         .expect(1)
         .mount(&mock_server)
         .await;
 
-    let provider =
-        FireworksLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
-            .with_api_base_url(format!(
-                "{}/inference/v1/chat/completions",
-                mock_server.uri()
-            ));
+    let provider = FireworksLlmProvider::with_model(
+        "test_key".to_string(),
+        "accounts/fireworks/models/deepseek-v4p1-flash".to_string(),
+    )
+    .with_api_base_url(format!(
+        "{}/inference/v1/chat/completions",
+        mock_server.uri()
+    ));
 
     let out = provider.complete("sys", "user").await.unwrap();
     assert_eq!(out, "hello from fireworks mock");
@@ -568,7 +699,7 @@ async fn test_anthropic_complete_sends_expected_headers() {
         .and(header("anthropic-version", "2023-06-01"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "content": [{"type": "text", "text": "hello from anthropic"}],
-            "model": "claude-3-haiku-20240307",
+            "model": "claude-haiku-5-5",
             "role": "assistant"
         })))
         .expect(1)
@@ -666,7 +797,7 @@ async fn test_groq_complete_sends_expected_request_body() {
     let mock_server = MockServer::start().await;
 
     let expected_request = json!({
-        "model": "test-model",
+        "model": "qwen/qwen3.8-27b",
         "messages": [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "user"}
@@ -681,15 +812,16 @@ async fn test_groq_complete_sends_expected_request_body() {
         .and(body_json(&expected_request))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "choices": [
-                {"message": {"content": "hello from groq"}}
+                {"message": {"content": "hello from groq", "reasoning": "not user output"}}
             ]
         })))
         .expect(1)
         .mount(&mock_server)
         .await;
 
-    let provider = GroqLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
-        .with_api_base_url(format!("{}/openai/v1/chat/completions", mock_server.uri()));
+    let provider =
+        GroqLlmProvider::with_model("test_key".to_string(), "qwen/qwen3.8-27b".to_string())
+            .with_api_base_url(format!("{}/openai/v1/chat/completions", mock_server.uri()));
     let out = provider.complete("sys", "user").await.unwrap();
     assert_eq!(out, "hello from groq");
 }
@@ -747,13 +879,12 @@ async fn test_gemini_complete_sends_expected_request_body() {
         ],
         "generationConfig": {
             "maxOutputTokens": 4096,
-            "temperature": 0.0,
             "responseMimeType": "text/plain"
         }
     });
 
     Mock::given(method("POST"))
-        .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+        .and(path("/v1beta/models/gemini-3.5-flash-lite:generateContent"))
         .and(header("x-goog-api-key", "test_key"))
         .and(body_json(&expected_request))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -778,7 +909,7 @@ async fn test_gemini_complete_parses_json_error_body() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .and(path("/v1beta/models/gemini-2.5-flash:generateContent"))
+        .and(path("/v1beta/models/gemini-3.5-flash-lite:generateContent"))
         .respond_with(ResponseTemplate::new(403).set_body_json(json!({
             "error": { "message": "invalid api key" }
         })))
@@ -812,7 +943,7 @@ async fn test_cohere_complete_sends_expected_request_body_with_explicit_model() 
     let mock_server = MockServer::start().await;
 
     let expected_request = json!({
-        "model": "test-model",
+        "model": "command-a-plus-05-2026",
         "stream": false,
         "messages": [
             {"role": "system", "content": "sys"},
@@ -837,8 +968,9 @@ async fn test_cohere_complete_sends_expected_request_body_with_explicit_model() 
         .mount(&mock_server)
         .await;
 
-    let provider = CohereLlmProvider::with_model("test_key".to_string(), "test-model".to_string())
-        .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
+    let provider =
+        CohereLlmProvider::with_model("test_key".to_string(), "command-a-plus-05-2026".to_string())
+            .with_api_base_url(format!("{}/v2/chat", mock_server.uri()));
     let out = provider.complete("sys", "user").await.unwrap();
     assert_eq!(out, "hello from cohere");
 }

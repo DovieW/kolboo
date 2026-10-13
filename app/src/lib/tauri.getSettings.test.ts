@@ -73,6 +73,20 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 
 describe("tauriAPI.getSettings() normalization", () => {
 	itWithImportTimeout(
+		"reads the startup window preference without changing legacy defaults",
+		async () => {
+			for (const value of [undefined, null, "true", false, true]) {
+				vi.resetModules();
+				currentStore = new FakeStore({ main_window_show_on_launch: value });
+				const { tauriAPI } = await import("./tauri");
+				expect((await tauriAPI.getSettings()).main_window_show_on_launch).toBe(
+					value === true,
+				);
+				expect(currentStore.setCalls).toEqual([]);
+			}
+		},
+	);
+	itWithImportTimeout(
 		"migrates legacy cleanup_prompt_sections.main -> cleanup_prompt_sections.system (read-only)",
 		async () => {
 			vi.resetModules();

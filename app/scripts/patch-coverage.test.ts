@@ -22,6 +22,7 @@ describe("reviewed native coverage snapshots", () => {
 		lines: [1],
 		functions: [1],
 		instantiations: [2],
+		functionInstances: [] as Array<{ line: number; names: string[] }>,
 	};
 	const changed = new Map([[filePath, new Set([1, 2, 3])]]);
 	function check(report: string, exception = entry, contents = source) {
@@ -92,6 +93,25 @@ describe("reviewed native coverage snapshots", () => {
 		]);
 		expect(evaluate([1, 2, 3]).failures).toEqual([]);
 		expect(evaluate([1, 2, 3]).applied[0].unmeasured).toBe(true);
+	});
+	it("waives exact compiler records but rejects new uncalled instances at the same definition", () => {
+		const exact = {
+			...entry,
+			instantiations: [],
+			functionInstances: [{ line: 2, names: ["_RtestOnly"] }],
+		};
+		const report =
+			"DA:2,1\nFN:2,_Rproduction\nFN:2,_RtestOnly\nFNDA:1,_Rproduction\nFNDA:0,_RtestOnly";
+		expect(check(report, exact).failures).toEqual([]);
+		expect(check(report, exact).applied[0].functions).toEqual([2]);
+		for (const invalid of [
+			`${report}\nFN:2,_RnewProvider\nFNDA:0,_RnewProvider`,
+			report.replace("FNDA:1,_Rproduction", "FNDA:0,_Rproduction"),
+			report.replace("DA:2,1", "DA:2,0"),
+			report.replaceAll("_RtestOnly", "unknown"),
+			report.replaceAll("_RtestOnly", "_RrenamedTest"),
+		])
+			expect(check(invalid, exact).failures[0].uncoveredFunctions).toEqual([2]);
 	});
 });
 

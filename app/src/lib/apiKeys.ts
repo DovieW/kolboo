@@ -8,6 +8,20 @@ export interface ApiKeyConfig {
 
 export const API_KEYS: ApiKeyConfig[] = [
 	{
+		id: "yiddishlabs_flash",
+		label: "YiddishLabs · Flash Turbo",
+		placeholder: "Flash API key",
+		storeKey: "yiddishlabs_flash_api_key",
+		getKeyUrl: "https://app.yiddishlabs.com/app/developer/api-docs",
+	},
+	{
+		id: "yiddishlabs_standard",
+		label: "YiddishLabs · Standard",
+		placeholder: "Standard API key (files and meetings)",
+		storeKey: "yiddishlabs_standard_api_key",
+		getKeyUrl: "https://app.yiddishlabs.com/app/developer/api-docs",
+	},
+	{
 		id: "groq",
 		label: "Groq",
 		placeholder: "Enter API key",

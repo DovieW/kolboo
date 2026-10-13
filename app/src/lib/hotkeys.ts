@@ -37,7 +37,8 @@ export type HotkeyType =
 	| "paste_last"
 	| "retry"
 	| "quick_ask_hold"
-	| "quick_ask_toggle";
+	| "quick_ask_toggle"
+	| "show_window";
 
 const HOTKEY_LABELS: Record<HotkeyType, string> = {
 	toggle: "toggle",
@@ -46,6 +47,7 @@ const HOTKEY_LABELS: Record<HotkeyType, string> = {
 	retry: "retry",
 	quick_ask_hold: "Quick Ask hold",
 	quick_ask_toggle: "Quick Ask toggle",
+	show_window: "open Kolboo",
 };
 
 export interface HotkeyShortcutCard {
@@ -63,6 +65,7 @@ export const HotkeyShortcutCardSchema = z.object({
 		"retry",
 		"quick_ask_hold",
 		"quick_ask_toggle",
+		"show_window",
 	]),
 	hotkey: HotkeyConfigSchema.nullable(),
 });
@@ -82,7 +85,7 @@ export function createHotkeyShortcutId(): string {
  * Create a Zod schema for validating a hotkey doesn't conflict with existing hotkeys
  */
 export function createHotkeyDuplicateSchema(
-	allHotkeys: Record<HotkeyType, HotkeyConfig | null>,
+	allHotkeys: Partial<Record<HotkeyType, HotkeyConfig | null>>,
 	excludeType: HotkeyType,
 ) {
 	return HotkeyConfigSchema.superRefine((hotkey, ctx) => {

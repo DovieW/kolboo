@@ -12,6 +12,43 @@ import {
 import { evaluatePatchCoverage, parseLcov } from "./patch-coverage.mjs";
 
 describe("rust coverage helper", () => {
+	it("retains reviewed aliases across build versions without merging another type or closure", () => {
+		const file = "app/src-tauri/src/native.rs";
+		const input = `SF:${file}\nFN:2,_RnewBuild\nFN:2,_RotherType\nFN:2,_RotherClosure\nFNDA:0,_RnewBuild\nFNDA:0,_RotherType\nFNDA:0,_RotherClosure\nDA:2,1\nend_of_record`;
+		const identities: Record<string, string> = {
+			_RreviewedOldBuild: "<Fixture<T> as Stt>::upload::{closure#0}",
+			_RnewBuild: "<Fixture<T> as Stt>::upload::{closure#0}",
+			_RotherType: "<Fixture<U> as Stt>::upload::{closure#0}",
+			_RotherClosure: "<Fixture<T> as Stt>::upload::{closure#1}",
+		};
+		const output = mergeRustBuildIdentities(
+			input,
+			(names: string[]) => names.map((name) => identities[name]),
+			["_RreviewedOldBuild"],
+		);
+		const coverage = parseLcov(output, {
+			sourceRoot: "/repo",
+			repoRoot: "/repo",
+		});
+		expect([...coverage.get(file).functions]).toEqual([
+			["2:_RreviewedOldBuild", 0],
+			["2:_RotherType", 0],
+			["2:_RotherClosure", 0],
+		]);
+		expect(
+			evaluatePatchCoverage(new Map([[file, new Set([2])]]), coverage)
+				.failures[0].uncoveredFunctions,
+		).toEqual([2]);
+		for (const name of ["_Rundecoded", "ordinary"]) {
+			expect(() =>
+				mergeRustBuildIdentities(
+					input,
+					(names: string[]) => names.map((item) => identities[item] ?? item),
+					[name],
+				),
+			).toThrow("Reviewed Rust alias must have a decoded identity");
+		}
+	});
 	it("merges build hashes without waiving untested generic variants or changing line coverage", () => {
 		const input =
 			"SF:app/src-tauri/src/native.rs\nFN:10,_RtestWry\nFN:10,_RappWry\nFN:10,_Rmock\nFN:11,_Rother\nFNDA:1,_RtestWry\nFNDA:0,_RappWry\nFNDA:0,_Rmock\nFNDA:0,_Rother\nDA:10,1\nDA:11,0\nend_of_record";

@@ -119,10 +119,11 @@ pub(super) struct LlmResolution {
 }
 
 /// Route to a preset based on the transcript.
-async fn route_preset<C: TranscriptionCallbacks>(
+async fn route_preset(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     stt_text: &str,
+    llm_config: &crate::llm::LlmConfig,
 ) -> RoutingResult {
     let mut routed_preset_id: Option<String> = None;
 
@@ -162,7 +163,7 @@ async fn route_preset<C: TranscriptionCallbacks>(
 
     // Run router if enabled and no override is set.
     if routed_preset_id.is_none() && router_enabled(profile) {
-        routed_preset_id = run_intent_router(ctx, callbacks, profile, stt_text).await;
+        routed_preset_id = run_intent_router(ctx, callbacks, profile, stt_text, llm_config).await;
     }
 
     // Default preset is the fallback when routing is off/undecided.
@@ -174,55 +175,51 @@ async fn route_preset<C: TranscriptionCallbacks>(
 }
 
 /// Run intent router (embeddings or LLM-based).
-async fn run_intent_router<C: TranscriptionCallbacks>(
+async fn run_intent_router(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     profile: &ProgramPromptProfile,
     stt_text: &str,
+    llm_config: &crate::llm::LlmConfig,
 ) -> Option<String> {
     let router = profile.router.as_ref()?;
 
     if router.strategy == IntentRouterStrategy::Llm {
-        run_llm_router(ctx, callbacks, profile, stt_text).await
+        run_llm_router(ctx, callbacks, profile, stt_text, llm_config).await
     } else {
         run_embeddings_router(ctx, callbacks, profile, stt_text).await
     }
 }
 
 /// Run LLM-based intent router.
-async fn run_llm_router<C: TranscriptionCallbacks>(
+async fn run_llm_router(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     profile: &ProgramPromptProfile,
     stt_text: &str,
+    llm_config: &crate::llm::LlmConfig,
 ) -> Option<String> {
     // If there's no active profile, routing should be disabled.
     let _active_profile = ctx.active_profile.as_ref()?;
 
     // Build provider params from router config or global defaults.
     let router_cfg = profile.router.as_ref();
-    let desired_provider = router_cfg
-        .and_then(|r| r.llm_provider.clone())
-        .unwrap_or_else(|| "openai".to_string());
-    let desired_model = router_cfg.and_then(|r| r.llm_model.clone());
-    let desired_openai_effort = router_cfg.and_then(|r| r.openai_reasoning_effort.clone());
-    let desired_gemini_budget = router_cfg.and_then(|r| r.gemini_thinking_budget);
-    let desired_gemini_level = router_cfg.and_then(|r| r.gemini_thinking_level.clone());
-    let desired_anthropic_budget = router_cfg.and_then(|r| r.anthropic_thinking_budget);
+    let mut request = super::llm_provider_request::resolve_one_off_llm_request_for_action(
+        llm_config,
+        Some(profile),
+        crate::model_selection::ModelAction::IntentRouter,
+        &[super::llm_provider_request::OneOffLlmProviderRequestLayer {
+            openai_reasoning_effort: router_cfg.and_then(|r| r.openai_reasoning_effort.clone()),
+            gemini_thinking_budget: router_cfg.and_then(|r| r.gemini_thinking_budget),
+            gemini_thinking_level: router_cfg.and_then(|r| r.gemini_thinking_level.clone()),
+            anthropic_thinking_budget: router_cfg.and_then(|r| r.anthropic_thinking_budget),
+            ..Default::default()
+        }],
+    );
+    request.params.timeout = Duration::from_secs(30);
 
     let maybe_provider = callbacks
-        .get_or_create_llm_provider(
-            desired_provider.as_str(),
-            LlmProviderParams {
-                model: desired_model,
-                timeout: Duration::from_secs(30),
-                ollama_url: None,
-                openai_reasoning_effort: desired_openai_effort,
-                gemini_thinking_budget: desired_gemini_budget,
-                gemini_thinking_level: desired_gemini_level,
-                anthropic_thinking_budget: desired_anthropic_budget,
-            },
-        )
+        .get_or_create_llm_provider(request.provider_id.as_str(), request.params)
         .ok();
 
     let provider = maybe_provider?;
@@ -251,9 +248,9 @@ async fn run_llm_router<C: TranscriptionCallbacks>(
 }
 
 /// Run embeddings-based intent router.
-async fn run_embeddings_router<C: TranscriptionCallbacks>(
+async fn run_embeddings_router(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     profile: &ProgramPromptProfile,
     stt_text: &str,
 ) -> Option<String> {
@@ -567,9 +564,9 @@ pub(super) fn log_preset_selection(
 }
 
 /// Resolve LLM provider and prompts for the rewrite step.
-pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
+pub(super) fn resolve_llm_for_rewrite(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     routed_preset_id: &Option<String>,
     llm_config: &crate::llm::LlmConfig,
 ) -> LlmResolution {
@@ -637,18 +634,43 @@ pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
     };
 
     let (llm_provider, not_attempted_reason) = if effective_llm_enabled {
-        let desired_llm_provider = ctx.forced_llm_provider.clone().unwrap_or_else(|| {
+        let action = crate::model_selection::ModelAction::Rewrite;
+        let selection = crate::model_selection::inherit_model_selection(
+            llm_config.selection.as_ref(),
+            &[
+                (
+                    selected_profile.and_then(|p| p.model_selections.get(&action)),
+                    selected_profile.and_then(|p| p.llm_provider.as_deref()),
+                    selected_profile.and_then(|p| p.llm_model.as_deref()),
+                ),
+                (
+                    selected_preset.and_then(|p| p.model_selections.get(&action)),
+                    selected_preset.and_then(|p| p.llm_provider.as_deref()),
+                    selected_preset.and_then(|p| p.llm_model.as_deref()),
+                ),
+                (
+                    None,
+                    ctx.forced_llm_provider.as_deref(),
+                    ctx.forced_llm_model.as_deref(),
+                ),
+            ],
+        );
+        let mut desired_llm_provider = ctx.forced_llm_provider.clone().unwrap_or_else(|| {
             selected_preset
                 .and_then(|p| p.llm_provider.clone())
                 .or_else(|| selected_profile.and_then(|p| p.llm_provider.clone()))
                 .unwrap_or_else(|| llm_config.provider.clone())
         });
-        let desired_llm_model = ctx.forced_llm_model.clone().or_else(|| {
+        let mut desired_llm_model = ctx.forced_llm_model.clone().or_else(|| {
             selected_preset
                 .and_then(|p| p.llm_model.clone())
                 .or_else(|| selected_profile.and_then(|p| p.llm_model.clone()))
                 .or_else(|| llm_config.model.clone())
         });
+        if let Some(choice) = &selection {
+            desired_llm_provider = choice.provider_id.clone();
+            desired_llm_model = Some(choice.model_id.clone());
+        }
 
         // Resolve effective provider-specific thinking knobs.
         let effective_openai_reasoning_effort = selected_preset
@@ -672,6 +694,7 @@ pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
             .get_or_create_llm_provider(
                 desired_llm_provider.as_str(),
                 LlmProviderParams {
+                    selection,
                     model: desired_llm_model.clone(),
                     timeout: llm_timeout,
                     ollama_url: llm_config.ollama_url.clone(),
@@ -715,9 +738,9 @@ pub(super) fn resolve_llm_for_rewrite<C: TranscriptionCallbacks>(
 }
 
 /// Run LLM rewrite on the transcript.
-pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
+pub(super) async fn run_llm_rewrite(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     stt_text: &str,
     llm_resolution: LlmResolution,
 ) -> (
@@ -844,9 +867,9 @@ pub(super) async fn run_llm_rewrite<C: TranscriptionCallbacks>(
 /// Complete transcription flow after STT is done.
 ///
 /// This orchestrates routing and LLM rewrite.
-pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
+pub(super) async fn complete_transcription_flow(
     ctx: &TranscriptionContext<'_>,
-    callbacks: &C,
+    callbacks: &dyn TranscriptionCallbacks,
     stt_text: &str,
     stt_duration_ms: u64,
     stt_retry: Option<crate::stt::RetryTelemetry>,
@@ -856,7 +879,7 @@ pub(super) async fn complete_transcription_flow<C: TranscriptionCallbacks>(
         return Err(PipelineError::Cancelled);
     }
     // Phase 3a: Route preset
-    let routing_result = route_preset(ctx, callbacks, stt_text).await;
+    let routing_result = route_preset(ctx, callbacks, stt_text, llm_config).await;
     if ctx.cancel_token.is_cancelled() {
         return Err(PipelineError::Cancelled);
     }

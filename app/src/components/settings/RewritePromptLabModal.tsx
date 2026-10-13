@@ -10,15 +10,11 @@ import {
 	Text,
 	Textarea,
 } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatErrorMessage } from "../../lib/formatError";
-import {
-	useByokLlmModels,
-	useLicenseAuthContext,
-	useManagedModels,
-} from "../../lib/queries";
-import { hasManagedInferenceAccess, llmAPI } from "../../lib/tauri";
+import { resolveModelPreference } from "../../lib/modelSelection";
+import { useSettings } from "../../lib/queries/settings";
+import { ActionModelPicker } from "../ActionModelPicker";
 
 type OpenAiThinkingEffort = "none" | "low" | "medium" | "high";
 
@@ -57,6 +53,7 @@ export function RewritePromptLabModal(props: {
 	onClose: () => void;
 
 	profileId: string;
+	presetId?: string;
 	profileLabel: string;
 
 	// Seed values when opening the modal.
@@ -73,6 +70,7 @@ export function RewritePromptLabModal(props: {
 	// Actions
 	onIteratePrompt: (params: {
 		profileId: string;
+		presetId?: string;
 		mode: "fixed" | "new";
 		transcript: string;
 		problemOutput: string;
@@ -95,62 +93,16 @@ export function RewritePromptLabModal(props: {
 
 	onTestPrompt: (params: {
 		profileId: string;
+		presetId?: string;
 		transcript: string;
 		prompt: string;
 	}) => Promise<{ output: string; providerUsed: string; modelUsed: string }>;
 }) {
-	const { data: configuredLlmProviders } = useQuery({
-		queryKey: ["llmProviders"],
-		queryFn: () => llmAPI.getLlmProviders(),
-		staleTime: 60_000,
-		refetchOnWindowFocus: false,
-	});
-	const { data: licenseAuthContext } = useLicenseAuthContext();
-	const managedAccessEnabled = hasManagedInferenceAccess(licenseAuthContext);
-	const managedModelsQuery = useManagedModels(managedAccessEnabled);
-	const byokLlmModelsQuery = useByokLlmModels(props.opened);
-	const llmProviders = useMemo(
-		() => [
-			...(managedAccessEnabled && (managedModelsQuery.data?.length ?? 0) > 0
-				? [
-						{
-							id: "managed",
-							name: "Kolboo Managed",
-							requires_api_key: false,
-							default_model:
-								managedModelsQuery.data?.find(
-									(model) => model.default_for_provider,
-								)?.id ??
-								managedModelsQuery.data?.[0]?.id ??
-								"gpt-4o-mini",
-							models:
-								managedModelsQuery.data
-									?.filter((model) =>
-										model.capabilities.includes("chat_completions"),
-									)
-									.map((model) => model.id) ?? [],
-						},
-					]
-				: []),
-			...(configuredLlmProviders ?? [])
-				.filter((provider) => provider.id !== "managed")
-				.map((provider) => ({
-					...provider,
-					models:
-						byokLlmModelsQuery.data[provider.id]?.map((model) => model.value) ??
-						provider.models,
-				})),
-		],
-		[
-			byokLlmModelsQuery.data,
-			configuredLlmProviders,
-			managedAccessEnabled,
-			managedModelsQuery.data,
-		],
-	);
-
-	const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
-	const [selectedModel, setSelectedModel] = useState<string | null>(null);
+	const { data: settings } = useSettings();
+	const profile = settings?.rewrite_program_prompt_profiles.find(profile => profile.id === props.profileId);
+	const preference = resolveModelPreference("prompt_tools", settings, props.profileId === "default" ? null : profile, profile?.presets?.find(preset => preset.id === props.presetId));
+	const selectedProvider = preference.provider;
+	const selectedModel = preference.model;
 
 	// One dropdown, but maps to different backend knobs depending on provider/model.
 	const [thinkingValue, setThinkingValue] = useState<string>("default");
@@ -174,46 +126,6 @@ export function RewritePromptLabModal(props: {
 	const [isImproving, setIsImproving] = useState(false);
 	const [isTesting, setIsTesting] = useState(false);
 
-	// If providers load and we don't have a selection yet, default to initial or first provider.
-	useEffect(() => {
-		if (!props.opened) return;
-		if (!llmProviders || llmProviders.length === 0) return;
-
-		if (!selectedProvider) {
-			const preferred = props.initialLlmProvider ?? null;
-			const exists = preferred
-				? llmProviders.some((p) => p.id === preferred)
-				: false;
-			setSelectedProvider(exists ? preferred : (llmProviders[0]?.id ?? null));
-		}
-	}, [llmProviders, props.initialLlmProvider, props.opened, selectedProvider]);
-
-	// When provider changes, ensure model is valid for that provider.
-	useEffect(() => {
-		if (!props.opened) return;
-		if (!selectedProvider) return;
-		const provider = (llmProviders ?? []).find(
-			(p) => p.id === selectedProvider,
-		);
-		const models = provider?.models ?? [];
-
-		if (models.length === 0) {
-			setSelectedModel(null);
-			return;
-		}
-
-		if (!selectedModel || !models.includes(selectedModel)) {
-			const preferred = props.initialLlmModel ?? null;
-			const usePreferred = preferred && models.includes(preferred);
-			setSelectedModel(usePreferred ? preferred : (models[0] ?? null));
-		}
-	}, [
-		llmProviders,
-		props.initialLlmModel,
-		props.opened,
-		selectedModel,
-		selectedProvider,
-	]);
 
 	// Seed values on open.
 	useEffect(() => {
@@ -231,15 +143,11 @@ export function RewritePromptLabModal(props: {
 		setImproveMeta("");
 		setTestMeta("");
 
-		setSelectedProvider(props.initialLlmProvider ?? null);
-		setSelectedModel(props.initialLlmModel ?? null);
 		setThinkingValue("default");
 	}, [
 		props.opened,
 		props.initialTranscript,
 		props.initialProblemOutput,
-		props.initialLlmProvider,
-		props.initialLlmModel,
 	]);
 
 	const supportsOpenAiReasoningEffort =
@@ -430,40 +338,7 @@ export function RewritePromptLabModal(props: {
 		>
 			<Stack gap="sm">
 				<Group grow gap="sm" align="flex-end">
-					<Select
-						label="Provider"
-						data={(llmProviders ?? []).map((p) => ({
-							value: p.id,
-							label: p.name,
-						}))}
-						value={selectedProvider}
-						onChange={(v) => {
-							setSelectedProvider(v);
-							setThinkingValue("default");
-						}}
-						placeholder="Select provider"
-						withCheckIcon={false}
-						disabled={
-							isImproving || isTesting || (llmProviders?.length ?? 0) === 0
-						}
-					/>
-
-					<Select
-						label="Model"
-						data={(
-							(llmProviders ?? []).find((p) => p.id === selectedProvider)
-								?.models ?? []
-						).map((m) => ({ value: m, label: m }))}
-						value={selectedModel}
-						onChange={(v) => {
-							setSelectedModel(v);
-							setThinkingValue("default");
-						}}
-						placeholder="Select model"
-						withCheckIcon={false}
-						disabled={isImproving || isTesting || !selectedProvider}
-						searchable
-					/>
+					<ActionModelPicker action="prompt_tools" label="Prompt tools model" profileId={props.profileId} presetId={props.presetId} disabled={isImproving || isTesting}/>
 
 					<Select
 						label="Thinking"
@@ -617,6 +492,7 @@ export function RewritePromptLabModal(props: {
 
 								const res = await props.onIteratePrompt({
 									profileId: props.profileId,
+									presetId: props.presetId,
 									mode,
 									transcript,
 									problemOutput: mode === "fixed" ? problemOutput : promptGoal,
@@ -673,6 +549,7 @@ export function RewritePromptLabModal(props: {
 							try {
 								const res = await props.onTestPrompt({
 									profileId: props.profileId,
+									presetId: props.presetId,
 									transcript,
 									prompt: improvedPrompt,
 								});

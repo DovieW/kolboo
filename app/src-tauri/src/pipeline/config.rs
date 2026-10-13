@@ -22,6 +22,8 @@ const MAX_WAV_SIZE_BYTES: usize = 50 * 1024 * 1024;
 /// Configuration for the recording pipeline
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
+    pub model_selections: crate::model_selection::ModelSelections,
+    pub model_selection_error: Option<String>,
     /// Optional backend input device name (CPAL device name).
     ///
     /// When set, recording will attempt to use the first input device whose name
@@ -55,6 +57,7 @@ pub struct PipelineConfig {
     pub stt_model: Option<String>,
     /// Optional language hint for STT (None = auto-detect)
     pub stt_language: Option<String>,
+    pub stt_input_mode: crate::settings::SttInputMode,
 
     /// Optional global transcription prompt.
     ///
@@ -194,6 +197,8 @@ impl OcrConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
+            model_selections: Default::default(),
+            model_selection_error: None,
             input_device_name: None,
             max_duration_secs: 300.0, // 5 minutes max
             stt_provider: default_values::DEFAULT_STT_PROVIDER.to_string(),
@@ -207,6 +212,7 @@ impl Default for PipelineConfig {
             managed_inference_fallback_llm_provider: None,
             stt_model: None,
             stt_language: Some(default_values::DEFAULT_STT_LANGUAGE.to_string()),
+            stt_input_mode: crate::settings::SttInputMode::Auto,
             stt_transcription_prompt: None,
             whisper_server_base_url: None,
             retry_config: RetryConfig::default(),
@@ -352,7 +358,7 @@ mod tests {
         let config = PipelineConfig::default();
         assert_eq!(config.max_duration_secs, 300.0);
         assert_eq!(config.stt_provider, "groq");
-        assert_eq!(config.stt_language.as_deref(), Some("en"));
+        assert_eq!(config.stt_language.as_deref(), Some("auto"));
         assert_eq!(
             config.transcription_timeout,
             default_transcription_timeout()

@@ -1,3 +1,5 @@
+import { ActionModelPicker } from "../../ActionModelPicker";
+import { resolveModelPreference } from "../../../lib/modelSelection";
 import {
 	Accordion,
 	Button,
@@ -6,7 +8,6 @@ import {
 	Switch,
 	Text,
 	Textarea,
-	TextInput,
 } from "@mantine/core";
 import type {
 	AppSettings,
@@ -37,7 +38,6 @@ type PromptIntentRouterSectionProps = {
 	selectDefaultValue: string;
 	anthropicThinkingBudgets: readonly number[];
 	getEmbeddingModelsForProvider: (provider: string) => ModelOption[];
-	getLlmModelOptionsForProvider: (provider: string | null) => ModelOption[];
 	saveRouter: (router: IntentRouterSettings | null) => void;
 	onCacheRouterEmbeddings: () => void;
 };
@@ -56,7 +56,6 @@ export function PromptIntentRouterSection({
 	selectDefaultValue,
 	anthropicThinkingBudgets,
 	getEmbeddingModelsForProvider,
-	getLlmModelOptionsForProvider,
 	saveRouter,
 	onCacheRouterEmbeddings,
 }: PromptIntentRouterSectionProps) {
@@ -148,18 +147,6 @@ export function PromptIntentRouterSection({
 									return;
 								}
 
-								const seedProvider =
-									settings?.llm_provider ??
-									effectiveRouter?.llm_provider ??
-									"openai";
-								const modelOptions =
-									getLlmModelOptionsForProvider(seedProvider);
-								const seedModel =
-									effectiveRouter?.llm_model ??
-									settings?.llm_model ??
-									modelOptions[0]?.value ??
-									null;
-
 								saveRouter({
 									enabled: true,
 									strategy: "llm",
@@ -169,8 +156,8 @@ export function PromptIntentRouterSection({
 									similarity_threshold: null,
 									similarity_margin: null,
 
-									llm_provider: seedProvider,
-									llm_model: seedModel,
+									llm_provider: effectiveRouter?.llm_provider ?? null,
+									llm_model: effectiveRouter?.llm_model ?? null,
 									openai_reasoning_effort:
 										settings?.openai_reasoning_effort ?? null,
 									gemini_thinking_budget:
@@ -410,17 +397,9 @@ export function PromptIntentRouterSection({
 
 					{routerStrategyValue === "llm"
 						? (() => {
-								const routerProvider =
-									effectiveRouter?.llm_provider ??
-									settings?.llm_provider ??
-									"openai";
-								const modelOptions =
-									getLlmModelOptionsForProvider(routerProvider);
-								const routerModel =
-									effectiveRouter?.llm_model ??
-									settings?.llm_model ??
-									modelOptions[0]?.value ??
-									null;
+								const preference = resolveModelPreference("intent_router", settings, settings?.rewrite_program_prompt_profiles.find(profile => profile.id === activeProfileId));
+								const routerProvider = preference.provider ?? "openai";
+								const routerModel = preference.model;
 
 								const supportsRouterOpenAiThinking =
 									routerProvider === "openai" &&
@@ -613,107 +592,7 @@ export function PromptIntentRouterSection({
 											provider/model supports it.
 										</Text>
 
-										<div className="settings-row">
-											<div>
-												<p className="settings-label">Provider</p>
-												<p className="settings-description">
-													LLM provider used only for routing.
-												</p>
-											</div>
-											<Select
-												data={[
-													{ value: "openai", label: "OpenAI" },
-													{ value: "gemini", label: "Gemini" },
-													{ value: "anthropic", label: "Anthropic" },
-													{ value: "groq", label: "Groq" },
-													{ value: "fireworks", label: "Fireworks" },
-													{ value: "ollama", label: "Ollama" },
-												]}
-												value={routerProvider}
-												onChange={(value) => {
-													if (!value) return;
-													const next = normalizeRouter(profileRouter);
-													const nextModelOptions =
-														getLlmModelOptionsForProvider(value);
-													const nextModel = nextModelOptions[0]?.value ?? null;
-													saveRouter({
-														...next,
-														enabled: true,
-														strategy: "llm",
-														llm_provider: value,
-														llm_model: nextModel,
-													});
-												}}
-												withCheckIcon={false}
-												styles={{
-													input: {
-														backgroundColor: "var(--bg-elevated)",
-														borderColor: "var(--border-default)",
-														color: "var(--text-primary)",
-														minWidth: 200,
-													},
-												}}
-											/>
-										</div>
-
-										<div className="settings-row">
-											<div>
-												<p className="settings-label">Model</p>
-												<p className="settings-description">
-													Model used for routing decisions.
-												</p>
-											</div>
-											{modelOptions.length > 0 ? (
-												<Select
-													data={modelOptions}
-													value={routerModel}
-													onChange={(value) => {
-														if (!value) return;
-														const next = normalizeRouter(profileRouter);
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "llm",
-															llm_provider: routerProvider,
-															llm_model: value,
-														});
-													}}
-													withCheckIcon={false}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 240,
-														},
-													}}
-												/>
-											) : (
-												<TextInput
-													value={routerModel ?? ""}
-													placeholder="Enter model id"
-													onChange={(e) => {
-														const value = e.currentTarget.value;
-														const next = normalizeRouter(profileRouter);
-														saveRouter({
-															...next,
-															enabled: true,
-															strategy: "llm",
-															llm_provider: routerProvider,
-															llm_model: value.trim().length ? value : null,
-														});
-													}}
-													styles={{
-														input: {
-															backgroundColor: "var(--bg-elevated)",
-															borderColor: "var(--border-default)",
-															color: "var(--text-primary)",
-															minWidth: 240,
-														},
-													}}
-												/>
-											)}
-										</div>
+										<ActionModelPicker action="intent_router" label="Routing model" profileId={activeProfileId} />
 
 										{supportsRouterOpenAiThinking ? (
 											<div className="settings-row">

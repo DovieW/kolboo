@@ -19,6 +19,7 @@ describe("settings runtime sync policy", () => {
 		"cleanup_prompt_sections",
 		"stt_provider",
 		"stt_model",
+		"stt_use_managed_inference",
 		"stt_language",
 		"stt_transcription_prompt",
 		"stt_live_output",
@@ -114,6 +115,7 @@ describe("settings runtime sync policy", () => {
 
 	it.each([
 		"github_backup_gist_id",
+		"main_window_show_on_launch",
 		"max_saved_recordings",
 		"request_logs_retention_mode",
 		"request_logs_privacy_mode",
@@ -229,20 +231,23 @@ describe("settings runtime sync policy", () => {
 		});
 	});
 
-	it("treats delete keys as changed settings", async () => {
-		const adapters = createAdapters();
+	it.each(["stt_model", "stt_use_managed_inference"])(
+		"treats deleting %s as changed settings",
+		async (key) => {
+			const adapters = createAdapters();
 
-		const result = await applySettingsRuntimeSyncPolicy({
-			deleteKeys: ["stt_model"],
-			backendEventEmitted: true,
-			invoke: adapters.invoke,
-			emitSettingsChanged: adapters.emitSettingsChanged,
-		});
+			const result = await applySettingsRuntimeSyncPolicy({
+				deleteKeys: [key],
+				backendEventEmitted: true,
+				invoke: adapters.invoke,
+				emitSettingsChanged: adapters.emitSettingsChanged,
+			});
 
-		expect(result.syncPerformed).toBe(true);
-		expect(adapters.invoke).toHaveBeenCalledTimes(1);
-		expect(adapters.emitSettingsChanged).not.toHaveBeenCalled();
-	});
+			expect(result.syncPerformed).toBe(true);
+			expect(adapters.invoke).toHaveBeenCalledTimes(1);
+			expect(adapters.emitSettingsChanged).not.toHaveBeenCalled();
+		},
+	);
 
 	it("preserves policy/license metadata when policy handling has no backend patch event", async () => {
 		const adapters = createAdapters();

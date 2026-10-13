@@ -11,14 +11,21 @@ mod fireworks;
 mod groq;
 mod http;
 pub(crate) mod language;
+#[cfg(test)]
+#[path = "tests/managed_selection.rs"]
+mod managed_selection_tests;
 mod openai;
 mod openai_compat;
 mod retry;
 pub(crate) mod simulated_streaming;
 mod speechmatics;
 pub(crate) mod streaming;
+#[cfg(test)]
+#[path = "tests/streaming_support.rs"]
+pub(crate) mod streaming_test_support;
 pub(crate) mod websocket_transport;
 mod whisper_server;
+pub(crate) mod yiddishlabs;
 
 #[cfg(feature = "local-whisper")]
 mod whisper;
@@ -36,6 +43,7 @@ pub use retry::{with_retry_report, RetryConfig, RetryTelemetry};
 pub use speechmatics::SpeechmaticsSttProvider;
 pub use streaming::StreamingSttSession;
 pub use whisper_server::WhisperServerSttProvider;
+pub use yiddishlabs::YiddishLabsSttProvider;
 
 #[cfg(feature = "local-whisper")]
 pub use whisper::{LocalWhisperConfig, LocalWhisperProvider, WhisperModel};
@@ -62,6 +70,24 @@ pub struct SpeakerSegment {
 pub struct SttTranscript {
     pub text: String,
     pub segments: Vec<SpeakerSegment>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UploadPurpose {
+    // Desktop imports use the saved meeting-upload pipeline. The file purpose
+    // is also exercised by provider HTTP contract fixtures, not live dictation.
+    #[cfg(test)]
+    File,
+    Meeting,
+}
+
+/// Stable, recording-owned storage for paid asynchronous upload receipts. It
+/// contains no audio/text and is never obtained from the provider response.
+#[derive(Debug, Clone)]
+pub(crate) struct SttUploadContext {
+    pub purpose: UploadPurpose,
+    pub chunk_offset: u64,
+    pub checkpoint_path: std::path::PathBuf,
 }
 
 pub fn speaker_document(text: &str, segments: &[SpeakerSegment]) -> String {
@@ -171,9 +197,24 @@ pub trait SttProvider: Send + Sync {
         })
     }
 
+    async fn transcribe_upload(
+        &self,
+        audio: &[u8],
+        format: &AudioFormat,
+        _context: &SttUploadContext,
+    ) -> Result<SttTranscript, SttError> {
+        self.transcribe_detailed(audio, format).await
+    }
+
     /// Get the name of this provider
     #[cfg_attr(not(test), allow(dead_code))]
     fn name(&self) -> &'static str;
+
+    /// Renew only an already-Managed adapter. Its endpoint, model, language,
+    /// prompt and transport settings stay bound to the original recording.
+    fn with_renewed_managed_token(&self, _token: &str) -> Option<Arc<dyn SttProvider>> {
+        None
+    }
 
     /// Whether this provider supports concurrent streaming (audio sent during recording).
     ///

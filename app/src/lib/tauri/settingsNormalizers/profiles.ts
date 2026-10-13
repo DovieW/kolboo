@@ -1,12 +1,14 @@
 import { normalizeSttLanguageOverride } from "../../sttLanguages";
+import { normalizeModelSelections } from "../../modelSelection";
 import type {
 	ActiveWindowOcrMode,
 	CleanupPromptSections,
 	CleanupPromptSectionsOverride,
 	ContextGrabMethod,
-	RewritePreset,
 	RewriteProgramPromptProfile,
+	ModelSelections,
 } from "../types";
+import type { NormalizedRewritePreset } from "../presetDefaults";
 import {
 	normalizeOutputMode,
 	normalizeOverlayModeValue,
@@ -14,7 +16,7 @@ import {
 	normalizeQuickAskDismissModeOverride,
 	normalizeWidgetPosition,
 } from "./appBehavior";
-import { normalizePlayingAudioHandling } from "./audio";
+import { normalizePlayingAudioHandling, normalizeSttInputMode } from "./audio";
 import { normalizeActiveWindowOcrModeOverride } from "./ocr";
 import { normalizeRawRewritePreset } from "./presets";
 import {
@@ -95,9 +97,17 @@ export function normalizeCleanupPromptSectionsOverride(
 	return out;
 }
 
+export type NormalizedRewriteProgramPromptProfile = Omit<
+	RewriteProgramPromptProfile,
+	"model_selections" | "presets"
+> & {
+	model_selections: ModelSelections;
+	presets: NormalizedRewritePreset[] | null;
+};
+
 export function normalizeRewriteProfile(
 	value: unknown,
-): RewriteProgramPromptProfile | null {
+): NormalizedRewriteProgramPromptProfile | null {
 	if (!isRecord(value)) return null;
 	const p = value;
 	const id = typeof p.id === "string" ? p.id : "";
@@ -232,10 +242,8 @@ export function normalizeRewriteProfile(
 		typeof p.output_hit_enter === "boolean" ? p.output_hit_enter : null;
 
 	const presets_raw = p.presets;
-	const presets: RewritePreset[] | null = Array.isArray(presets_raw)
-		? presets_raw
-				.map(normalizeRawRewritePreset)
-				.filter((x): x is RewritePreset => x !== null)
+	const presets: NormalizedRewritePreset[] | null = Array.isArray(presets_raw)
+		? presets_raw.map(normalizeRawRewritePreset).filter((x) => x !== null)
 		: null;
 
 	const default_preset_id =
@@ -252,6 +260,7 @@ export function normalizeRewriteProfile(
 
 	return {
 		id,
+		model_selections: normalizeModelSelections(p.model_selections),
 		name,
 		program_paths,
 		disabled,
@@ -265,6 +274,7 @@ export function normalizeRewriteProfile(
 		stt_provider,
 		stt_model,
 		stt_language,
+		stt_input_mode: normalizeSttInputMode(p.stt_input_mode),
 		stt_timeout_seconds,
 		llm_provider,
 		llm_model,

@@ -48,6 +48,8 @@ pub const API_KEY_SETTING_KEYS: &[&str] = &[
     "assemblyai_api_key",
     "speechmatics_api_key",
     "deepgram_api_key",
+    "yiddishlabs_flash_api_key",
+    "yiddishlabs_standard_api_key",
     // LLM providers
     "cerebras_api_key",
     "openai_api_key",

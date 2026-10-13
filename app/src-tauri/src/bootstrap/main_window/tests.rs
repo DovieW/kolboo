@@ -46,22 +46,62 @@ fn native_window_manager_integration() {
     );
     crate::text::selection_probe::tests::native_selection_probe_copy_transaction();
     let history_directory = tempfile::tempdir().unwrap();
+    let (native_context, updater_server) = crate::automatic_updates::tests::native_context();
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
+        .manage(crate::recordings::RecordingStore::new(
+            history_directory.path().into(),
+        ))
         .manage(crate::history::HistoryStorage::new(
             history_directory.path().into(),
         ))
-        .manage(crate::request_log::RequestLogStore::new())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(crate::automatic_updates::init())
         .invoke_handler(tauri::generate_handler![
+            crate::automatic_updates::get_update_status,
+            crate::automatic_updates::check_for_updates,
+            crate::automatic_updates::install_update,
             crate::commands::licensing::email_code::license_request_email_code,
             crate::commands::licensing::email_code::license_verify_email_code,
             crate::commands::licensing::license_cancel_login,
+            crate::commands::config::get_model_selection_settings,
+            crate::commands::config::get_available_providers,
+            crate::commands::config::sync_pipeline_config,
+            crate::commands::settings::settings_apply_patch,
+            crate::commands::llm::llm_complete,
+            crate::commands::llm::iterate_rewrite_prompt,
+            crate::commands::llm::test_rewrite_with_prompt,
         ])
-        .build(mock_context(noop_assets()))
+        .build(native_context)
         .unwrap();
+    {
+        use tauri_plugin_autostart::ManagerExt;
+        // All OS registration writes target this fixture's private XDG config.
+        let launch = app.autolaunch();
+        launch.disable().unwrap();
+        crate::bootstrap::startup::initialize_start_at_login(app.handle(), true);
+        assert!(
+            launch.is_enabled().unwrap(),
+            "new installs default to login startup"
+        );
+        launch.disable().unwrap();
+        crate::bootstrap::startup::initialize_start_at_login(app.handle(), false);
+        assert!(
+            !launch.is_enabled().unwrap(),
+            "an upgrade must preserve an opt-out"
+        );
+    }
+    crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
+    crate::pipeline::native_model_actions(app.handle());
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
+    crate::pipeline::native_streaming_consumer(app.handle());
+    crate::text::live_target::native_test(app.handle());
+    crate::audio_capture::native_null_pcm_callbacks();
+    crate::pipeline::native_recording_output(app.handle());
+    crate::pipeline::native_completed_upload_retry(app.handle());
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
     // A real GTK screen with controlled fractional DPI, not a fake Window.
@@ -92,6 +132,66 @@ fn native_window_manager_integration() {
     pump("initial fractional-DPI size", &mut app, &|_| {
         window.inner_size().unwrap() == PhysicalSize::new(2240, 1400)
     });
+    // Exercise the actual cross-platform shortcut dispatcher, including saved
+    // card decoding and release-only events. No real desktop key is registered.
+    {
+        use tauri_plugin_global_shortcut::{Shortcut, ShortcutEvent, ShortcutState};
+        let settings = app.store("settings.json").unwrap();
+        let card = crate::settings::HotkeyShortcutCard {
+            id: "open-window-test".into(),
+            kind: crate::settings::HotkeyAction::ShowWindow,
+            hotkey: Some(crate::settings::HotkeyConfig {
+                modifiers: vec!["ctrl".into(), "alt".into()],
+                key: "KeyK".into(),
+            }),
+        };
+        settings.set("hotkey_shortcuts", serde_json::json!([card]));
+        let shortcut: Shortcut = "Ctrl+Alt+KeyK".parse().unwrap();
+        window.hide().unwrap();
+        pump("hide before open shortcut", &mut app, &|_| {
+            !window.is_visible().unwrap()
+        });
+        crate::shortcuts::handle_shortcut_event(
+            app.handle(),
+            &shortcut,
+            &ShortcutEvent {
+                id: shortcut.id(),
+                state: ShortcutState::Released,
+            },
+        );
+        assert!(
+            !window.is_visible().unwrap(),
+            "release must not open a window"
+        );
+        crate::shortcuts::handle_shortcut_event(
+            app.handle(),
+            &shortcut,
+            &ShortcutEvent {
+                id: shortcut.id(),
+                state: ShortcutState::Pressed,
+            },
+        );
+        pump("open via saved shortcut", &mut app, &|_| {
+            window.is_visible().unwrap()
+        });
+        assert!(!app
+            .state::<AppState>()
+            .is_recording
+            .load(std::sync::atomic::Ordering::SeqCst));
+        app.state::<AppState>()
+            .paste_key_held
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        crate::shortcuts::handle_hotkey_action_event(
+            app.handle(),
+            crate::settings::HotkeyAction::PasteLast,
+            false,
+        );
+        assert!(!app
+            .state::<AppState>()
+            .paste_key_held
+            .load(std::sync::atomic::Ordering::SeqCst));
+        settings.delete("hotkey_shortcuts");
+    }
     native_overlay_startup_overlap(&mut app);
     window
         .set_size(tauri::Size::Physical(PhysicalSize::new(1925, 1225)))

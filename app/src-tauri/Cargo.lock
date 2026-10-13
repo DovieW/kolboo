@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "kolboo"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "arboard",
  "ashpd",
@@ -3104,6 +3104,7 @@ dependencies = [
  "dirs 6.0.0",
  "dotenvy",
  "enigo",
+ "flate2",
  "futures-util",
  "gdk",
  "gtk",
@@ -3125,6 +3126,7 @@ dependencies = [
  "serde_urlencoded",
  "sha2",
  "symphonia",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-nspanel",
@@ -4437,9 +4439,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.16"
+version = "0.11.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560"
+checksum = "a9746dbde176634f4f2f1faf2404e30a31b2bc1e9cafb5329c95d8177a18c9fc"
 dependencies = [
  "aws-lc-rs",
  "bytes",

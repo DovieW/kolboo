@@ -1278,8 +1278,25 @@ async fn retry_transcription_inner(
             )
             .await
     } else if meeting_id.is_some() {
+        // Completed-history reruns remain fresh attempts for other providers.
+        // Standard must retain its asynchronous receipt across failed retries.
+        let checkpoint = recording_options
+            .meeting_model
+            .as_ref()
+            .filter(|model| {
+                model.provider == "yiddishlabs"
+                    && model.model == crate::stt::yiddishlabs::STANDARD_MODEL
+            })
+            .map(|_| recording_store.transcription_checkpoint(&recording_source_id))
+            .transpose()
+            .map_err(CommandError::from)?;
         pipeline
-            .transcribe_journal_wav(wav.clone(), profile_id.as_deref(), None, &recording_options)
+            .transcribe_journal_wav(
+                wav.clone(),
+                profile_id.as_deref(),
+                checkpoint.as_deref(),
+                &recording_options,
+            )
             .await
     } else {
         pipeline

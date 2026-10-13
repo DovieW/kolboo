@@ -51,16 +51,40 @@ fn log_request_entry(app: &tauri::AppHandle, level: LogLevel, message: impl Into
     }
 }
 
+pub(crate) struct WindowsInsertRequest<'a> {
+    pub(crate) text: &'a str,
+    pub(crate) initial_snapshot: Option<WindowsTextTargetSnapshot>,
+    pub(crate) allow_paste: bool,
+    pub(crate) allow_typing: bool,
+    pub(crate) smart_paste_protection: bool,
+    pub(crate) paste_shortcut: crate::text::key_inject::PasteShortcut,
+    pub(crate) owner: Option<&'a crate::text::inject::OutputSession>,
+}
+
+impl WindowsInsertRequest<'_> {
+    fn ensure_current(&self) -> Result<(), String> {
+        self.owner
+            .map_or(Ok(()), crate::text::inject::OutputSession::ensure_current)
+    }
+}
+
 #[cfg(target_os = "windows")]
-pub fn insert_text_with_snapshot(
+pub(crate) fn insert_text_with_snapshot(
     app: &tauri::AppHandle,
-    text: &str,
-    initial_snapshot: Option<WindowsTextTargetSnapshot>,
-    allow_paste: bool,
-    allow_typing: bool,
-    smart_paste_protection: bool,
-    paste_shortcut: crate::text::key_inject::PasteShortcut,
+    request: WindowsInsertRequest<'_>,
 ) -> Result<WindowsInsertMethod, String> {
+    request.ensure_current()?;
+    let WindowsInsertRequest {
+        text,
+        initial_snapshot,
+        allow_paste,
+        allow_typing,
+        smart_paste_protection,
+        paste_shortcut,
+        owner,
+    } = request;
+    let ensure_current =
+        || owner.map_or(Ok(()), crate::text::inject::OutputSession::ensure_current);
     let snapshot = if let Some(snapshot) = initial_snapshot {
         snapshot
     } else {
@@ -90,6 +114,7 @@ pub fn insert_text_with_snapshot(
             LogLevel::Warn,
             "UIA insert: plan not allowed, using safe fallback".to_string(),
         );
+        ensure_current()?;
         copy_to_clipboard_and_notify(app, text)?;
         return Ok(WindowsInsertMethod::None);
     }
@@ -129,12 +154,14 @@ pub fn insert_text_with_snapshot(
                 reason.as_str()
             ),
         );
+        ensure_current()?;
         copy_to_clipboard_and_notify(app, text)?;
         return Ok(WindowsInsertMethod::None);
     }
 
     let mut method_error: Option<String> = None;
     let mut clipboard_restored: Option<bool> = None;
+    ensure_current()?;
 
     let method_used = match plan.method {
         WindowsInsertMethod::UiaValuePattern => {
@@ -206,6 +233,7 @@ pub fn insert_text_with_snapshot(
     );
 
     // Fallback ladder: attempt paste then typing before safe fallback.
+    ensure_current()?;
     if method_used != WindowsInsertMethod::Paste
         && allow_paste
         && type_text_blocking_with_options(text, false, true, paste_shortcut).is_ok()
@@ -231,10 +259,10 @@ pub fn insert_text_with_snapshot(
         return Ok(WindowsInsertMethod::Paste);
     }
 
-    if method_used != WindowsInsertMethod::Typing
-        && allow_typing
-        && type_text_as_keystrokes(text).is_ok()
-    {
+    if method_used != WindowsInsertMethod::Typing && allow_typing && {
+        ensure_current()?;
+        type_text_as_keystrokes(text).is_ok()
+    } {
         log::info!("UIA insert: fallback typing succeeded");
         log_request_entry(
             app,
@@ -269,19 +297,16 @@ pub fn insert_text_with_snapshot(
         LogLevel::Warn,
         "UIA insert: all methods failed, using safe fallback".to_string(),
     );
+    ensure_current()?;
     copy_to_clipboard_and_notify(app, text)?;
     Ok(WindowsInsertMethod::None)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn insert_text_with_snapshot(
+pub(crate) fn insert_text_with_snapshot(
     _app: &tauri::AppHandle,
-    _text: &str,
-    _initial_snapshot: Option<WindowsTextTargetSnapshot>,
-    _allow_paste: bool,
-    _allow_typing: bool,
-    _smart_paste_protection: bool,
-    _paste_shortcut: crate::text::key_inject::PasteShortcut,
+    request: WindowsInsertRequest<'_>,
 ) -> Result<WindowsInsertMethod, String> {
+    request.ensure_current()?;
     Ok(WindowsInsertMethod::None)
 }

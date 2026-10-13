@@ -122,6 +122,7 @@ const createDeps = (): QueryFnDeps => {
 		configAPI: {
 			getDefaultSections: vi.fn(async () => ({ system: "" })),
 			getAvailableProviders: vi.fn(async () => ({
+				live_text_insertion_supported: true,
 				stt: [],
 				llm: [],
 				ocr: { available: false, reason: null },
