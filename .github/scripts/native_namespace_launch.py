@@ -2,7 +2,7 @@
 
 Direct kernel mappings avoid newuidmap's subordinate-ID policy. No host policy
 or root identity is mapped into the child namespace. The parent never executes
-the fixture; setpriv drops the child to the runner before executing its command.
+the fixture; the child drops to the runner before executing its command.
 """
 import ctypes
 import os
@@ -35,18 +35,38 @@ def write_mappings(pid, uid, gid, proc_root=Path("/proc")):
             f"{identity} {identity} 1\n", encoding="ascii")
 
 
-def fixture_command(uid, gid, command):
-    if not command or uid <= 0 or gid <= 0:
-        raise ValueError("A non-root fixture command is required")
-    # Only namespace-local CAP_SYS_ADMIN survives exec, for offline networking.
-    return ["/usr/bin/setpriv", f"--reuid={uid}", f"--regid={gid}",
-            "--clear-groups", "--inh-caps=+sys_admin", "--ambient-caps=+sys_admin",
-            "--no-new-privs", "--", *command]
+class CapabilityHeader(ctypes.Structure):
+    _fields_ = [("version", ctypes.c_uint32), ("pid", ctypes.c_int)]
+
+
+class CapabilityData(ctypes.Structure):
+    _fields_ = [("effective", ctypes.c_uint32), ("permitted", ctypes.c_uint32),
+                ("inheritable", ctypes.c_uint32)]
+
+
+def checked(result, operation):
+    if result != 0:
+        raise OSError(ctypes.get_errno(), operation)
+
+
+def drop_child_privileges(uid, gid, libc):
+    # Do this before any exec: the unmapped initial root ID would otherwise lose
+    # namespace capabilities before it could drop to the mapped runner identity.
+    checked(libc.prctl(8, 1, 0, 0, 0), "Cannot retain namespace capabilities")
+    os.setresgid(gid, gid, gid)
+    os.setresuid(uid, uid, uid)
+    header = CapabilityHeader(0x20080522, 0)  # Linux capability ABI v3
+    data = (CapabilityData * 2)()
+    data[0] = CapabilityData(1 << 21, 1 << 21, 1 << 21)  # CAP_SYS_ADMIN only
+    checked(libc.capset(ctypes.byref(header), data), "Cannot restrict namespace capabilities")
+    checked(libc.prctl(47, 2, 21, 0, 0), "Cannot retain offline network capability")
+    checked(libc.prctl(38, 1, 0, 0, 0), "Cannot forbid privilege escalation")
 
 
 def main(command):
     uid, gid = runner_ids(os.environ, os.geteuid())
-    argv = fixture_command(uid, gid, command)
+    if not command:
+        raise ValueError("A fixture command is required")
     parent, child = socket.socketpair()
     parent.settimeout(5)
     child.settimeout(5)
@@ -56,13 +76,15 @@ def main(command):
         try:
             os.setgroups([])
             libc = ctypes.CDLL(None, use_errno=True)
+            libc.prctl.argtypes = [ctypes.c_int, *([ctypes.c_ulong] * 4)]
             if libc.unshare(0x10000000) != 0:  # CLONE_NEWUSER
                 raise OSError(ctypes.get_errno(), "Cannot create fixture user namespace")
             child.sendall(b"R")
             if child.recv(1) != b"G":
                 raise RuntimeError("Fixture mappings were not acknowledged")
             child.close()
-            os.execv(argv[0], argv)
+            drop_child_privileges(uid, gid, libc)
+            os.execvp(command[0], command)
         except Exception as error:
             print(f"Native namespace child failed: {error}", file=sys.stderr, flush=True)
             os._exit(1)

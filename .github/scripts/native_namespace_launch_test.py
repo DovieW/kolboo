@@ -1,7 +1,8 @@
 from pathlib import Path
 import tempfile
 import unittest
-from native_namespace_launch import fixture_command, runner_ids, write_mappings
+from unittest.mock import patch
+from native_namespace_launch import drop_child_privileges, runner_ids, write_mappings
 
 
 class PrivilegedMappingContract(unittest.TestCase):
@@ -34,14 +35,37 @@ class PrivilegedMappingContract(unittest.TestCase):
                     write_mappings(pid, uid, gid, root)
 
     def test_command_drops_identity_and_retains_only_namespace_network_capability(self):
-        self.assertEqual(fixture_command(1001, 1002, ["/usr/bin/python3", "fixture.py"]),
-                         ["/usr/bin/setpriv", "--reuid=1001", "--regid=1002",
-                          "--clear-groups", "--inh-caps=+sys_admin",
-                          "--ambient-caps=+sys_admin", "--no-new-privs", "--",
-                          "/usr/bin/python3", "fixture.py"])
-        for uid, gid, command in [(0, 1001, ["true"]), (1001, 0, ["true"]), (1001, 1001, [])]:
-            with self.subTest(uid=uid), self.assertRaises(ValueError):
-                fixture_command(uid, gid, command)
+        operations = []
+
+        class KernelBoundary:
+            def prctl(self, *args):
+                operations.append(args)
+                return 0
+
+            def capset(self, header, data):
+                operations.append((header._obj.version, header._obj.pid))
+                operations.append(tuple((item.effective, item.permitted, item.inheritable)
+                                        for item in data))
+                return 0
+
+        with patch("native_namespace_launch.os.setresgid", side_effect=lambda *args: operations.append(("gid", *args))), \
+                patch("native_namespace_launch.os.setresuid", side_effect=lambda *args: operations.append(("uid", *args))):
+            drop_child_privileges(1001, 1002, KernelBoundary())
+        self.assertEqual(operations, [(8, 1, 0, 0, 0),
+                                     ("gid", 1002, 1002, 1002),
+                                     ("uid", 1001, 1001, 1001),
+                                     (0x20080522, 0),
+                                     ((1 << 21, 1 << 21, 1 << 21), (0, 0, 0)),
+                                     (47, 2, 21, 0, 0), (38, 1, 0, 0, 0)])
+
+    def test_failed_kernel_call_never_continues_to_exec(self):
+        class RejectedKernel:
+            def prctl(self, *_):
+                return -1
+
+        with patch("native_namespace_launch.os.setresuid") as setuid, self.assertRaises(OSError):
+            drop_child_privileges(1001, 1001, RejectedKernel())
+        setuid.assert_not_called()
 
 
 if __name__ == "__main__":
