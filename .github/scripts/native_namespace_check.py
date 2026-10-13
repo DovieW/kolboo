@@ -19,6 +19,15 @@ def verify_identity(parent_namespace, current_namespace, expected, current):
         raise ValueError("Native acceptance must retain the original non-root identity")
 
 
+def verify_privileges(status):
+    fields = dict(line.split(":", 1) for line in status.splitlines() if ":" in line)
+    for kind in ["CapEff", "CapPrm", "CapInh", "CapAmb"]:
+        if int(fields[kind].strip(), 16) != 1 << 21:  # CAP_SYS_ADMIN
+            raise ValueError("Only namespace-local network capability may survive exec")
+    if fields["NoNewPrivs"].strip() != "1":
+        raise ValueError("Native acceptance must not acquire new privileges")
+
+
 def main():
     for kind, actual in [("UID", os.getuid()), ("GID", os.getgid())]:
         expected = int(os.environ[f"KOLBOO_NATIVE_EXPECTED_{kind}"])
@@ -27,6 +36,7 @@ def main():
             os.readlink("/proc/self/ns/user"), expected, actual,
         )
         verify_mapping(Path(f"/proc/self/{kind.lower()}_map").read_text(), expected)
+    verify_privileges(Path("/proc/self/status").read_text())
     # Offline startup must be able to enter a separate network namespace after
     # exec, not just immediately after unshare. No network requests are made.
     subprocess.run(["unshare", "--net", "--", "true"], check=True, timeout=5)

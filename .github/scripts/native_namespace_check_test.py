@@ -1,5 +1,5 @@
 import unittest
-from native_namespace_check import verify_identity, verify_mapping
+from native_namespace_check import verify_identity, verify_mapping, verify_privileges
 
 
 class NativeNamespaceContract(unittest.TestCase):
@@ -20,6 +20,17 @@ class NativeNamespaceContract(unittest.TestCase):
         ]:
             with self.subTest(actual=actual), self.assertRaises(ValueError):
                 verify_identity(parent, current, expected, actual)
+
+    def test_post_exec_capabilities_are_minimal_and_privilege_escalation_is_blocked(self):
+        fields = {name: "00200000" for name in ["CapEff", "CapPrm", "CapInh", "CapAmb"]}
+        fields["NoNewPrivs"] = "1"
+        status = lambda data: "\n".join(f"{key}:\t{value}" for key, value in data.items())
+        verify_privileges(status(fields))
+        for name in ["CapEff", "CapPrm", "CapInh", "CapAmb", "NoNewPrivs"]:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                verify_privileges(status({**fields, name: "0"}))
+        with self.assertRaises(ValueError):
+            verify_privileges(status({**fields, "CapEff": "00200001"}))
 
 
 if __name__ == "__main__":

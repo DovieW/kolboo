@@ -301,9 +301,11 @@ in the printed temporary directory for diagnosis. The first instrumented desktop
 binary compilation may take longer than the window assertions themselves.
 CI first verifies a private user namespace with exactly the original non-root
 UID/GID mapped to the same host IDs, plus a post-exec offline network namespace.
-It uses `unshare --map-current-user --keep-caps`, not subordinate-ID ranges or
-host-root mappings. Retained capabilities apply only within that private user
-namespace. A failed preflight stops before expensive Rust compilation; host
+On restricted CI hosts a privileged parent writes the blocked child's single-ID
+kernel maps directly, avoiding subordinate-ID helper policy. It then drops the
+child to the original runner IDs before exec with only namespace-local
+CAP_SYS_ADMIN, for offline startup. No host-root identity is mapped. The fixture
+cannot acquire new privileges. A failed preflight stops before Rust compilation; host
 AppArmor, subuid and namespace policy are never relaxed. Full offline startup also needs
 the tray runtime (`libayatana-appindicator3-dev` on Ubuntu). Failed startup logs
 are printed from the synthetic fixture, never the user's desktop/data.

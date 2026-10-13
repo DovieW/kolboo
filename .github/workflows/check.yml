@@ -93,11 +93,11 @@ jobs:
       - name: Verify native namespace isolation before Rust compilation
         shell: bash
         run: |
-          python3 -m unittest discover -s .github/scripts -p 'native_namespace_check_test.py'
+          python3 -m unittest discover -s .github/scripts -p 'native_namespace_*_test.py'
           export KOLBOO_NATIVE_PARENT_USER_NAMESPACE=$(readlink /proc/self/ns/user)
           export KOLBOO_NATIVE_EXPECTED_UID=$(id -u)
           export KOLBOO_NATIVE_EXPECTED_GID=$(id -g)
-          unshare --user --map-current-user --keep-caps -- python3 .github/scripts/native_namespace_check.py
+          sudo -n --preserve-env=KOLBOO_NATIVE_PARENT_USER_NAMESPACE,KOLBOO_NATIVE_EXPECTED_UID,KOLBOO_NATIVE_EXPECTED_GID /usr/bin/python3 .github/scripts/native_namespace_launch.py /usr/bin/python3 .github/scripts/native_namespace_check.py
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@94c31af3204a9f15ab40b35ad084410b905bbc73 # main
@@ -114,10 +114,11 @@ jobs:
       - name: Generate Rust coverage
         working-directory: app
         run: |
-          # Map only this unprivileged runner. Retain namespace-local capabilities
-          # for offline startup; never change host AppArmor/subuid policy.
+          # The privileged parent maps only the blocked child to the original
+          # runner IDs. Fixtures never run as host root or alter host policy.
+          native_env="HOME,DISPLAY,XAUTHORITY,XDG_DATA_HOME,XDG_CONFIG_HOME,XDG_CACHE_HOME,XDG_RUNTIME_DIR,GNOME_KEYRING_CONTROL,DBUS_SESSION_BUS_ADDRESS,GDK_BACKEND,WINIT_UNIX_BACKEND,GDK_SCALE,GDK_DPI_SCALE,WAYLAND_DISPLAY,GTK_MODULES,GTK_A11Y,NO_AT_BRIDGE,ALSA_CONFIG_PATH,KOLBOO_NATIVE_WINDOW_TEST,KOLBOO_NATIVE_WINDOW_DIRECTORY,KOLBOO_NATIVE_PARENT_USER_NAMESPACE,KOLBOO_NATIVE_EXPECTED_UID,KOLBOO_NATIVE_EXPECTED_GID,KOLBOO_NATIVE_WINDOW_RUNNER,LLVM_PROFILE_FILE"
           export KOLBOO_NATIVE_WINDOW_RUNNER="unshare --net --"
-          export KOLBOO_NATIVE_USER_NAMESPACE_RUNNER='["unshare","--user","--map-current-user","--keep-caps","--"]'
+          export KOLBOO_NATIVE_USER_NAMESPACE_RUNNER=$(node -e 'console.log(JSON.stringify(["sudo", "-n", "--preserve-env=" + process.argv[1], "/usr/bin/env", "PATH=" + process.env.PATH, "/usr/bin/python3", process.argv[2]]))' "$native_env" "$GITHUB_WORKSPACE/.github/scripts/native_namespace_launch.py")
           pnpm cargo:coverage -- --lcov --output-path coverage/rust-lcov.info
 
       - name: Enforce 100% patch coverage
