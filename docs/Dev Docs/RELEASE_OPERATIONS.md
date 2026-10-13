@@ -138,8 +138,11 @@ WebKit `EGL_BAD_PARAMETER`; passing geometry/close checks alone is insufficient.
 It contains the older bundled host display libraries implicated in
 [Tauri #15976](https://github.com/tauri-apps/tauri/issues/15976). CLI 2.12.1
 includes the [upstream packaging fix](https://github.com/tauri-apps/tauri/pull/16062).
-Linux packaging now inventories the extracted image and rejects those host
-display libraries before uploading artifacts. The Windows NSIS template was
+Linux packaging now inventories the extracted image and rejects bundled
+`libwayland-client` before uploading artifacts, matching the upstream fix.
+Other GTK/display dependencies remain bundled by upstream; their presence is
+not treated as proof of failure or portability. Actual rendering is required.
+The Windows NSIS template was
 rebased to the same tagged CLI without dropping the Kolboo upgrade safeguards.
 The first draft remains unpublished: replacement packages, all updater
 signatures/provenance, and actual AppImage frontend rendering must be verified.

@@ -2,10 +2,12 @@ import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-// These host display libraries must not shadow the host Mesa drivers. Older
-// linuxdeploy bundled them and caused WebKit EGL_BAD_PARAMETER on newer Mesa:
+// Host Mesa uses libwayland-client; bundling an older copy can abort WebKit
+// with EGL_BAD_PARAMETER. CLI 2.12.1 excludes this library upstream. Other
+// GTK dependencies remain bundled, so do not reject the stock fixed bundler
+// simply because it includes libxkbcommon or other Wayland libraries:
 // https://github.com/tauri-apps/tauri/issues/15976
-const hostDisplayLibrary = /^lib(?:wayland-(?:client|server|cursor|egl)|xkbcommon|xcb-(?:randr|render|shm)|Xau|Xdmcp)\.so(?:\.\d+)*$/;
+const hostDisplayLibrary = /^libwayland-client\.so(?:\.\d+)*$/;
 
 export async function checkAppImageLibraries(appDir) {
 	if (!(await lstat(path.join(appDir, "usr"))).isDirectory()) {

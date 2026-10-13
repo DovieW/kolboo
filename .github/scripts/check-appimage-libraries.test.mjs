@@ -16,6 +16,9 @@ async function fixture(t) {
 test("accepts application libraries and does not follow links outside the bundle", async (t) => {
 	const root = await fixture(t);
 	await writeFile(path.join(root, "usr/lib/libwebkit2gtk-4.1.so.0"), "synthetic");
+	for (const name of ["libwayland-server.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1", "libxkbcommon.so.0", "libxcb-randr.so.0", "libxcb-render.so.0", "libxcb-shm.so.0", "libXau.so.6", "libXdmcp.so.6"]) {
+		await writeFile(path.join(root, "usr/lib", name), "synthetic fixed-bundler dependency");
+	}
 	await symlink("missing-library.so", path.join(root, "usr/lib/libapplication.so"));
 	await symlink("/unavailable-host-directory", path.join(root, "usr/lib/host"));
 	await checkAppImageLibraries(root);
@@ -24,7 +27,7 @@ test("accepts application libraries and does not follow links outside the bundle
 	assert.match(cli.stdout, /inventory passed/);
 });
 
-for (const name of ["libwayland-client.so.0", "libwayland-server.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1", "libxkbcommon.so.0", "libxcb-randr.so.0", "libxcb-render.so.0", "libxcb-shm.so.0", "libXau.so.6", "libXdmcp.so.6", "libwayland-client.so", "libwayland-client.so.0.23.0"]) {
+for (const name of ["libwayland-client.so.0", "libwayland-client.so", "libwayland-client.so.0.23.0"]) {
 	test(`rejects host dependency ${name}, including nested libraries and dangling symlinks`, async (t) => {
 		const root = await fixture(t);
 		const relative = `usr/lib/x86_64-linux-gnu/${name}`;
@@ -57,10 +60,10 @@ test("fails closed for missing, non-directory or linked usr roots and invalid CL
 
 test("reports every incompatible real file in deterministic order", async (t) => {
 	const root = await fixture(t);
-	await writeFile(path.join(root, "usr/lib/libxkbcommon.so.0"), "synthetic");
-	await writeFile(path.join(root, "usr/lib/libXau.so.6"), "synthetic");
+	await writeFile(path.join(root, "usr/lib/libwayland-client.so.0"), "synthetic");
+	await writeFile(path.join(root, "usr/lib/x86_64-linux-gnu/libwayland-client.so.0.23.0"), "synthetic");
 	await assert.rejects(checkAppImageLibraries(root), (error) => {
-		assert.ok(error.message.endsWith("usr/lib/libXau.so.6\nusr/lib/libxkbcommon.so.0"));
+		assert.ok(error.message.endsWith("usr/lib/libwayland-client.so.0\nusr/lib/x86_64-linux-gnu/libwayland-client.so.0.23.0"));
 		return true;
 	});
 });
