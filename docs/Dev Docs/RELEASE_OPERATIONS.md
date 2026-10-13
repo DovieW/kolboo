@@ -126,6 +126,31 @@ PR #111 was merged as `58ec0e1` with the maintainer's explicitly approved merge
 override; no branch rules changed. These development builds are not acceptance
 of the final account-enabled, updater-signed release packages.
 
+The first signed release run `38466928729` produced all three platform packages.
+Its exact DEB was installed on the maintainer's KDE/Ubuntu 26.04 laptop, with
+the user-local launcher redirected to `/usr/bin/kolboo` and the old launcher
+retained as a backup. The maintainer reported the restored signed-in Managed
+path and signed-out BYOK dictation working. This does not prove a fresh
+email-code login or every restart/animation/permission permutation.
+
+The signed AppImage from that run failed frontend rendering on newer Mesa with
+WebKit `EGL_BAD_PARAMETER`; passing geometry/close checks alone is insufficient.
+It contains the older bundled host display libraries implicated in
+[Tauri #15976](https://github.com/tauri-apps/tauri/issues/15976). CLI 2.12.1
+includes the [upstream packaging fix](https://github.com/tauri-apps/tauri/pull/16062).
+Linux packaging now inventories the extracted image and rejects those host
+display libraries before uploading artifacts. The Windows NSIS template was
+rebased to the same tagged CLI without dropping the Kolboo upgrade safeguards.
+The first draft remains unpublished: replacement packages, all updater
+signatures/provenance, and actual AppImage frontend rendering must be verified.
+Prior DEB acceptance does not establish acceptance of a different executable.
+
+The maintainer explicitly requested no YiddishLabs changes after reviewing the
+two BYOK findings: initial secure-key bootstrap omits the YiddishLabs slots,
+and imported-file Standard submissions use meeting-purpose metadata. Both
+remain known limitations, not fixes included in 0.3.3. Managed YiddishLabs stays
+disabled; no vendor credentials, paid tests or job-table migration were added.
+
 ## Windows startup regression (0.3.2)
 
 The overlay layout helper previously acquired its layout mutex before resolving

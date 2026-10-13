@@ -9,6 +9,7 @@ on:
       - ".github/scripts/configure-desktop-sentry*"
       - ".github/scripts/upload-desktop-symbols*"
       - ".github/scripts/validate-desktop-cloud-config*"
+      - ".github/scripts/check-appimage-libraries*"
       - ".github/workflows/linux-build.yml"
   workflow_dispatch:
     inputs:
@@ -127,6 +128,7 @@ jobs:
           set -euo pipefail
           node --test .github/scripts/validate-desktop-cloud-config.test.mjs
           node .github/scripts/validate-desktop-cloud-config.mjs
+          node --test .github/scripts/check-appimage-libraries.test.mjs
           node --test .github/scripts/configure-desktop-sentry.test.mjs .github/scripts/upload-desktop-symbols.test.mjs
           node .github/scripts/configure-desktop-sentry.mjs
           version=$(node -p "require('./app/package.json').version")
@@ -210,6 +212,7 @@ jobs:
             "$GITHUB_WORKSPACE/$appimage_path" --appimage-extract >/dev/null
             test -x squashfs-root/AppRun
           )
+          node .github/scripts/check-appimage-libraries.mjs "$appimage_extract_dir/squashfs-root"
 
           mkdir -p artifacts
           cp "$deb_path" artifacts/
@@ -237,6 +240,8 @@ jobs:
           channel=${{ inputs.service_enabled && 'service-beta' || inputs.release_signing && 'versioned-community' || 'linux-community-beta' }}
           architecture=x86_64
           build_runner=ubuntu-22.04
+          tauri_cli=$(node -p "require('./app/package.json').devDependencies['@tauri-apps/cli']")
+          appimage_host_display_inventory=passed
           updater_enabled=${{ inputs.release_signing && 'true' || 'false' }}
           git_ref=${GITHUB_REF}
           git_sha=${GITHUB_SHA}

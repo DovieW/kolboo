@@ -1,5 +1,5 @@
-; Derived from Tauri CLI v2.11.4, under MIT OR Apache-2.0.
-; Source: https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.4/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
+; Derived from Tauri CLI v2.12.1, under MIT OR Apache-2.0.
+; Source: https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.1/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
 ; Local changes: KOLBOO in-place upgrade and directory/shortcut page skipping.
 ; See README.md and LICENSE-MIT for provenance and upgrade validation.
 Unicode true
@@ -31,6 +31,7 @@ ManifestDPIAwareness PerMonitorV2
 !include "FileAssociation.nsh"
 !include "Win\COM.nsh"
 !include "Win\Propkey.nsh"
+!include "Win\RestartManager.nsh"
 !include "StrFunc.nsh"
 ${StrCase}
 ${StrLoc}
@@ -272,7 +273,7 @@ Function PageReinstall
 
   ; Skip showing the page if passive
   ;
-  ; Note that we don't call this earlier at the begining
+  ; Note that we don't call this earlier at the beginning
   ; of this function because we need to populate some variables
   ; related to current installed version if detected and whether
   ; we are downgrading or not.
@@ -389,7 +390,7 @@ Function PageLeaveReinstall
         Abort
       ${EndIf}
 
-      ; Other erros? show generic error message and return to select un/reinstall page
+      ; Other errors? show generic error message and return to select un/reinstall page
       MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
       Abort
     ${EndIf}
@@ -654,7 +655,7 @@ Section Install
     !insertmacro NSIS_HOOK_PREINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
@@ -791,7 +792,7 @@ Section Uninstall
     !insertmacro NSIS_HOOK_PREUNINSTALL
   !endif
 
-  !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
+  !insertmacro CheckIfAppIsRunning "$INSTDIR\${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
 
   ; Delete the app directory and its content from disk
   ; Copy main executable

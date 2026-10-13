@@ -108,7 +108,7 @@ test("manual NSIS upgrades use a narrowly modified pinned upstream template", as
 	const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 	const config = JSON.parse(await readFile(path.join(repositoryRoot, "app/src-tauri/tauri.conf.json"), "utf8"));
 	const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "app/package.json"), "utf8"));
-	assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.11.4", "rebase the template when upgrading the CLI");
+	assert.equal(packageJson.devDependencies["@tauri-apps/cli"], "2.12.1", "rebase the template when upgrading the CLI");
 	assert.equal(config.bundle.windows.nsis.template, "windows/installer.nsi");
 	assert.equal(config.bundle.windows.nsis.installMode, "currentUser");
 	assert.equal(config.plugins.updater.windows.installMode, "passive");
@@ -125,7 +125,7 @@ test("manual NSIS upgrades use a narrowly modified pinned upstream template", as
 	const upstream = template.split("\n").slice(4).join("\n").replace(change, "").replace(skipPages, "")
 		.replaceAll("MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfUpdating", "MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive");
 	assert.equal(createHash("sha256").update(upstream).digest("hex"),
-		"20f4ecc730defb71f1342eaeaec4021df13be3d843abba0effe88ea5835fa079",
+		"dabed59013b1d78b879a1a85bc7f2eed2993b33a9a90cdabe5946de3d3950597",
 		"do not silently fork the installer or remove data-preservation safeguards");
 });
 

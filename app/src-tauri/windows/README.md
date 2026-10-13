@@ -1,6 +1,6 @@
 # Windows setup upgrade policy
 
-`installer.nsi` is Tauri CLI **2.11.4**'s stock NSIS template, licensed under
+`installer.nsi` is Tauri CLI **2.12.1**'s stock NSIS template, licensed under
 MIT OR Apache-2.0 (the MIT license is included here). The `KOLBOO` block
 immediately after version comparison in `PageReinstall` sets `UpdateMode` for
 newer NSIS versions and skips the uninstall/maintenance page. `SkipIfUpdating`
@@ -20,6 +20,13 @@ When upgrading `@tauri-apps/cli`, rebase this template against the corresponding
 upstream template and run the Windows packaging/upgrade rehearsal. Do not copy
 an unrelated `dev` template. Installer contract tests verify the pinned CLI,
 template provenance and the unchanged updater public key.
+
+The October 13, 2026 rebase to CLI 2.12.1 retains the same two Kolboo upgrade
+blocks. Upstream now includes Restart Manager and checks the installed
+executable by its full path; the remaining upstream edits correct comments.
+The contract test reconstructs and hashes the exact tagged upstream template.
+This rebase is needed alongside the upstream AppImage/Mesa packaging fix; it
+does not establish hands-on Windows upgrade acceptance.
 
 Windows acceptance must exercise: fresh EXE install; newer EXE over EXE without
 the uninstall page; same-version repair; MSI over MSI; background signed update

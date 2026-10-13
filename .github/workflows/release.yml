@@ -64,7 +64,7 @@ jobs:
           esac
 
       - name: Test updater manifest generation
-        run: node --test .github/scripts/generate-updater-manifest.test.mjs
+        run: node --test .github/scripts/generate-updater-manifest.test.mjs .github/scripts/check-appimage-libraries.test.mjs
 
       - name: Generate release notes from changelog.d
         run: node .github/scripts/generate-release-notes.mjs RELEASE_NOTES.md
