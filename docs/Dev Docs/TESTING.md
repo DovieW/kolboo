@@ -234,7 +234,11 @@ unused default-method/vtable records emitted only for test fixture types.
 `functionInstances` lists exact compiler names, requires a covered source
 definition and another covered Rust function instance, and rejects any new
 uncalled instance at that definition. It is not a production-adapter or function
-body exclusion. Compiler/name changes require review. No frontend behavior or
+body exclusion. Reviewed records keep their approved raw alias only when full
+Rust demangling matches the same concrete type, method and closure. Build/version
+hashes do not change that identity; counts, source boundaries and the original
+exception list remain unchanged. New semantic identities still fail.
+Compiler/name changes require review. No frontend behavior or
 provider-protocol code is exempted. Real hot-plug recovery, physical-microphone
 and Windows/macOS native acceptance remain unverified by these fixtures.
 
