@@ -82,8 +82,14 @@ beta tags remain cloud-disabled by default. Both build-mode flags and all five
 public origins/keys come from the same explicit input. Release verification
 rejects missing or invalid public configuration before expensive builds begin.
 Only the Supabase publishable key enters desktop packages, never server keys or
-Cloudflare Access credentials. `production` here names the strict installer
-validation mode, not a promotion of the existing early-development backend.
+Cloudflare Access credentials. `production` is the strict installer validation
+mode. On October 13 the maintainer also authorized promoting the existing live
+Worker fleet to production runtime safeguards, without replacing the service.
+The legacy `-dev` Worker URLs remain valid for existing clients; their names do
+not indicate a development sandbox. The existing database, durable catalog
+partition, account access and quota limits were preserved. Authenticated
+before/after acceptance and rejection of development-only routes passed in
+private deployment run `38404247436`; no paid inference or SQL migration ran.
 
 The approved-email admission hook and complimentary beta access remain in force.
 Do not disable admission, enable paid checkout, publish YiddishLabs models, apply
