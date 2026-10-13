@@ -1262,7 +1262,7 @@ impl SharedPipeline {
         inner.pending_connection = Some(crate::stt::streaming::OwnedStreamingTask(task));
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub async fn try_start_concurrent_streaming(&self, app_handle: &AppHandle) {
         let Some(epoch) = self.session_epoch() else {
             return;

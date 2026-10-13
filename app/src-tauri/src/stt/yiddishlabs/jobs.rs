@@ -327,6 +327,7 @@ async fn transcribe_with_poll_interval(
         .map(|gateway| crate::http::join_base_url(gateway, "/v1/managed/transcription/jobs"))
         .unwrap_or_else(|| provider.standard_endpoint.clone());
     let purpose = match context.purpose {
+        #[cfg(test)]
         UploadPurpose::File => "file",
         UploadPurpose::Meeting => "meeting",
     };

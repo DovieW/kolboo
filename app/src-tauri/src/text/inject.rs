@@ -162,30 +162,6 @@ pub fn output_text_with_mode_options(
     }
 }
 
-/// Apply a user-facing platform fallback before invoking synthetic input.
-///
-/// Wayland uses its own keyboard-only portal grant. An unavailable or rejected
-/// grant leaves the completed transcript on the clipboard, never XWayland input.
-#[cfg(desktop)]
-pub(crate) fn output_text_with_app(
-    app: &AppHandle,
-    text: &str,
-    mode: OutputMode,
-    hit_enter: bool,
-    preserve_clipboard: bool,
-    shortcut: PasteShortcut,
-) -> Result<OutputDelivery, String> {
-    output_text_with_app_and_lease(
-        app,
-        text,
-        mode,
-        hit_enter,
-        preserve_clipboard,
-        shortcut,
-        &OutputLease::capture(app),
-    )
-}
-
 #[cfg(desktop)]
 fn output_text_with_app_and_lease(
     app: &AppHandle,

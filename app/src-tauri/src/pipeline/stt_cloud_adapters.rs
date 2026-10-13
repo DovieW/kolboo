@@ -22,7 +22,6 @@ pub(super) struct CloudSttProviderBuildContext {
     pub managed_gateway_url: Option<String>,
     pub transcription_prompt: Option<String>,
     pub request_log_store: Option<RequestLogStore>,
-    pub stt_live_output: bool,
 }
 
 pub(super) struct CloudSttProviderAdapter {
@@ -339,7 +338,6 @@ mod tests {
             managed_gateway_url: Some("https://managed.example.test".to_string()),
             transcription_prompt: Some("keep punctuation".to_string()),
             request_log_store: None,
-            stt_live_output: true,
         }
     }
 

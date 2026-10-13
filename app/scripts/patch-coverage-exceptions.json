@@ -135,7 +135,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Explicitly approved 2026-10-12: only the two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/stt/streaming.rs",
@@ -144,7 +144,7 @@
 		"lines": [1502, 2057],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "46337b4003b0a9bd8380a78b30c3b08526bcfb8fc881302499a1f82ac1caadd1"
+		"sha256": "8aceb03432672817d797629d8e00c4e3b69ad40ea6ebdeec799586fcfee50ca3"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",
@@ -272,27 +272,6 @@
 		"functions": [55],
 		"instantiations": [58],
 		"sha256": "f12141cd96fc8bcbd02d30fccc61d774ccafd01f48e5905bb2dbd741fe94667f"
-	},
-	{
-		"filePath": "app/src-tauri/src/text/inject.rs",
-		"reason": "Re-reviewed and approved 2026-09-30: real Wry state capture, worker/main-thread dispatch, OS clipboard and native keyboard calls cannot safely execute in headless tests. Actual pipeline leases, portal permission/delivery lifecycle, chord cleanup, fallback policy and clipboard barriers are tested. No exception covers the lease comparison or controller protocol bodies.",
-		"evidence": [
-			"app/src-tauri/src/text/tests/key_inject.rs",
-			"app/src-tauri/src/text/clipboard/tests.rs",
-			"app/src-tauri/src/platform_capabilities.rs",
-			"app/src-tauri/src/text/tests/output_ownership.rs",
-			"app/src-tauri/src/text/tests/wayland_input.rs"
-		],
-		"lines": [
-			45, 46, 47, 48, 49, 50, 51, 52, 53, 162, 163, 164, 165, 166, 167, 168,
-			169, 170, 172, 175, 176, 177, 178, 179, 180, 181, 182, 190, 191, 192, 193,
-			194, 195, 196, 197, 199, 201, 202, 203, 204, 205, 217, 225, 226, 227, 228,
-			229, 230, 231, 232, 233, 236, 237, 238, 239, 240, 241, 242, 243, 244, 246,
-			247, 248, 280, 288, 341, 360, 361, 365, 366, 372, 377
-		],
-		"functions": [45, 48, 51, 175, 194, 225, 232, 236, 248, 361],
-		"instantiations": [],
-		"sha256": "c1eb8504d80870ebff243a3faedc7eaad408f04fe592b3537b093015a1d7f1be"
 	},
 	{
 		"filePath": "app/src-tauri/src/adapters/media_controls.rs",
@@ -426,7 +405,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/stt/mod.rs",
-		"reason": "Explicitly approved 2026-10-12: only these 21 named, unused compiler-generated default-method/vtable copies for cfg(test) fixture types are exempt. The shared upload and credential-renewal definitions and every real adapter's changed executable code are measured. Exact record names prevent a new untested production adapter instance from inheriting this waiver; a compiler/name change requires review.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after adding cfg(test) to the fixture-only File variant: only the same 21 named, unused compiler-generated default-method/vtable copies for cfg(test) fixture types are exempt. Definitions shifted by three lines; names and scope are unchanged. The shared upload and credential-renewal definitions and every real adapter's changed executable code are measured. Exact record names prevent a new untested production adapter instance from inheriting this waiver; a compiler/name change requires review.",
 		"evidence": [
 			"app/src-tauri/src/stt/tests/managed_selection.rs",
 			"app/src-tauri/src/stt/elevenlabs/tests/realtime_contract.rs",
@@ -438,7 +417,7 @@
 		"functions": [],
 		"functionInstances": [
 			{
-				"line": 202,
+				"line": 205,
 				"names": [
 					"_RNvYNtNCNvNtNtNtCsdl1dz0YQn0P_10kolboo_lib8commands9licensing12native_tests48owned_stt_refresh_preserves_gateway_and_identity011CannotRenewNtNtBe_3stt11SttProvider17transcribe_uploadBe_",
 					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt19simulated_streaming5tests22CumulativeFakeProviderNtB8_11SttProvider17transcribe_uploadBa_",
@@ -453,7 +432,7 @@
 				]
 			},
 			{
-				"line": 212,
+				"line": 215,
 				"names": [
 					"_RNvYNtNtNtNtCsdl1dz0YQn0P_10kolboo_lib3stt19simulated_streaming5tests22CumulativeFakeProviderNtB8_11SttProvider26with_renewed_managed_tokenBa_",
 					"_RNvYNtNCNvNtNtCsdl1dz0YQn0P_10kolboo_lib8pipeline5tests18native_live_output08ProviderNtNtBc_3stt11SttProvider26with_renewed_managed_tokenBc_",
@@ -469,6 +448,6 @@
 				]
 			}
 		],
-		"sha256": "dc2e43f01761e5b01189e1440add2cdcdd1e0797fbaf2e7c254168a8a2546d2b"
+		"sha256": "92b34f3cb748e3ae7f7b9d60fa2e5fbc425f65d528337932ff19908d3943637d"
 	}
 ]

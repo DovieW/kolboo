@@ -298,6 +298,7 @@ pub(super) fn get_or_create_stt_provider(
         .map(|(provider, _)| provider)
 }
 
+#[cfg(test)]
 pub(super) fn get_or_create_selected_stt_provider(
     inner: &mut PipelineInner,
     choice: &crate::model_selection::ModelSelection,
@@ -513,7 +514,6 @@ pub(super) fn get_or_create_resolved_stt_provider(
             },
             transcription_prompt: inner.config.stt_transcription_prompt.clone(),
             request_log_store: inner.config.request_log_store.clone(),
-            stt_live_output: inner.config.stt_live_output,
         },
     )?;
 

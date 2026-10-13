@@ -74,6 +74,9 @@ pub struct SttTranscript {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UploadPurpose {
+    // Desktop imports use the saved meeting-upload pipeline. The file purpose
+    // is also exercised by provider HTTP contract fixtures, not live dictation.
+    #[cfg(test)]
     File,
     Meeting,
 }

@@ -752,7 +752,6 @@ fn unavailable_provider_key_errors_do_not_claim_the_saved_key_is_missing() {
             managed_gateway_url: None,
             transcription_prompt: None,
             request_log_store: None,
-            stt_live_output: false,
         },
     );
     let Err(PipelineError::Config(stt_message)) = stt_result else {

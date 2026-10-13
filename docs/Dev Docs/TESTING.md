@@ -242,6 +242,13 @@ Compiler/name changes require review. No frontend behavior or
 provider-protocol code is exempted. Real hot-plug recovery, physical-microphone
 and Windows/macOS native acceptance remain unverified by these fixtures.
 
+On 2026-10-13 the Windows dead-code cleanup was reviewed against these exact
+approved boundaries: restricting a Linux-only test helper leaves the two
+pipeline cancellation exits unchanged; a fixture-only enum annotation shifts
+the same 21 named compiler records by three lines. Their snapshots retain the
+same scope. The obsolete `text/inject.rs` snapshot was removed, not refreshed;
+isolated native coverage now exercises that boundary.
+
 Rust coverage evidence is available through:
 
 ```sh
@@ -292,12 +299,12 @@ Coverage fails rather than silently skipping this boundary when its prerequisite
 or local unprivileged user/network namespaces are unavailable. Failed-run artifacts remain
 in the printed temporary directory for diagnosis. The first instrumented desktop
 binary compilation may take longer than the window assertions themselves.
-CI uses a privileged user-namespace launcher that maps and drops back to the
-runner UID/GID, preserving only named display/storage/runtime and LLVM-profile
-variables (including the runner's HOME). Retained capabilities are scoped to
-that private user namespace, allowing offline startup to create its own network
-namespace without a second host-root launcher. Host namespace security policy
-is not disabled. Full offline startup also needs
+CI first verifies a private user namespace with exactly the original non-root
+UID/GID mapped to the same host IDs, plus a post-exec offline network namespace.
+It uses `unshare --map-current-user --keep-caps`, not subordinate-ID ranges or
+host-root mappings. Retained capabilities apply only within that private user
+namespace. A failed preflight stops before expensive Rust compilation; host
+AppArmor, subuid and namespace policy are never relaxed. Full offline startup also needs
 the tray runtime (`libayatana-appindicator3-dev` on Ubuntu). Failed startup logs
 are printed from the synthetic fixture, never the user's desktop/data.
 `KOLBOO_NATIVE_USER_NAMESPACE_RUNNER` is a trusted CI argv array, not a bypass:

@@ -51,7 +51,6 @@ async fn managed_transcription_requests_keep_exact_provider_and_raw_model_identi
                 managed_gateway_url: Some(server.uri()),
                 transcription_prompt: None,
                 request_log_store: None,
-                stt_live_output: false,
             },
         )
         .unwrap();
@@ -116,7 +115,6 @@ async fn credential_renewal_preserves_the_original_adapter_and_cannot_convert_by
                     managed_gateway_url: managed.then(|| original.uri()),
                     transcription_prompt: Some("synthetic context".into()),
                     request_log_store: None,
-                    stt_live_output: false,
                 },
             )
             .unwrap()
