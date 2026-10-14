@@ -78,10 +78,22 @@ export function NetworkSettings({
 	const [isClearingCerts, setIsClearingCerts] = useState(false);
 
 	useEffect(() => {
-		if (!settings) return;
-		setModeDraft(settings.proxy_settings.mode);
-		setManualDraft(settings.proxy_settings.manual);
-	}, [settings]);
+		setModeDraft(persisted.mode);
+	}, [persisted.mode]);
+
+	useEffect(() => {
+		setManualDraft({
+			proxy_url: persisted.manual.proxy_url,
+			no_proxy: persisted.manual.no_proxy,
+			username: persisted.manual.username,
+			password: persisted.manual.password,
+		});
+	}, [
+		persisted.manual.proxy_url,
+		persisted.manual.no_proxy,
+		persisted.manual.username,
+		persisted.manual.password,
+	]);
 
 	const canApplyManual = manualDraft.proxy_url.trim().length > 0;
 
@@ -190,9 +202,6 @@ export function NetworkSettings({
 
 		// Otherwise, keep draft mode as Manual (so the fields show), but don't
 		// change the effective mode until a proxy URL is provided.
-		if (nextMode === "manual") {
-			saveManualDraft({ enableIfPossible: false });
-		}
 	};
 
 	const content = (

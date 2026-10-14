@@ -4,6 +4,7 @@ import { isCloudServiceAvailable } from "../../lib/cloudService";
 // Keep the first-run guide order centralized here so the setup copy/tests can
 // assert that account setup stays ahead of provider configuration.
 export const SETTINGS_GUIDE_STEPS = [
+	"proxy",
 	"account",
 	"groq",
 	"dictation",
@@ -14,10 +15,11 @@ export type SettingsGuideStep = (typeof SETTINGS_GUIDE_STEPS)[number];
 
 export function buildSettingsGuideSteps(
 	hasManagedAccess: boolean,
-): [SettingsGuideStep, ...SettingsGuideStep[]] {
-	if (!isCloudServiceAvailable()) return ["groq", "dictation", "wrapup"];
+): [SettingsGuideStep, SettingsGuideStep, ...SettingsGuideStep[]] {
+	if (!isCloudServiceAvailable())
+		return ["proxy", "groq", "dictation", "wrapup"];
 	return hasManagedAccess
-		? ["account", "dictation", "wrapup"]
+		? ["proxy", "account", "dictation", "wrapup"]
 		: [...SETTINGS_GUIDE_STEPS];
 }
 

@@ -72,11 +72,13 @@ export function SettingsGuideOverlay({
 	onSkip,
 	onFinished,
 	onGoHome,
+	onConfigureProxy,
 }: {
 	opened: boolean;
 	onSkip: () => void;
 	onFinished: () => void;
 	onGoHome: () => void;
+	onConfigureProxy: () => void;
 }) {
 	const queryClient = useQueryClient();
 
@@ -98,6 +100,7 @@ export function SettingsGuideOverlay({
 				: "Community";
 
 	const welcomeTimersRef = useRef<number[]>([]);
+	const resumeAfterProxy = useRef(false);
 
 	const [phase, setPhase] = useState<Phase>("welcome");
 	const firstStep = buildSettingsGuideSteps(accountView.hasPaidAccess)[0];
@@ -196,7 +199,14 @@ export function SettingsGuideOverlay({
 		queryClient.invalidateQueries({ queryKey: ["settings"] });
 
 		// Reset guide state on open.
-		restartWelcomeSequence();
+		if (resumeAfterProxy.current) {
+			resumeAfterProxy.current = false;
+			setPhase("guide");
+			setStep(buildSettingsGuideSteps(false)[1]);
+			setSkipVisible(true);
+		} else {
+			restartWelcomeSequence();
+		}
 
 		setGroqKeyValue("");
 		hasHydratedGroqKeyRef.current = false;
@@ -426,6 +436,29 @@ export function SettingsGuideOverlay({
 					)}
 
 					<div className="tang-guide-content tang-guide-fade-in">
+						{step === "proxy" && (
+							<div className="tang-guide-step">
+								<Title order={3}>Do you need a proxy?</Title>
+								<Text c="dimmed" size="sm" mt="sm">
+									If your network requires a proxy, configure it before signing
+									in or connecting to a provider. Otherwise, continue with your
+									current network settings.
+								</Text>
+								<Group justify="center" mt="lg">
+									<Button
+										onClick={() => {
+											resumeAfterProxy.current = true;
+											onConfigureProxy();
+										}}
+									>
+										Set up proxy
+									</Button>
+									<Button variant="default" onClick={goForward}>
+										Continue with current settings
+									</Button>
+								</Group>
+							</div>
+						)}
                         {step === "account" && (
                             <div className="tang-guide-step">
                                 {accountView.isSignedIn ? (

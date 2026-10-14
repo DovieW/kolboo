@@ -74,6 +74,9 @@ They remain available under **Your models** for Managed accounts too.
   contains no keys.
 - Transcription, rewriting and ad-hoc LLM tools honor configured proxy/TLS settings,
   including manual proxy bypass rules and explicit No proxy mode.
+- Setup asks about proxy configuration before account/provider setup. “Set up proxy”
+  opens Settings → Network; “Continue setup guide” resumes onboarding afterward.
+  Selecting an empty Manual proxy opens an editable draft without activating it.
 - Removing a provider removes its saved key but does not replace saved model
   selections. Select another model before using a recording/profile that referred
   to the removed provider; it will fail safely instead of contacting another vendor.

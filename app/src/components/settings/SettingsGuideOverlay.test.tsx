@@ -25,13 +25,18 @@ vi.mock("../account/AccountAuthentication", () => ({
 let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
-const callbacks = { onSkip: vi.fn(), onFinished: vi.fn(), onGoHome: vi.fn() };
-async function render() {
+const callbacks = {
+	onSkip: vi.fn(),
+	onFinished: vi.fn(),
+	onGoHome: vi.fn(),
+	onConfigureProxy: vi.fn(),
+};
+async function render(opened = true) {
 	await act(async () =>
 		root.render(
 			<QueryClientProvider client={client}>
 				<MantineProvider env="test">
-					<SettingsGuideOverlay opened {...callbacks} />
+					<SettingsGuideOverlay opened={opened} {...callbacks} />
 				</MantineProvider>
 			</QueryClientProvider>,
 		),
@@ -66,11 +71,27 @@ afterEach(async () => {
 	Reflect.deleteProperty(document, "fonts");
 });
 
+it("offers proxy setup before authentication and resumes after configuring it", async () => {
+	await render();
+	await click("Start");
+	expect(host.textContent).toContain("Do you need a proxy?");
+	expect(host.querySelector("form")).toBeNull();
+	await click("Set up proxy");
+	expect(callbacks.onConfigureProxy).toHaveBeenCalledOnce();
+	await render(false);
+	expect(host.querySelector('[role="dialog"]')).toBeNull();
+	await render();
+	expect(
+		host.querySelector('[aria-label="Email-code sign-in"]'),
+	).not.toBeNull();
+});
+
 it("starts directly at BYOK setup in Community packages, including cached Pro accounts", async () => {
 	vi.stubEnv("VITE_CLOUD_SERVICE_ENABLED", "false");
 	state.license = { tier: "personal", status: "active" } as LicenseState;
 	await render();
 	await click("Start");
+	await click("Continue with current settings");
 	expect(host.querySelector("form")).toBeNull();
 	expect(host.textContent).toContain("Create a Groq API key");
 	expect(host.textContent).not.toContain("Pro active");
@@ -79,6 +100,7 @@ it("starts directly at BYOK setup in Community packages, including cached Pro ac
 it("keeps account-free setup available and advances past BYOK setup when access becomes active", async () => {
 	await render();
 	await click("Start");
+	await click("Continue with current settings");
 	expect(
 		host.querySelector('[aria-label="Email-code sign-in"]'),
 	).not.toBeNull();
@@ -109,6 +131,7 @@ it.each([
 		} as LicenseState;
 		await render();
 		await click("Start");
+		await click("Continue with current settings");
 		expect(host.querySelector("form")).toBeNull();
 		expect(host.querySelector(".mantine-Badge-root")?.textContent).toBe(badge);
 		await click("Continue setup");

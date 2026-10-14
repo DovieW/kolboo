@@ -1,4 +1,4 @@
-import { NavLink, Tooltip } from "@mantine/core";
+import { Button, NavLink, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -194,6 +194,7 @@ export default function App() {
 	const [settingsGuideOpen, setSettingsGuideOpen] = useState<boolean>(
 		() => bootShouldAutoOpenGuide,
 	);
+	const [settingsGuideProxyPaused, setSettingsGuideProxyPaused] = useState(false);
 	const lastSingleInstanceToastAt = useRef(0);
 
 	const guideQuery = useSettingsGuideState();
@@ -220,7 +221,7 @@ export default function App() {
 		"posthog_analytics_enabled",
 	);
 	const shouldShowTelemetryDisclosure =
-		!settingsGuideOpen && Boolean(settings) && !telemetryDisclosureResolved;
+		!settingsGuideOpen && !settingsGuideProxyPaused && Boolean(settings) && !telemetryDisclosureResolved;
 
 	// The optional per-installation toggle does not govern aggregate counts.
 	const aggregateAnalyticsEnabled = telemetryDisclosureResolved;
@@ -447,11 +448,24 @@ export default function App() {
 					setLogsJumpToId(null);
 					setActiveView(view);
 					if (view === "settings" && guideState === "pending") {
+						setSettingsGuideProxyPaused(false);
 						setSettingsGuideOpen(true);
 					}
 				}}
 			/>
 			<main id="main-content" className="app-page" tabIndex={-1}>
+				{!settingsGuideOpen && settingsGuideProxyPaused && (
+					<Button
+						mb="md"
+						variant="light"
+						onClick={() => {
+							setSettingsGuideProxyPaused(false);
+							setSettingsGuideOpen(true);
+						}}
+					>
+						Continue setup guide
+					</Button>
+				)}
 				{renderView()}
 				<div
 					className="retained-page"
@@ -466,6 +480,15 @@ export default function App() {
 
 			<SettingsGuideOverlay
 				opened={settingsGuideOpen}
+				onConfigureProxy={() => {
+					setSettingsGuideProxyPaused(true);
+					setSettingsGuideOpen(false);
+					setActiveView("settings");
+					setSettingsNavigationRequest((previous) => ({
+						tab: "network",
+						id: (previous?.id ?? 0) + 1,
+					}));
+				}}
 				onSkip={() => {
 					setSettingsGuideOpen(false);
 					setGuideState.mutate("skipped");
