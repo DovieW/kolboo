@@ -36,7 +36,8 @@ export function TelemetryDisclosureContent({
 						<Stack gap="xs">
 							<Text size="sm" c="dimmed">
 								App opens, page visits and recording outcomes. Recording events
-								include rounded duration, mode and recognized provider/model.
+								include rounded duration, mode, recognized provider/model, the
+								language hint and provider-reported language (or unknown/mixed).
 							</Text>
 							<Text size="sm" c="dimmed">
 								No transcripts, prompts, audio, OCR content, secrets or email

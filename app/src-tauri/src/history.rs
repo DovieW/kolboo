@@ -73,6 +73,10 @@ pub struct HistoryEntry {
     /// STT model used for this transcription.
     #[serde(default)]
     pub stt_model: Option<String>,
+    #[serde(default)]
+    pub stt_language_hint: Option<String>,
+    #[serde(default)]
+    pub stt_detected_languages: Vec<String>,
     /// LLM provider used for rewriting (if enabled).
     #[serde(default)]
     pub llm_provider: Option<String>,
@@ -105,6 +109,10 @@ pub struct HistoryEntry {
 /// STT and speaker metadata are intentionally only available through detail.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct HistorySummary {
+    #[serde(default)]
+    pub stt_language_hint: Option<String>,
+    #[serde(default)]
+    pub stt_detected_languages: Vec<String>,
     pub id: String,
     pub timestamp: DateTime<Utc>,
     pub text: String,
@@ -167,6 +175,8 @@ pub enum RequestHistoryUpdate {
         request_id: String,
         llm_provider: Option<String>,
         llm_model: Option<String>,
+        stt_language_hint: Option<String>,
+        stt_detected_languages: Vec<String>,
     },
     CompleteSuccess {
         request_id: String,
@@ -200,6 +210,8 @@ impl HistoryEntry {
             preset_name: None,
             stt_provider: None,
             stt_model: None,
+            stt_language_hint: None,
+            stt_detected_languages: Vec::new(),
             llm_provider: None,
             llm_model: None,
             recording_request_id: None,
@@ -224,6 +236,8 @@ impl HistoryEntry {
             preset_name: model_info.preset_name,
             stt_provider: model_info.stt_provider,
             stt_model: model_info.stt_model,
+            stt_language_hint: None,
+            stt_detected_languages: Vec::new(),
             llm_provider: model_info.llm_provider,
             llm_model: model_info.llm_model,
             recording_request_id: None,
@@ -811,7 +825,15 @@ impl HistoryStorage {
                 request_id,
                 llm_provider,
                 llm_model,
-            } => self.set_request_llm_model(&request_id, llm_provider, llm_model),
+                stt_language_hint,
+                stt_detected_languages,
+            } => self.set_request_llm_model(
+                &request_id,
+                llm_provider,
+                llm_model,
+                stt_language_hint,
+                stt_detected_languages,
+            ),
             RequestHistoryUpdate::CompleteSuccess { request_id, text } => {
                 self.complete_request_success(&request_id, text)
             }
@@ -946,6 +968,8 @@ impl HistoryStorage {
         request_id: &str,
         llm_provider: Option<String>,
         llm_model: Option<String>,
+        stt_language_hint: Option<String>,
+        stt_detected_languages: Vec<String>,
     ) -> Result<(), String> {
         let _mutation = self.mutation.lock().map_err(|_| "History unavailable")?;
         {
@@ -957,6 +981,8 @@ impl HistoryStorage {
             if let Some(entry) = data.entries.iter_mut().find(|e| e.id == request_id) {
                 entry.llm_provider = llm_provider;
                 entry.llm_model = llm_model;
+                entry.stt_language_hint = stt_language_hint;
+                entry.stt_detected_languages = stt_detected_languages;
             }
         }
 
@@ -1124,6 +1150,8 @@ impl HistoryStorage {
                 .map(|e| {
                     // Only a bounded preview crosses IPC. Details are loaded on demand.
                     HistorySummary {
+                        stt_language_hint: e.stt_language_hint.clone(),
+                        stt_detected_languages: e.stt_detected_languages.clone(),
                         id: e.id.clone(),
                         timestamp: e.timestamp,
                         status: e.status,

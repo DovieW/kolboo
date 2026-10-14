@@ -247,6 +247,12 @@ pub struct RequestLog {
     pub completed_at: Option<DateTime<Utc>>,
     /// STT provider used
     pub stt_provider: String,
+    /// Recording-owned resolved hint; never read from later Settings.
+    #[serde(default)]
+    pub stt_language_hint: Option<String>,
+    /// Only provider-reported codes, never inferred from transcript text.
+    #[serde(default)]
+    pub stt_detected_languages: Vec<String>,
     /// STT model used
     pub stt_model: Option<String>,
     /// LLM provider used (if formatting enabled)
@@ -522,6 +528,15 @@ pub enum RequestStatus {
 }
 
 impl RequestLog {
+    pub(crate) fn set_stt_response(&mut self, response: JsonValue) {
+        for code in crate::telemetry::provider_reported_languages(&response) {
+            if !self.stt_detected_languages.contains(&code) {
+                self.stt_detected_languages.push(code);
+            }
+        }
+        self.stt_response_json = Some(response);
+    }
+
     /// Create a new request log
     pub fn new(stt_provider: String, stt_model: Option<String>) -> Self {
         Self {
@@ -532,6 +547,8 @@ impl RequestLog {
             completed_at: None,
             stt_provider,
             stt_model,
+            stt_language_hint: None,
+            stt_detected_languages: Vec::new(),
             llm_provider: None,
             llm_model: None,
             managed_inference: false,

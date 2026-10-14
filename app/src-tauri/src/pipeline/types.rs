@@ -162,6 +162,8 @@ impl LlmOutcome {
 /// include LLM formatting and/or fallbacks).
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
+    pub stt_language_hint: Option<String>,
+    pub stt_detected_languages: Vec<String>,
     pub speaker_segments: Vec<crate::stt::SpeakerSegment>,
     /// Raw transcript as returned from the STT provider (before any LLM formatting).
     pub stt_text: String,

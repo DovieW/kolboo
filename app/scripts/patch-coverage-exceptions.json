@@ -50,15 +50,15 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/history.rs",
-		"reason": "Re-reviewed 2026-10-01: the existing unreachable serialization-error closure moved into the shared atomic snapshot writer. HistoryData contains only serializable plain fields. Retry and superseded-row success/failure, title preservation, correction protection, disk-write rollback and post-commit cleanup failure are exercised in storage tests; no transition or persistence behavior is waived.",
+		"reason": "Re-reviewed 2026-10-01: the existing unreachable serialization-error closure moved into the shared atomic snapshot writer. HistoryData contains only serializable plain fields. Retry and superseded-row success/failure, title preservation, correction protection, disk-write rollback and post-commit cleanup failure are exercised in storage tests; no transition or persistence behavior is waived. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced.",
 		"evidence": [
 			"app/src-tauri/src/tests/history_storage_tests.rs",
 			"app/src-tauri/src/history.rs"
 		],
 		"lines": [],
-		"functions": [392],
+		"functions": [406],
 		"instantiations": [],
-		"sha256": "12a99aa324675d39fbb49d571b6c6c7356a154a81eb7acaf8d6ccf6e99892efb"
+		"sha256": "34a3e72b6555afafbd71f58f73135fddec368b770edf9883825f37c7a99c0b40"
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/text.rs",
@@ -135,16 +135,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/stt/streaming.rs",
 			"app/src-tauri/src/text/tests/output_ownership.rs"
 		],
-		"lines": [1502, 2057],
+		"lines": [1502, 2061],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "8aceb03432672817d797629d8e00c4e3b69ad40ea6ebdeec799586fcfee50ca3"
+		"sha256": "7303d2b2ba52144ac7f10e16832afb627c4bae57c7c77c34ce4b5c85aa2e1562"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",
@@ -169,12 +169,12 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/transcription_flow.rs",
-		"reason": "LLVM emits uncalled generic copies for early-return/cancelled/native callers. These source functions and every changed line execute in successful routing, rewrite, unavailable-provider and cancellation tests; only duplicate function records may be waived.",
+		"reason": "LLVM emits uncalled generic copies for early-return/cancelled/native callers. These source functions and every changed line execute in successful routing, rewrite, unavailable-provider and cancellation tests; only duplicate function records may be waived. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced.",
 		"evidence": ["app/src-tauri/src/pipeline/transcription_flow/tests.rs"],
 		"lines": [],
 		"functions": [],
 		"instantiations": [72, 74, 691, 806, 813],
-		"sha256": "4c2cdbfe6214ac9aa8e48fc479cdc36962933d05585e9991d1db78bf61192118"
+		"sha256": "21a603bbe779d3934d9c677689e5950c5ace5de7f6762973bca9f33536f98233"
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/normal_dictation_output.rs",
@@ -201,7 +201,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/sessions/recording_finalization.rs",
-		"reason": "Concrete Wry history/log/cost finalization adapters now forward duration rather than decoding a whole recording. Duration extraction, activity metadata and log finalization semantics are independently tested.",
+		"reason": "Concrete Wry history/log/cost finalization adapters now forward duration rather than decoding a whole recording. Duration extraction, activity metadata and log finalization semantics are independently tested. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced.",
 		"evidence": [
 			"app/src-tauri/src/recordings/tests/audio.rs",
 			"app/src-tauri/src/history/activity.rs",
@@ -213,7 +213,7 @@
 		],
 		"functions": [153],
 		"instantiations": [],
-		"sha256": "2c82882659a3e5064563855b9777cb0e21efa95c53bca13bb342e77c08f515d8"
+		"sha256": "1dcb7a4bee96784f94cf9a62af79979409f8c100ee986302dec9ea8bf6172d5b"
 	},
 	{
 		"filePath": "app/src-tauri/src/settings_view.rs",

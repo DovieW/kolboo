@@ -264,6 +264,8 @@ export interface HistoryEntry {
   recording_request_id?: string | null;
   speaker_segments?: SpeakerSegment[];
   status?: HistoryStatus & string;
+  stt_detected_languages?: string[];
+  stt_language_hint?: string | null;
   /**
    * STT model used for this transcription.
    */
@@ -346,6 +348,8 @@ export interface HistorySummary {
   recording_mode?: RecordingMode | null;
   recording_request_id?: string | null;
   status: HistoryStatus;
+  stt_detected_languages?: string[];
+  stt_language_hint?: string | null;
   stt_model?: string | null;
   stt_provider?: string | null;
   text: string;
@@ -1169,6 +1173,10 @@ export interface RequestLog {
    */
   status: RequestStatus;
   /**
+   * Only provider-reported codes, never inferred from transcript text.
+   */
+  stt_detected_languages?: string[];
+  /**
    * STT duration in milliseconds
    */
   stt_duration_ms?: number | null;
@@ -1180,6 +1188,10 @@ export interface RequestLog {
    * Whether the STT call was treated as free-tier for pricing/cost purposes.
    */
   stt_is_free_tier?: boolean;
+  /**
+   * Recording-owned resolved hint; never read from later Settings.
+   */
+  stt_language_hint?: string | null;
   /**
    * STT model used
    */

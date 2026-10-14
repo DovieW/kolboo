@@ -37,6 +37,8 @@ export interface HistoryEntry {
 	preset_name?: string | null;
 	stt_provider?: string | null;
 	stt_model?: string | null;
+	stt_language_hint?: string | null;
+	stt_detected_languages?: string[];
 	llm_provider?: string | null;
 	llm_model?: string | null;
 	// Request id of the WAV recording to use for playback/rerun.

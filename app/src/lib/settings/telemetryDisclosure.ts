@@ -5,9 +5,8 @@ export const TELEMETRY_DISCLOSURE_VERSION_KEY = "telemetry_disclosure_version";
 
 // Keep this explicit and stable. If we revise the wording later, bump this
 // version intentionally so the app can re-show the disclosure on purpose.
-// This revision adds page and recording metadata and allows account-linked
-// analytics after the optional choice. Existing consent must be renewed.
-export const TELEMETRY_DISCLOSURE_VERSION = "2026-09-usage-v2";
+// This revision adds bounded language metadata; existing disclosure must be reviewed again.
+export const TELEMETRY_DISCLOSURE_VERSION = "2026-10-language-v3";
 
 export type TelemetryDisclosureState = {
 	posthogAnalyticsEnabled: boolean;

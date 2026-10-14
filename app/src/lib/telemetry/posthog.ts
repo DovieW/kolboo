@@ -9,6 +9,8 @@ import {
 	TELEMETRY_DISCLOSURE_VERSION_KEY,
 } from "../settings/telemetryDisclosure";
 import { loadRuntimeConfig } from "../tauri/runtimeConfig";
+import languageCodes from "./languageCodes.json";
+import { STT_LANGUAGE_VALUES } from "../sttLanguages";
 
 const DISTINCT_ID_STORAGE_KEY = "kolboo_posthog_distinct_id_v1";
 const POSTHOG_HOSTS = new Set([
@@ -83,6 +85,15 @@ function basicEventProperties(
 		KNOWN_STT_MODELS.has(provided.stt_model)
 			? provided.stt_model
 			: "other";
+	properties.stt_language_hint =
+		typeof provided.stt_language_hint === "string" &&
+		(STT_LANGUAGE_VALUES as readonly string[]).includes(provided.stt_language_hint)
+			? provided.stt_language_hint : provided.stt_language_hint == null ? "unknown" : "other";
+	const reported = Array.isArray(provided.stt_detected_languages)
+		? [...new Set(provided.stt_detected_languages.filter((value): value is string =>
+			typeof value === "string" && languageCodes.includes(value),
+		))] : [];
+	properties.stt_language = reported.length > 1 ? "mixed" : reported[0] ?? "unknown";
 	return properties;
 }
 

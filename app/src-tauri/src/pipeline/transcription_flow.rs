@@ -898,7 +898,15 @@ pub(super) async fn complete_transcription_flow(
         return Err(PipelineError::Cancelled);
     }
 
+    let mut stt_language_hint = None;
+    let mut stt_detected_languages = Vec::new();
+    ctx.update_request_log(|log| {
+        stt_language_hint = log.stt_language_hint.clone();
+        stt_detected_languages = log.stt_detected_languages.clone();
+    });
     Ok(TranscriptionResult {
+        stt_language_hint,
+        stt_detected_languages,
         speaker_segments: Vec::new(),
         stt_text: stt_text.to_string(),
         final_text,

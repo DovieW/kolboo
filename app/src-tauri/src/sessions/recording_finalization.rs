@@ -288,6 +288,8 @@ pub(crate) fn persist_history_llm_metadata(
             request_id: req_id.to_string(),
             llm_provider: provider,
             llm_model: model,
+            stt_language_hint: result.stt_language_hint.clone(),
+            stt_detected_languages: result.stt_detected_languages.clone(),
         },
     );
 }
@@ -353,6 +355,8 @@ mod tests {
 
     fn transcription_result(llm_outcome: LlmOutcome) -> TranscriptionResult {
         TranscriptionResult {
+            stt_language_hint: None,
+            stt_detected_languages: Vec::new(),
             speaker_segments: Vec::new(),
             stt_text: "raw".into(),
             final_text: "final".into(),

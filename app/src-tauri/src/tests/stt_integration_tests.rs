@@ -228,6 +228,8 @@ fn create_test_wav_silence(duration_secs: f32) -> Vec<u8> {
 #[tokio::test]
 async fn test_deepgram_transcribe_sends_expected_request() {
     let mock_server = MockServer::start().await;
+    let store = crate::request_log::RequestLogStore::new();
+    store.start_request("deepgram".into(), None);
 
     let guard = Mock::given(method("POST"))
         .and(path("/v1/listen"))
@@ -238,6 +240,7 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "results": {
                 "channels": [{
+                    "detected_language": "he",
                     "alternatives": [{
                         "transcript": "hello deepgram"
                     }]
@@ -254,7 +257,8 @@ async fn test_deepgram_transcribe_sends_expected_request() {
         None,
         None,
     )
-    .with_api_base_url(mock_server.uri());
+    .with_api_base_url(mock_server.uri())
+    .with_request_log_store(Some(store.clone()));
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -265,6 +269,7 @@ async fn test_deepgram_transcribe_sends_expected_request() {
 
     let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello deepgram");
+    assert_eq!(store.get_logs(None)[0].stt_detected_languages, ["he"]);
 
     let received = guard.received_requests().await;
     assert_eq!(received.len(), 1);
@@ -320,8 +325,15 @@ async fn test_deepgram_non_success_is_surface_as_api_error() {
 
 #[tokio::test]
 async fn test_assemblyai_transcribe_sends_expected_requests() {
-    for model in [None, Some("universal-3-5-pro"), Some("universal-2")] {
+    for (model, with_logs) in [
+        (None, false),
+        (None, true),
+        (Some("universal-3-5-pro"), true),
+        (Some("universal-2"), true),
+    ] {
         let mock_server = MockServer::start().await;
+        let store = crate::request_log::RequestLogStore::new();
+        store.start_request("assemblyai".into(), model.map(str::to_owned));
         let upload_url = format!("{}/upload/abc", mock_server.uri());
 
         let upload_guard = Mock::given(method("POST"))
@@ -351,6 +363,7 @@ async fn test_assemblyai_transcribe_sends_expected_requests() {
             .and(header("authorization", "test_key"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "status": "completed",
+                "language_code": "yi",
                 "text": "hello assemblyai"
             })))
             .expect(1)
@@ -363,7 +376,8 @@ async fn test_assemblyai_transcribe_sends_expected_requests() {
             model.map(str::to_string),
             None,
         )
-        .with_api_base_url(mock_server.uri());
+        .with_api_base_url(mock_server.uri())
+        .with_request_log_store(with_logs.then(|| store.clone()));
 
         let wav_data = create_test_wav_silence(0.1);
         let format = AudioFormat {
@@ -374,6 +388,14 @@ async fn test_assemblyai_transcribe_sends_expected_requests() {
 
         let result = transcribe_uploaded(&provider, &wav_data, &format).await;
         assert_eq!(result.unwrap(), "hello assemblyai");
+        assert_eq!(
+            store.get_logs(None)[0].stt_detected_languages,
+            if with_logs {
+                vec!["yi".to_owned()]
+            } else {
+                Vec::new()
+            }
+        );
 
         let upload_received = upload_guard.received_requests().await;
         assert_eq!(upload_received.len(), 1);
@@ -739,12 +761,15 @@ async fn test_aquavoice_non_success_is_surface_as_api_error() {
 #[tokio::test]
 async fn test_elevenlabs_transcribe_sends_expected_multipart() {
     let mock_server = MockServer::start().await;
+    let store = crate::request_log::RequestLogStore::new();
+    store.start_request("elevenlabs".into(), None);
 
     let guard = Mock::given(method("POST"))
         .and(path("/v1/speech-to-text"))
         .and(header("xi-api-key", "test_key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "text": "hello elevenlabs"
+            , "language_code": "yi"
         })))
         .expect(1)
         .mount_as_scoped(&mock_server)
@@ -757,7 +782,8 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
         Some("scribe_v1".to_string()),
         None,
     )
-    .with_api_base_url(mock_server.uri());
+    .with_api_base_url(mock_server.uri())
+    .with_request_log_store(Some(store.clone()));
 
     let wav_data = create_test_wav_silence(0.1);
     let format = AudioFormat {
@@ -768,6 +794,7 @@ async fn test_elevenlabs_transcribe_sends_expected_multipart() {
 
     let result = transcribe_uploaded(&provider, &wav_data, &format).await;
     assert_eq!(result.unwrap(), "hello elevenlabs");
+    assert_eq!(store.get_logs(None)[0].stt_detected_languages, ["yi"]);
 
     let received = guard.received_requests().await;
     assert_eq!(received.len(), 1);
@@ -1187,6 +1214,37 @@ async fn test_openai_current_transcription_language_contract_and_log() {
             assert_eq!(fields["language"], json!(language));
         }
     }
+}
+
+#[tokio::test]
+async fn responses_audio_does_not_guess_language_from_output_text() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"output_text":"synthetic transcript"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let store = crate::request_log::RequestLogStore::new();
+    store.start_request("openai".into(), None);
+    let provider = OpenAiSttProvider::new("synthetic".into(), Some("gpt-audio".into()), None, None)
+        .with_api_base_url(server.uri())
+        .with_request_log_store(Some(store.clone()));
+    let format = AudioFormat {
+        sample_rate: 16000,
+        channels: 1,
+        encoding: AudioEncoding::Wav,
+    };
+    assert_eq!(
+        provider
+            .transcribe(&create_test_wav_silence(0.1), &format)
+            .await
+            .unwrap(),
+        "synthetic transcript"
+    );
+    assert!(store.get_logs(None)[0].stt_detected_languages.is_empty());
 }
 
 #[tokio::test]
