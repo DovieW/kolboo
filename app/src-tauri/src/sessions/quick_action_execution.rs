@@ -247,8 +247,6 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
     record_quick_ask_prompt_context(
         input.app,
         input.pipeline,
-        &quick_ask_config,
-        &question_with_context,
         quick_ask_context_text_for_log,
         quick_ask_clipboard_context_for_log,
         selected_context_trimmed,
@@ -584,8 +582,6 @@ fn record_quick_ask_ocr_start_context(
 fn record_quick_ask_prompt_context(
     app: &AppHandle,
     pipeline: &SharedPipeline,
-    quick_ask_config: &QuickAskEffectiveConfig,
-    question_with_context: &str,
     quick_ask_context_text_for_log: Option<String>,
     quick_ask_clipboard_context_for_log: Option<String>,
     selected_context_trimmed: Option<&str>,
@@ -615,12 +611,6 @@ fn record_quick_ask_prompt_context(
         }
 
         if let Some(serde_json::Value::Object(map)) = log.quick_ask_request_json.as_mut() {
-            if !quick_ask_config.request_logs_privacy_mode {
-                map.insert(
-                    "user_message".to_string(),
-                    serde_json::Value::String(question_with_context.to_string()),
-                );
-            }
             map.insert(
                 "context_present".to_string(),
                 serde_json::Value::Bool(context_chars.is_some()),

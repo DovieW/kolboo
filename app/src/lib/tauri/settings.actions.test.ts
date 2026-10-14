@@ -356,18 +356,6 @@ describe("tauri settings side effects", () => {
 		expect(invokeMock).toHaveBeenCalledWith("sync_pipeline_config");
 	});
 
-	it("updateRequestLogsPrivacyMode patches settings", async () => {
-		vi.resetModules();
-		const { tauriSettingsAPI } = await import("./settings");
-
-		await tauriSettingsAPI.updateRequestLogsPrivacyMode(true);
-
-		expect(invokeMock).toHaveBeenCalledWith("settings_apply_patch", {
-			patch: { request_logs_privacy_mode: true },
-			deleteKeys: [],
-		});
-	});
-
 	it("updateSTTLanguage patches settings", async () => {
 		vi.resetModules();
 		const { tauriSettingsAPI } = await import("./settings");
@@ -526,7 +514,7 @@ describe("tauri settings side effects", () => {
 				is_valid: true,
 				enforced_fields: [
 					{
-						path: "request_logs_privacy_mode",
+						path: "rewrite_llm_enabled",
 						reason: "Managed by organization policy",
 					},
 				],
@@ -534,7 +522,7 @@ describe("tauri settings side effects", () => {
 		});
 		const { tauriSettingsAPI } = await import("./settings");
 
-		await tauriSettingsAPI.updateRequestLogsPrivacyMode(true);
+		await tauriSettingsAPI.updateRewriteLlmEnabled(true);
 
 		expect(invokeMock).not.toHaveBeenCalledWith(
 			"settings_apply_patch",

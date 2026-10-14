@@ -110,6 +110,13 @@ network request, including its source IP.
 
 ## Controlling your data
 
+The former **Privacy mode for payloads** switch has been removed. Known sensitive
+content fields are always omitted in the local Payloads JSON viewer and its copy
+action. Old saved toggle values no longer affect it. This does not change what
+your selected provider receives or remove content already held in local History,
+recordings, or in-memory request logs. History/recording retention and confirmed
+full debug exports keep their separate controls.
+
 Kolboo includes controls for deleting locally stored data
 (history/recordings/stats/logs), adjusting retention, and reviewing the optional
 linked analytics toggle in **Settings → Data**.

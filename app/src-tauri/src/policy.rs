@@ -15,6 +15,8 @@ const SUPPORTED_POLICY_PATHS: &[&str] = &[
     "widget_position",
     "output_mode",
     "output_hit_enter",
+    // Accept legacy policy packs without invalidating other enforced rules.
+    // Payload-view redaction is now unconditional; this key cannot disable it.
     "request_logs_privacy_mode",
     "disable_product_analytics",
     "quick_ask_provider",

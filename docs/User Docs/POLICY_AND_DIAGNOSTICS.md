@@ -42,6 +42,13 @@ Open **Logs** from the sidebar to search recent requests and inspect a request's
 transcription, rewrite result, timing and errors. The controls stay at the top
 while the request list scrolls. Closing or switching a request pauses its audio.
 
+The **Payloads** JSON viewer always omits known sensitive content fields, including
+prompts, transcript text, and clipboard/OCR context, from its display and copy
+actions. There is no payload-privacy toggle. Serialized JSON bodies are redacted
+before formatting; unstructured string bodies are omitted. This is a viewing
+safeguard, not a change to provider requests, local History, or in-memory log
+retention.
+
 **Export → Export privacy-safe JSON** leaves out text and provider payloads. Full
 debug export requires a separate confirmation because it may include transcripts,
 prompts and provider responses. Review the file before sharing it.

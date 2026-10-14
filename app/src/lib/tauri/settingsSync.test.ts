@@ -118,7 +118,6 @@ describe("settings runtime sync policy", () => {
 		"main_window_show_on_launch",
 		"max_saved_recordings",
 		"request_logs_retention_mode",
-		"request_logs_privacy_mode",
 		"stats_retention_unit",
 		"stats_retention_value",
 		"groq_free_tier",

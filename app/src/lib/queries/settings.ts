@@ -240,15 +240,6 @@ export function useUpdateOutputSmartPasteProtection() {
 	);
 }
 
-export function useUpdateRequestLogsPrivacyMode() {
-	return useSettingsInvalidatingMutation(
-		(enabled: boolean) => tauriAPI.updateRequestLogsPrivacyMode(enabled),
-		{
-			extraInvalidations: [{ queryKey: ["requestLogs"], reason: "settings" }],
-		},
-	);
-}
-
 export function useUpdateQuietAudioGateEnabled() {
 	return useSettingsInvalidatingMutation((enabled: boolean) =>
 		tauriAPI.updateQuietAudioGateEnabled(enabled),
