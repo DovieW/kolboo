@@ -159,7 +159,6 @@ export function TranscribeSettingsSection({
 					profileId={activeProfileId}
 				/>
 			</div>
-			<div className="settings-row">
 				<TranscriptionInputModeControl
 					value={isDefaultScope ? globalInputMode : sttInputMode}
 					inheritedMode={globalInputMode}
@@ -174,7 +173,6 @@ export function TranscribeSettingsSection({
 						else onSttInputModeChange?.(mode);
 					}}
 				/>
-			</div>
 
 			{/* Simulated Streaming — only for non-realtime STT models */}
 			{!byokInput && (

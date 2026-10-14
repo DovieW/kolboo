@@ -1,6 +1,7 @@
 # Policy and diagnostics
 
-Kolboo includes an enterprise policy view in **Settings → Policy**.
+Kolboo includes a read-only enterprise/device policy view in
+**Account → Advanced → Organization policy**, also available while signed out.
 
 ## What you can see
 
@@ -19,7 +20,8 @@ keeps that toggle off and shows the policy reason when available.
 
 ## Diagnostics export
 
-Use **Export diagnostics** in the Policy tab to copy a redacted JSON report for support.
+Use **Export diagnostics** under **Account → Advanced → Organization policy**
+to copy a redacted JSON report for support.
 
 The export is designed to exclude sensitive values (API keys/tokens/secrets),
 raw org names, and raw internal IDs.

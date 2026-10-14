@@ -118,6 +118,16 @@ The final command prompts for sudo on the remote host. This debug-profile packag
 is for rapid native testing only; official releases still use the optimized,
 signed release workflow.
 
+For managed-service testing, supply the verified public service configuration
+(`TAURI_API_BASE_URL`, `TAURI_MANAGED_INFERENCE_GATEWAY_URL`,
+`TAURI_SUPABASE_URL`, `TAURI_SUPABASE_PUBLISHABLE_KEY`, and
+`TAURI_PUBLIC_AUTH_PAGE_URL`) together with `TAURI_CLOUD_ENV=production` and
+`VITE_CLOUD_SERVICE_ENABLED=true`. Do not rely on the fast script's generic
+endpoint defaults or embed developer Cloudflare Access credentials. The updater
+is disabled by default for these development packages. Copy promptly after
+checks, but finish dictation and quit the running app before installation and
+restart; preserve its settings and secure storage.
+
 ## 6) Reclaim Cargo target disk space safely
 
 Use `pnpm -C app clean:rust-cache` to preview the exact known Cargo target directories and their sizes. Use `pnpm -C app clean:rust-cache:apply` only when you are ready to discard those rebuildable outputs. See [Windows v1 release operations](RELEASE_OPERATIONS.md#cargo-cache-disk-usage) for the deletion boundary and rebuild impact.

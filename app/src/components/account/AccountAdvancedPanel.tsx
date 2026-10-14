@@ -13,6 +13,7 @@ import {
 	useEnterprisePersonaState,
 } from "../../lib/queries/enterprisePersona";
 import type { LicenseAuthContext } from "../../lib/tauri";
+import { PolicySettings } from "../settings/PolicySettings";
 
 function AdvancedDetail({ label, value }: { label: string; value: string }) {
 	return (
@@ -54,13 +55,27 @@ export function AccountAdvancedPanel(props: {
 			<Accordion.Item value="advanced">
 				<Accordion.Control>
 					<Stack gap={2}>
-						<Text fw={600}>Advanced account details</Text>
+						<Text fw={600}>Advanced</Text>
 						<Text size="sm" c="dimmed">
-							Diagnostics, test persona info, and support-friendly auth context.
+							Organization policy, diagnostics, and support details.
 						</Text>
 					</Stack>
 				</Accordion.Control>
 				<Accordion.Panel>
+					<Card withBorder radius="lg" className="account-panel" mb="md">
+						<Stack gap="md">
+							<Group justify="space-between">
+								<Title order={4}>Organization policy</Title>
+								<Badge color="gray" variant="light">Read-only rules</Badge>
+							</Group>
+							<Text size="sm" c="dimmed">
+								Policy rules are enforced by your organization or device
+								configuration. You can refresh their status and export
+								diagnostics here, not edit the rules.
+							</Text>
+							<PolicySettings />
+						</Stack>
+					</Card>
 					<div className="account-advanced-grid">
 						<Card withBorder radius="lg" className="account-panel">
 							<Stack gap="md">

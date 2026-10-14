@@ -48,10 +48,10 @@ afterEach(async () => {
 	await act(async () => root.unmount());
 	host.remove();
 });
-async function render(props: Partial<Parameters<typeof ModelPicker>[0]> = {}) {
+async function render(props: Partial<Parameters<typeof ModelPicker>[0]> = {}, portal = false) {
 	await act(async () =>
 		root.render(
-			<MantineProvider env="test">
+			<MantineProvider env={portal ? undefined : "test"}>
 				<ModelPicker
 					label="Model"
 					value={null}
@@ -144,6 +144,34 @@ it("labels unpinned legacy preferences without inventing a payment source",async
 	expect(change).not.toHaveBeenCalled();
 });
 
+it("keeps the compact name and payment-source badge on the trigger while exposing the provider in its description", async () => {
+	await render({ value: choices[0]?.selection ?? null });
+	const trigger = host.querySelector<HTMLButtonElement>('[aria-label="Model"]');
+	expect(trigger?.closest('.model-picker-field')).not.toBeNull();
+	expect(trigger?.querySelector('.model-picker-value')?.textContent).toBe('<b>Friendly</b>');
+	expect(trigger?.querySelector('.model-picker-source')?.textContent).toBe('Your models');
+	expect(trigger?.getAttribute('title')).toBe('<b>Friendly</b> · My endpoint · Your models');
+	expect(trigger?.textContent).not.toContain('My endpoint');
+	await click('Model'); await click('Kolboo Managed');
+	expect(trigger?.querySelector('.model-picker-source')?.textContent).toBe('Your models');
+	expect(change).not.toHaveBeenCalled();
+	await render({ value: choices[2]?.selection ?? null });
+	expect(trigger?.querySelector('.model-picker-source')?.textContent).toBe('Managed');
+	expect(trigger?.getAttribute('title')).toBe('Managed model · OpenAI · Managed');
+});
+
+it("renders the popout outside clipping cards without moving the compact trigger", async () => {
+	await render({ value: choices[0]?.selection ?? null }, true);
+	await click("Model");
+	const dropdown = document.querySelector(".model-picker-dropdown");
+	expect(dropdown).not.toBeNull();
+	expect(host.contains(dropdown)).toBe(false);
+	expect(dropdown?.textContent).toContain("Kolboo Managed");
+	expect(dropdown?.textContent).toContain("Your models");
+	expect(host.querySelector(".model-picker-trigger")).not.toBeNull();
+	expect(change).not.toHaveBeenCalled();
+});
+
 it("offers setup for endpoints without models without inventing or saving a model ID", async () => {
 	await render({ choices: [], onSetup: setup, setupProviders: [{provider_id:"ollama",label:"Ollama"}] });
 	await click("Model");
@@ -200,7 +228,9 @@ it("keeps missing selections visible and explains loading and unavailable models
 		choices: [],
 		loading: true,
 	});
-	expect(host.textContent).toContain("retired-id · retired · Managed");
+	expect(host.querySelector('.model-picker-value')?.textContent).toBe("retired-id");
+	expect(host.querySelector('.model-picker-source')?.textContent).toBe("Managed");
+	expect(host.querySelector('[aria-label="Model"]')?.getAttribute("title")).toBe("retired-id · retired · Managed");
 	expect(host.textContent).toContain("Saved selection unavailable");
 	await click("Model");
 	expect(host.textContent).toContain("Loading models…");

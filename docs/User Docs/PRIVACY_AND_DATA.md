@@ -114,8 +114,8 @@ Kolboo includes controls for deleting locally stored data
 (history/recordings/stats/logs), adjusting retention, and reviewing the optional
 linked analytics toggle in **Settings → Data**.
 
-If your organization manages Kolboo, **Settings → Policy** can explain why a
-particular setting is locked.
+If your organization manages Kolboo, **Account → Advanced → Organization policy**
+can explain why a particular setting is locked.
 
 If you are a maintainer, see `docs/Dev Docs/TELEMETRY_GOVERNANCE.md` and
 `docs/Dev Docs/SENTRY_INTEGRATION.md` for the current telemetry posture.

@@ -15,12 +15,22 @@ Account/access summaries are shown only after signing in.
 - **Grace**: entitlement refresh failed recently; account remains available during the grace window.
 - **Expired**: grace window ended without a successful refresh.
 
-## What is shown in Settings → Account
+## What is shown in Account
 
 - Current account state and tier
 - Signed-in email (if available)
 - Organization name and ID (if your account has org context)
 - Actions: Sign in, Refresh, Manage, Sign out
+
+**Advanced → Organization policy** contains read-only organization/device rules,
+policy refresh, and redacted diagnostics export. It replaces the former Policy
+settings tab and remains accessible without signing in, including Community
+packages. Account identity details remain separate from Advanced diagnostics.
+
+In AI settings, model controls show a compact friendly name and a **Managed** or
+**Your models** badge. Hover the control or open its picker to see the provider
+and full selection. Labels and controls share a row when space permits and stack
+in narrow views. Browsing the picker does not change a selection or payment source.
 
 **Access level** describes your account entitlement, not the provider used for
 each request. Personal managed access does not prevent using your own API keys:

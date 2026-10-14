@@ -84,7 +84,7 @@ export function ActionModelPicker({
 			{ onSuccess: () => onSelection?.(selection) },
 		);
 	return (
-		<>
+		<div className="action-model-picker">
 			<ModelPicker
 				key={path}
 				label={label}
@@ -135,6 +135,6 @@ export function ActionModelPicker({
 					This choice is controlled by organization policy.
 				</Text>
 			)}
-		</>
+		</div>
 	);
 }

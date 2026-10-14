@@ -17,7 +17,6 @@ import { hasManagedInferenceAccess, tauriAPI } from "../../lib/tauri";
 import { AudioSettings } from "./AudioSettings";
 import { HotkeySettings } from "./HotkeySettings";
 import { NetworkSettings } from "./NetworkSettings";
-import { PolicySettings } from "./PolicySettings";
 import { PrivacySettings } from "./PrivacySettings";
 import { ProfileConfigModal } from "./ProgramsModal";
 import { PromptSettings } from "./PromptSettings";
@@ -294,7 +293,6 @@ export function SettingsShell({ navigationRequest }: SettingsShellProps) {
 						</Tabs.Tab>
 						<Tabs.Tab value="network">Network</Tabs.Tab>
 						<Tabs.Tab value="privacy">Privacy</Tabs.Tab>
-						<Tabs.Tab value="policy">Policy</Tabs.Tab>
 					</Tabs.List>
 				</header>
 
@@ -386,11 +384,6 @@ export function SettingsShell({ navigationRequest }: SettingsShellProps) {
 						</div>
 					</Tabs.Panel>
 
-					<Tabs.Panel value="policy" pt="md">
-						<div className="settings-card">
-							<PolicySettings />
-						</div>
-					</Tabs.Panel>
 				</div>
 			</Tabs>
 		</div>

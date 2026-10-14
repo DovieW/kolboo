@@ -43,10 +43,10 @@ vi.mock("../../lib/queries", () => ({
 }));
 vi.mock("./AccountIdentityCard", () => ({ AccountIdentityCard: () => null }));
 vi.mock("./AccountAdvancedPanel", () => ({
-	AccountAdvancedPanel: (props: { onSimulateAuthFailure: () => void }) => (
-		<button type="button" onClick={props.onSimulateAuthFailure}>
+	AccountAdvancedPanel: (props: { signedIn: boolean; onSimulateAuthFailure: () => void }) => (
+		<div data-testid="advanced"><button type="button" disabled={!props.signedIn} onClick={props.onSimulateAuthFailure}>
 			Simulate auth failure
-		</button>
+		</button></div>
 	),
 }));
 vi.mock("./AccountUsageCard", () => ({ AccountUsageCard: () => null }));
@@ -136,7 +136,8 @@ it("keeps Community packages account-free even with a cached Pro session, withou
 	await render();
 	expect(host.textContent).toContain("Accounts will be available in a later update");
 	expect(host.querySelector("form")).toBeNull();
-	expect(host.querySelector("button")).toBeNull();
+	expect(host.querySelector('[data-testid="advanced"]')).not.toBeNull();
+	expect(host.querySelector<HTMLButtonElement>('[data-testid="advanced"] button')?.disabled).toBe(true);
 	state.license = { status: "active", tier: "personal" };
 	await render();
 	expect(host.textContent).not.toContain("Pro active");
@@ -152,6 +153,8 @@ it("shows one compact sign-in form instead of duplicate signed-out summary cards
 	await render();
 	expect(host.querySelector(".account-signin-layout")).not.toBeNull();
 	expect(host.querySelectorAll("form")).toHaveLength(1);
+	expect(host.querySelector('[data-testid="advanced"]')).not.toBeNull();
+	expect(host.querySelector<HTMLButtonElement>('[data-testid="advanced"] button')?.disabled).toBe(true);
 	expect(host.textContent).not.toContain("ACCOUNT ACCESS");
 	expect(host.textContent).not.toContain("Not signed in");
 	state.error = new Error("Offline");
@@ -165,6 +168,8 @@ it("keeps signed-in details and exits the narrow login layout", async () => {
 	expect(host.querySelector(".account-signin-layout")).toBeNull();
 	expect(host.querySelector("form")).toBeNull();
 	expect(host.textContent).toContain("Your account");
+	expect(host.querySelector('[data-testid="advanced"]')?.closest('.mantine-Accordion-panel')).toBeNull();
+	expect(host.querySelector<HTMLButtonElement>('[data-testid="advanced"] button')?.disabled).toBe(false);
 	state.license = {
 		status: "active",
 		tier: "enterprise",

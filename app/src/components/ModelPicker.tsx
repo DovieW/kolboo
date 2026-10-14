@@ -75,10 +75,10 @@ export function ModelPicker({
 				.includes(search.trim().toLocaleLowerCase()),
 	);
 	return (
-		<Stack gap={4}>
+		<Stack gap={4} className="model-picker">
 			<Combobox
 				store={combobox}
-				withinPortal={false}
+				withinPortal
 				onOptionSubmit={(key) => {
 					submitModelChoice(matching, key, disabled, (selection) => {
 						onChange(selection);
@@ -91,7 +91,16 @@ export function ModelPicker({
 						component="button"
 						type="button"
 						label={label}
+						classNames={{
+							root: "model-picker-field",
+							label: "model-picker-label",
+							wrapper: "model-picker-control",
+							input: "model-picker-trigger",
+						}}
 						aria-label={label}
+						title={value
+							? `${selected?.displayName ?? value.model_id} · ${selected?.providerName ?? value.provider_id} · ${value.source === "managed" ? "Managed" : "Your models"}`
+							: legacyLabel}
 						disabled={disabled}
 						pointer
 						rightSection={<Combobox.Chevron />}
@@ -102,18 +111,22 @@ export function ModelPicker({
 					>
 						{value ? (
 							<>
-								{selected?.displayName ?? value.model_id} ·{" "}
-								{selected?.providerName ?? value.provider_id} ·{" "}
-								{value.source === "managed" ? "Managed" : "Your models"}
+								<span className="model-picker-value">
+									{selected?.displayName ?? value.model_id}
+								</span>
+								<Badge size="xs" variant="light" className="model-picker-source"
+									color={value.source === "managed" ? "blue" : "gray"}>
+									{value.source === "managed" ? "Managed" : "Your models"}
+								</Badge>
 							</>
-						) : legacyLabel ? legacyLabel : (
+						) : legacyLabel ? <span className="model-picker-value">{legacyLabel}</span> : (
 							<Input.Placeholder>
 								{loading ? "Loading models…" : "Choose a model"}
 							</Input.Placeholder>
 						)}
 					</InputBase>
 				</Combobox.Target>
-				<Combobox.Dropdown>
+				<Combobox.Dropdown className="model-picker-dropdown">
 					<Tabs
 						value={tab}
 						onChange={(next) => {
