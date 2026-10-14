@@ -238,10 +238,6 @@ describe("settings defaults cross-layer contract", () => {
 				DEFAULT_SETTINGS_VALUES.quick_replace_enabled,
 			],
 			[
-				"DEFAULT_REQUEST_LOGS_PRIVACY_MODE",
-				DEFAULT_SETTINGS_VALUES.request_logs_privacy_mode,
-			],
-			[
 				"DEFAULT_TRANSCRIPTION_RETENTION_DELETE_RECORDINGS",
 				DEFAULT_SETTINGS_VALUES.transcription_retention_delete_recordings,
 			],

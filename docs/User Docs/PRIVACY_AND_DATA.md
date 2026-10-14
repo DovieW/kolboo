@@ -84,8 +84,12 @@ Kolboo currently separates telemetry into two buckets:
     not identify returning users or unique installations
   - basic events count app opens, page visits, recording starts and outcomes,
     transcription starts/results/errors; recording outcomes include rounded
-    duration, mode, and recognized provider/model names (unknown/custom values
-    are grouped as “other”)
+    duration, mode, recognized provider/model names, the selected language hint,
+    and language reported by the transcription provider (unknown/custom values
+    are grouped; multiple reported languages become “mixed”). No text analysis
+    or extra provider requests are used to determine language, and providers
+    that do not report it remain “unknown”. This expanded disclosure requires
+    review before collection resumes
   - **Settings → Data** controls optional linked analytics. When enabled, events
     use an opaque account ID while signed in, or a random local installation ID
     while signed out. No email address is sent; disabling it stops linked events
@@ -106,12 +110,19 @@ network request, including its source IP.
 
 ## Controlling your data
 
+The former **Privacy mode for payloads** switch has been removed. Known sensitive
+content fields are always omitted in the local Payloads JSON viewer and its copy
+action. Old saved toggle values no longer affect it. This does not change what
+your selected provider receives or remove content already held in local History,
+recordings, or in-memory request logs. History/recording retention and confirmed
+full debug exports keep their separate controls.
+
 Kolboo includes controls for deleting locally stored data
 (history/recordings/stats/logs), adjusting retention, and reviewing the optional
 linked analytics toggle in **Settings → Data**.
 
-If your organization manages Kolboo, **Settings → Policy** can explain why a
-particular setting is locked.
+If your organization manages Kolboo, **Account → Advanced → Organization policy**
+can explain why a particular setting is locked.
 
 If you are a maintainer, see `docs/Dev Docs/TELEMETRY_GOVERNANCE.md` and
 `docs/Dev Docs/SENTRY_INTEGRATION.md` for the current telemetry posture.

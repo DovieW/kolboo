@@ -988,9 +988,6 @@ export const tauriSettingsAPI = {
 			request_logs_retention_days: normalizeRequestLogsRetentionDays(
 				await store.get("request_logs_retention_days"),
 			),
-			request_logs_privacy_mode:
-				(await store.get<boolean>("request_logs_privacy_mode")) ??
-				DEFAULT_SETTINGS_VALUES.request_logs_privacy_mode,
 			posthog_analytics_enabled: await readSettingValue(
 				POSTHOG_ANALYTICS_ENABLED_KEY,
 				DEFAULT_SETTINGS_VALUES.posthog_analytics_enabled,
@@ -1771,12 +1768,6 @@ export const tauriSettingsAPI = {
 				request_logs_retention_amount: amount,
 				request_logs_retention_days: days,
 			},
-		});
-	},
-
-	async updateRequestLogsPrivacyMode(enabled: boolean): Promise<void> {
-		await applySettingsPatch({
-			patch: { request_logs_privacy_mode: Boolean(enabled) },
 		});
 	},
 

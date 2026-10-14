@@ -42,12 +42,15 @@ export function AccountView() {
         catch (error) { showError("Unable to open account management", error); }
         finally { setManagePending(false); }
     }
-    if (!isCloudServiceAvailable()) return <div className="main-content account-signin-layout">
-        <div className="main-content-inner page-content-start"><Card withBorder radius="lg"><Stack>
+    const cloudAvailable = isCloudServiceAvailable();
+    const advanced = <AccountAdvancedPanel authContext={context} authContextMessage={authReasonCodeToMessage(context?.reason_code ?? null) ?? "No auth issue detected."}
+        signedIn={signedIn && cloudAvailable} refreshPending={refresh.isPending} onSimulateAuthFailure={() => refreshAccess(true)} />;
+    if (!cloudAvailable) return <div className="main-content account-signin-layout">
+        <div className="main-content-inner page-content-start"><Stack gap="lg"><Card withBorder radius="lg"><Stack>
             <Title order={2} size="h3">Community</Title>
             <Text>Accounts will be available in a later update. Use your own provider keys in Settings.</Text>
             {signedIn && <Button variant="subtle" color="gray" onClick={signOut} loading={logout.isPending}>Sign out</Button>}
-        </Stack></Card></div>
+        </Stack></Card>{advanced}</Stack></div>
     </div>;
     return <div className={`main-content ${signedIn ? "" : "account-signin-layout"}`}>
         <div className="main-content-inner page-content-start"><Stack gap="lg" className="account-page-stack">
@@ -68,10 +71,9 @@ export function AccountView() {
                     <AccountIdentityCard loading={license.isLoading || auth.isLoading} email={state.email ?? null}
                         organizationLabel={state.org?.org_name ?? null} organizationId={state.org?.org_id ?? null}
                         subject={state.user_id ?? context?.subject_id ?? null} internalTierLabel={formatInternalTierLabel(state.tier)} />
-                    <AccountAdvancedPanel authContext={context} authContextMessage={authReasonCodeToMessage(context?.reason_code ?? null) ?? "No auth issue detected."}
-                        signedIn={signedIn} refreshPending={refresh.isPending} onSimulateAuthFailure={() => refreshAccess(true)} />
                 </Stack></Accordion.Panel>
             </Accordion.Item></Accordion>}
+            {advanced}
         </Stack></div>
     </div>;
 }

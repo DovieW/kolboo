@@ -180,7 +180,7 @@ impl SttProvider for SpeechmaticsSttProvider {
 
         if let Some(store) = &self.request_log_store {
             store.with_current(|log| {
-                log.stt_response_json = Some(response_json);
+                log.set_stt_response(response_json);
             });
         }
 

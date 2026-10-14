@@ -58,6 +58,8 @@ struct TranscriptGetResponse {
     text: Option<String>,
     #[serde(default)]
     error: Option<String>,
+    #[serde(default)]
+    language_code: Option<String>,
 }
 
 /// AssemblyAI STT provider for speech-to-text.
@@ -317,6 +319,14 @@ impl AssemblyAiSttProvider {
 
             match response.status {
                 TranscriptStatus::Completed => {
+                    if let Some(store) = &self.request_log_store {
+                        store.with_current(|log| {
+                            log.set_stt_response(json!({
+                                "status": "completed", "text": response.text,
+                                "error": response.error, "language_code": response.language_code,
+                            }));
+                        });
+                    }
                     return Ok(response.text.unwrap_or_default());
                 }
                 TranscriptStatus::Error => {
@@ -399,18 +409,6 @@ impl SttProvider for AssemblyAiSttProvider {
         let upload_url = self.upload_audio(audio).await?;
         let transcript_id = self.submit_transcript(&upload_url).await?;
         let text = self.poll_until_done(&transcript_id).await?;
-
-        if let Some(store) = &self.request_log_store {
-            // Best effort: fetch the final transcript JSON for logging so request logs
-            // still capture AssemblyAI's terminal payload after the batch workflow.
-            if let Ok(final_response) = self.get_transcript(&transcript_id).await {
-                let response_json =
-                    serde_json::to_value(final_response).unwrap_or_else(|_| json!({}));
-                store.with_current(|log| {
-                    log.stt_response_json = Some(response_json);
-                });
-            }
-        }
 
         Ok(text)
     }

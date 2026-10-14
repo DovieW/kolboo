@@ -61,6 +61,8 @@ export function AggregateAnalyticsBridge({
 							duration_seconds: item.duration_seconds,
 							stt_provider: item.stt_provider,
 							stt_model: item.stt_model,
+							stt_language_hint: item.stt_language_hint,
+							stt_detected_languages: item.stt_detected_languages,
 						});
 					}
 					statuses.set(item.id, item.status);

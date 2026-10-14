@@ -38,6 +38,8 @@ it("offers inheritance and both input modes without selecting an incompatible re
 		await act(async () => option?.click());
 	}
 	await render();
+	expect(host.querySelector('.settings-row .settings-label')?.textContent).toBe('Input mode');
+	expect(host.querySelector('.settings-row-actions .settings-input-mode-control')).not.toBeNull();
 	expect(host.querySelector<HTMLInputElement>("input")?.value).toBe("Auto");
 	await choose("After recording");
 	expect(change).toHaveBeenLastCalledWith("after_recording");

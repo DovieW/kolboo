@@ -1061,7 +1061,85 @@ a:focus-visible {
 	max-width: 100%;
 }
 
+/* Model labels and compact selectors share one row, independent of label length. */
+.action-model-picker,
+.model-picker {
+	width: 100%;
+	min-width: 0;
+}
+.model-picker {
+	container-type: inline-size;
+	container-name: model-picker;
+}
+.model-picker-field {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 24px;
+	min-width: 0;
+}
+.model-picker-label {
+	flex: 1 1 140px;
+	min-width: 0;
+	margin: 0;
+}
+.model-picker-control {
+	width: 360px;
+	max-width: 100%;
+	min-width: 0;
+	flex-shrink: 0;
+}
+.model-picker-trigger {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+}
+.model-picker-value {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	flex: 1;
+}
+.model-picker-source {
+	flex-shrink: 0;
+	text-transform: none;
+}
+.model-picker-dropdown {
+	overflow-wrap: anywhere;
+}
+.settings-input-mode-control {
+	width: 240px;
+	max-width: 100%;
+}
+@container model-picker (max-width: 540px) {
+	.model-picker-field {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 8px;
+	}
+	.model-picker-label {
+		flex-basis: auto;
+	}
+	.model-picker-control {
+		width: 100%;
+	}
+}
+
 @media (max-width: 760px) {
+	.model-picker-field {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 8px;
+	}
+	.model-picker-label {
+		flex-basis: auto;
+	}
+	.model-picker-control {
+		width: 100%;
+	}
 	.settings-row {
 		flex-wrap: wrap;
 		gap: 12px;

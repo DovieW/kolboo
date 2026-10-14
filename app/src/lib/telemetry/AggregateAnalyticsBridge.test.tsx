@@ -135,6 +135,8 @@ describe("AggregateAnalyticsBridge", () => {
 					duration_seconds: 83.4,
 					stt_provider: "openai",
 					stt_model: "gpt-4o-transcribe-diarize",
+					stt_language_hint: "auto",
+					stt_detected_languages: ["yi", "he"],
 				},
 				{ id: "old", status: "success" },
 			],
@@ -146,6 +148,8 @@ describe("AggregateAnalyticsBridge", () => {
 			duration_seconds: 83.4,
 			stt_provider: "openai",
 			stt_model: "gpt-4o-transcribe-diarize",
+			stt_language_hint: "auto",
+			stt_detected_languages: ["yi", "he"],
 		});
 		const count = trackAggregateEventMock.mock.calls.length;
 		await act(async () => listeners.get("history-changed")?.(undefined));

@@ -425,7 +425,7 @@ async fn run_streaming_task(
     if let Some(store) = &request_log_store {
         store.with_current(|log| {
             log.raw_transcript = Some(final_text.clone());
-            log.stt_response_json = Some(response_json);
+            log.set_stt_response(response_json);
         });
     }
 

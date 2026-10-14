@@ -561,6 +561,8 @@ pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
             model_id: "quick-id".into(),
         };
         let result = TranscriptionResult {
+            stt_language_hint: None,
+            stt_detected_languages: Vec::new(),
             speaker_segments: vec![],
             stt_text: "Synthetic question".into(),
             final_text: "Synthetic question".into(),
@@ -854,6 +856,7 @@ async fn each_capture_and_saved_retry_cancels_the_previous_session_token() {
 
 /// A fake audio capture backend that returns canned WAV data without using CPAL.
 pub(super) struct FakeAudioCapture {
+    diagnostics_override: Option<AudioCaptureDiagnostics>,
     level_meter: SharedAudioLevelMeter,
     waveform_meter: SharedAudioWaveformMeter,
     vad_enabled: bool,
@@ -871,6 +874,7 @@ pub(super) struct FakeAudioCapture {
 impl FakeAudioCapture {
     pub fn new() -> Self {
         Self {
+            diagnostics_override: None,
             level_meter: SharedAudioLevelMeter::new_for_tests(),
             waveform_meter: SharedAudioWaveformMeter::new_for_tests(),
             vad_enabled: false,
@@ -1057,7 +1061,12 @@ impl AudioCaptureBackend for FakeAudioCapture {
         &mut self,
         _cfg: AudioEncodeConfig,
     ) -> Result<(Vec<u8>, AudioCaptureDiagnostics), AudioCaptureError> {
-        Ok((self.wav.clone(), Self::diagnostics()))
+        Ok((
+            self.wav.clone(),
+            self.diagnostics_override
+                .clone()
+                .unwrap_or_else(Self::diagnostics),
+        ))
     }
 
     fn stop_and_get_wav_before_after(
@@ -2951,6 +2960,40 @@ async fn pipeline_can_transcribe_without_network_or_hardware() {
 }
 
 #[tokio::test]
+async fn skipped_quiet_audio_has_no_claimed_language_or_provider_request() {
+    for speech_detected in [Some(false), None] {
+        let mut capture = FakeAudioCapture::new();
+        capture.diagnostics_override = Some(AudioCaptureDiagnostics {
+            speech_detected,
+            ..FakeAudioCapture::diagnostics()
+        });
+        let mut config = test_config_for_transcription();
+        config.quiet_audio_gate_enabled = true;
+        config.quiet_audio_require_speech = true;
+        config.quiet_audio_min_duration_secs = 1.0;
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut provider = MockSttProvider::new("must not transcribe");
+        provider.batch_calls = calls.clone();
+        let pipeline = SharedPipeline::new_for_tests(config, Box::new(capture));
+        pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        pipeline.start_recording().unwrap();
+        let result = pipeline.stop_and_transcribe_detailed().await.unwrap();
+        assert!(result.final_text.is_empty());
+        assert_eq!(result.stt_language_hint, None);
+        assert!(result.stt_detected_languages.is_empty());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(pipeline.state(), PipelineState::Idle);
+        assert!(matches!(
+            result.llm_outcome,
+            LlmOutcome::NotAttempted(
+                LlmNotAttemptedReason::NoSpeechDetectedByVad
+                    | LlmNotAttemptedReason::QuietAudioGate
+            )
+        ));
+    }
+}
+
+#[tokio::test]
 async fn meeting_transcription_bypasses_only_dictation_size_limit_and_requires_ownership() {
     let mut config = test_config_for_transcription();
     config.max_recording_bytes = 1024;
@@ -3146,6 +3189,10 @@ async fn saved_meeting_language_never_follows_later_dictation_settings() {
     for hint in [None, Some("auto"), Some("yi"), Some("he")] {
         let mut config = test_config_for_transcription();
         config.stt_language = Some("en".into());
+        let logs = crate::request_log::RequestLogStore::new();
+        logs.start_request(MOCK_PROVIDER.into(), Some("snapshot-model".into()));
+        logs.with_current(|log| log.set_stt_response(serde_json::json!({"language_code":"yi"})));
+        config.request_log_store = Some(logs);
         let p = SharedPipeline::new_for_tests(config, Box::new(FakeAudioCapture::new()));
         let expected = hint.filter(|value| *value != "auto");
         p.inject_stt_provider_for_tests(
@@ -3173,6 +3220,11 @@ async fn saved_meeting_language_never_follows_later_dictation_settings() {
                 .await
                 .unwrap();
             assert_eq!(result.stt_text, "Snapshot language");
+            assert_eq!(result.stt_detected_languages, ["yi"]);
+            assert_eq!(
+                result.stt_language_hint.as_deref(),
+                Some(hint.unwrap_or("auto"))
+            );
             assert_eq!(p.config().stt_language.as_deref(), Some(later_hint));
             assert_eq!(options.language_hint.as_deref(), hint);
             p.end_recovery();

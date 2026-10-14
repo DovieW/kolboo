@@ -69,6 +69,19 @@ vi.mock("@tauri-apps/plugin-store", () => ({
 }));
 
 describe("legacy settings fixtures", () => {
+	itWithImportTimeout("ignores the retired payload privacy toggle without changing retained data settings", async () => {
+		for (const stored of [true, false, null]) {
+			vi.resetModules();
+			currentStore = new FakeStore({ ...legacySettingsFixture, request_logs_privacy_mode: stored,
+				transcription_retention_amount: 123, request_logs_retention_amount: 45 });
+			const { tauriAPI } = await import("../tauri");
+			const settings = await tauriAPI.getSettings();
+			expect(settings).not.toHaveProperty("request_logs_privacy_mode");
+			expect(settings.transcription_retention_amount).toBe(123);
+			expect(settings.request_logs_retention_amount).toBe(45);
+			expect(currentStore.data.get("request_logs_privacy_mode")).toBe(stored);
+		}
+	});
     itWithImportTimeout("normalizes a malformed legacy profile collection instead of inventing profile overrides", async () => {
         vi.resetModules();
         currentStore = new FakeStore({ ...legacySettingsFixture, rewrite_program_prompt_profiles: { invalid: "profile collection" } });

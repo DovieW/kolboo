@@ -85,7 +85,12 @@ pub(super) fn resolve_stt_provider_for_transcription(
     let model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
     let language_used = effective.language.clone();
 
-    log_stt_provider_selection(inner, provider_id_used.as_str(), model_used.clone());
+    log_stt_provider_selection(
+        inner,
+        provider_id_used.as_str(),
+        model_used.clone(),
+        language_used.as_deref(),
+    );
 
     // A meeting's explicitly selected local model must not follow later changes
     // to the dictation model. Use the existing model directory, never a UI path.
@@ -230,11 +235,17 @@ fn model_for_log(
     model
 }
 
-fn log_stt_provider_selection(inner: &PipelineInner, provider_id: &str, model: Option<String>) {
+fn log_stt_provider_selection(
+    inner: &PipelineInner,
+    provider_id: &str,
+    model: Option<String>,
+    language: Option<&str>,
+) {
     if let Some(store) = inner.config.request_log_store.as_ref() {
         store.with_current(|log| {
             log.stt_provider = provider_id.to_string();
             log.stt_model = model;
+            log.stt_language_hint = Some(language.unwrap_or("auto").to_owned());
         });
     }
 }

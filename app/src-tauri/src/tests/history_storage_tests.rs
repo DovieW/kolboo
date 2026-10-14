@@ -107,6 +107,8 @@ fn test_request_history_update_api_keeps_request_metadata_together() {
         .unwrap();
     history
         .apply_request_update(RequestHistoryUpdate::SetLlmModel {
+            stt_language_hint: Some("auto".into()),
+            stt_detected_languages: vec!["yi".into()],
             request_id: req_id.clone(),
             llm_provider: Some("anthropic".to_string()),
             llm_model: Some("claude-test".to_string()),
@@ -129,6 +131,11 @@ fn test_request_history_update_api_keeps_request_metadata_together() {
     assert_eq!(entry.recording_request_id.as_deref(), Some("rec-1"));
     assert_eq!(entry.llm_provider.as_deref(), Some("anthropic"));
     assert_eq!(entry.llm_model.as_deref(), Some("claude-test"));
+    assert_eq!(entry.stt_language_hint.as_deref(), Some("auto"));
+    assert_eq!(entry.stt_detected_languages, ["yi"]);
+    let query = serde_json::from_value(serde_json::json!({})).unwrap();
+    let page = history.query_page(query).unwrap();
+    assert_eq!(page.items[0].stt_detected_languages, ["yi"]);
 
     history
         .apply_request_update(RequestHistoryUpdate::Delete {

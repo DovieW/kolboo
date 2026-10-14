@@ -227,12 +227,6 @@ pub(crate) fn read_quick_ask_global_config(
             "quick_ask_conversation_history_count",
             default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_COUNT as u64,
         ),
-        request_logs_privacy_mode: read_setting(
-            app,
-            mode,
-            "request_logs_privacy_mode",
-            default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE,
-        ),
     }
 }
 
@@ -246,7 +240,6 @@ pub(crate) fn read_quick_ask_global_config(
             default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_ENABLED,
         conversation_history_count_raw: default_values::DEFAULT_QUICK_ASK_CONVERSATION_HISTORY_COUNT
             as u64,
-        request_logs_privacy_mode: default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE,
         ..Default::default()
     }
 }

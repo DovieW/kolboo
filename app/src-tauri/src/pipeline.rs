@@ -1879,6 +1879,8 @@ impl SharedPipeline {
                 recording::QuietAudioGateResult::NoSpeechDetected => {
                     inner.reset_to_idle();
                     return Ok(TranscriptionResult {
+                        stt_language_hint: None,
+                        stt_detected_languages: Vec::new(),
                         speaker_segments: Vec::new(),
                         stt_text: String::new(),
                         final_text: String::new(),
@@ -1896,6 +1898,8 @@ impl SharedPipeline {
                 recording::QuietAudioGateResult::Quiet => {
                     inner.reset_to_idle();
                     return Ok(TranscriptionResult {
+                        stt_language_hint: None,
+                        stt_detected_languages: Vec::new(),
                         speaker_segments: Vec::new(),
                         stt_text: String::new(),
                         final_text: String::new(),
@@ -2710,6 +2714,13 @@ impl SharedPipeline {
             inner.reset_to_idle();
             return Ok(TranscriptionResult {
                 speaker_segments,
+                stt_language_hint: Some(stt_language.unwrap_or_else(|| "auto".to_owned())),
+                stt_detected_languages: inner
+                    .config
+                    .request_log_store
+                    .as_ref()
+                    .and_then(|store| store.with_current(|log| log.stt_detected_languages.clone()))
+                    .unwrap_or_default(),
                 stt_text,
                 final_text,
                 stt_duration_ms,

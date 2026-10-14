@@ -411,6 +411,28 @@ describe("posthog telemetry", () => {
 		expect(fetch).toHaveBeenCalledTimes(3);
 	});
 
+	it("sends language metadata without guessing from hints or accepting free-form fields", async () => {
+		for (const fields of [
+			{ stt_language_hint: "auto", stt_detected_languages: ["yi"] },
+			{ stt_language_hint: "he", stt_detected_languages: [] },
+			{ stt_language_hint: "private words", stt_detected_languages: ["yi", "he", "private words", 4] },
+			{ stt_language_hint: null, stt_detected_languages: ["en", "en"] },
+			{ stt_language_hint: 2, stt_detected_languages: "private words" },
+		]) await trackAggregateEvent("recording_finished", { status: "success", ...fields, transcript: "private words" });
+		expect(getPayload(0).properties).toMatchObject({ stt_language_hint: "auto", stt_language: "yi" });
+		expect(getPayload(1).properties).toMatchObject({ stt_language_hint: "he", stt_language: "unknown" });
+		expect(getPayload(2).properties).toMatchObject({ stt_language_hint: "other", stt_language: "mixed" });
+		expect(getPayload(3).properties).toMatchObject({ stt_language_hint: "unknown", stt_language: "en" });
+		expect(getPayload(4).properties).toMatchObject({ stt_language_hint: "other", stt_language: "unknown" });
+		expect(JSON.stringify(vi.mocked(fetch).mock.calls)).not.toContain("private words");
+	});
+
+	it("sends nothing until the expanded language disclosure is reviewed", async () => {
+		storeGetMock.mockImplementation(async key => key === "telemetry_disclosure_version" ? "2026-09-usage-v2" : key === "telemetry_disclosure_acknowledged_at" ? "2026-09-01T00:00:00Z" : true);
+		await trackAggregateEvent("recording_finished", { status: "success", stt_language_hint: "yi", stt_detected_languages: ["yi"] });
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
 	it("does not fail optional analytics when local storage is unavailable", async () => {
 		vi.stubGlobal("localStorage", {
 			getItem: () => {

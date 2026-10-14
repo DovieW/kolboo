@@ -1,7 +1,6 @@
 import { CodeHighlight } from "@mantine/code-highlight";
-import { Badge, Box, Modal, Stack, Tabs, Text } from "@mantine/core";
+import { Box, Modal, Stack, Tabs, Text } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
-import { useSettings } from "../lib/queries";
 import type { RequestLog } from "../lib/tauri";
 
 type TabKey =
@@ -100,7 +99,21 @@ function redactPayloadValue(
 	const next: Record<string, unknown> = {};
 	for (const [key, entry] of Object.entries(record)) {
 		if (redactedKeys.has(key)) {
-			next[key] = "<hidden due to privacy mode>";
+			next[key] = "<sensitive content omitted>";
+			continue;
+		}
+		// Legacy/debug adapters may store a serialized body rather than an object.
+		// Do not let formatting parse it after redaction and expose its content.
+		if (key.endsWith("_json") && typeof entry === "string") {
+			try {
+				const parsed: unknown = JSON.parse(entry);
+				next[key] =
+					parsed !== null && typeof parsed === "object"
+						? redactPayloadValue(parsed, redactedKeys)
+						: "<unstructured payload omitted>";
+			} catch {
+				next[key] = "<unstructured payload omitted>";
+			}
 			continue;
 		}
 		next[key] = redactPayloadValue(entry, redactedKeys);
@@ -117,8 +130,6 @@ export default function LogJsonModal({
 	onClose: () => void;
 	log: RequestLog;
 }) {
-	const { data: settings } = useSettings();
-	const privacyModeEnabled = settings?.request_logs_privacy_mode ?? false;
 	const redactedKeys = useMemo(
 		() =>
 			new Set([
@@ -156,70 +167,10 @@ export default function LogJsonModal({
 		[],
 	);
 
-	const logForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log;
-		return redactPayloadValue(log, redactedKeys) as RequestLog;
-	}, [log, privacyModeEnabled, redactedKeys]);
-
-	const quickAskRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.quick_ask_request_json;
-		return redactPayloadValue(log.quick_ask_request_json, redactedKeys);
-	}, [log.quick_ask_request_json, privacyModeEnabled, redactedKeys]);
-
-	const quickAskResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.quick_ask_response_json;
-		return redactPayloadValue(log.quick_ask_response_json, redactedKeys);
-	}, [log.quick_ask_response_json, privacyModeEnabled, redactedKeys]);
-
-	const quickReplaceRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.quick_replace_request_json;
-		return redactPayloadValue(log.quick_replace_request_json, redactedKeys);
-	}, [log.quick_replace_request_json, privacyModeEnabled, redactedKeys]);
-
-	const quickReplaceResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.quick_replace_response_json;
-		return redactPayloadValue(log.quick_replace_response_json, redactedKeys);
-	}, [log.quick_replace_response_json, privacyModeEnabled, redactedKeys]);
-
-	const llmRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.llm_request_json;
-		return redactPayloadValue(log.llm_request_json, redactedKeys);
-	}, [log.llm_request_json, privacyModeEnabled, redactedKeys]);
-
-	const llmResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.llm_response_json;
-		return redactPayloadValue(log.llm_response_json, redactedKeys);
-	}, [log.llm_response_json, privacyModeEnabled, redactedKeys]);
-
-	const sttRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.stt_request_json;
-		return redactPayloadValue(log.stt_request_json, redactedKeys);
-	}, [log.stt_request_json, privacyModeEnabled, redactedKeys]);
-
-	const sttResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.stt_response_json;
-		return redactPayloadValue(log.stt_response_json, redactedKeys);
-	}, [log.stt_response_json, privacyModeEnabled, redactedKeys]);
-
-	const ocrRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.ocr_request_json;
-		return redactPayloadValue(log.ocr_request_json, redactedKeys);
-	}, [log.ocr_request_json, privacyModeEnabled, redactedKeys]);
-
-	const ocrResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.ocr_response_json;
-		return redactPayloadValue(log.ocr_response_json, redactedKeys);
-	}, [log.ocr_response_json, privacyModeEnabled, redactedKeys]);
-
-	const routerRequestForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.router_request_json;
-		return redactPayloadValue(log.router_request_json, redactedKeys);
-	}, [log.router_request_json, privacyModeEnabled, redactedKeys]);
-
-	const routerResponseForModal = useMemo(() => {
-		if (!privacyModeEnabled) return log.router_response_json;
-		return redactPayloadValue(log.router_response_json, redactedKeys);
-	}, [log.router_response_json, privacyModeEnabled, redactedKeys]);
+	const logForModal = useMemo(
+		() => redactPayloadValue(log, redactedKeys) as RequestLog,
+		[log, redactedKeys],
+	);
 	const hasSttPayload =
 		log.stt_request_json !== undefined || log.stt_response_json !== undefined;
 	const hasLlmPayload =
@@ -269,19 +220,12 @@ export default function LogJsonModal({
 			}}
 		>
 			<Stack gap="sm" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-				{privacyModeEnabled && (
-					<Badge color="yellow" variant="light" size="sm">
-						Privacy mode is on — some payload fields are hidden.
-					</Badge>
-				)}
 				<Text size="xs" c="dimmed">
-					Payloads are captured for debugging. STT requests often use a debug
-					preview with <code>&lt;binary audio omitted&gt;</code>
-					placeholders (multipart/raw bodies can’t be shown verbatim). LLM
-					request/response JSON is typically the actual API body. Quick
-					Ask/Quick Replace payloads are the logical prompt/question/answer
-					metadata (not necessarily the provider’s raw wire format). Embeddings
-					payloads include an input preview and redact raw embedding floats.
+					This debugging view omits sensitive content fields. STT requests use
+					previews with binary audio omitted. Quick Ask/Quick Replace show
+					logical metadata, not necessarily the provider’s wire format. This
+					does not change what is sent to your selected provider or what you
+					choose to save in History.
 				</Text>
 
 				<Tabs
@@ -362,14 +306,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={sttRequestForModal} />
+								<JsonPanel value={logForModal.stt_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="stt-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={sttResponseForModal} />
+								<JsonPanel value={logForModal.stt_response_json} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -381,14 +325,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={llmRequestForModal} />
+								<JsonPanel value={logForModal.llm_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="llm-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={llmResponseForModal} />
+								<JsonPanel value={logForModal.llm_response_json} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -400,14 +344,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={ocrRequestForModal} />
+								<JsonPanel value={logForModal.ocr_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="ocr-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={ocrResponseForModal} />
+								<JsonPanel value={logForModal.ocr_response_json} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -419,14 +363,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={quickAskRequestForModal} />
+								<JsonPanel value={logForModal.quick_ask_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="quick-ask-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={quickAskResponseForModal} />
+								<JsonPanel value={logForModal.quick_ask_response_json} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -438,14 +382,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={quickReplaceRequestForModal} />
+								<JsonPanel value={logForModal.quick_replace_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="quick-replace-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={quickReplaceResponseForModal} />
+								<JsonPanel value={logForModal.quick_replace_response_json} />
 							</Tabs.Panel>
 						</>
 					)}
@@ -457,14 +401,14 @@ export default function LogJsonModal({
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={routerRequestForModal} />
+								<JsonPanel value={logForModal.router_request_json} />
 							</Tabs.Panel>
 							<Tabs.Panel
 								value="router-response"
 								pt="sm"
 								style={{ flex: 1, minHeight: 0, overflow: "hidden" }}
 							>
-								<JsonPanel value={routerResponseForModal} />
+								<JsonPanel value={logForModal.router_response_json} />
 							</Tabs.Panel>
 						</>
 					)}

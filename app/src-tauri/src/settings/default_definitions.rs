@@ -190,10 +190,6 @@ pub(crate) fn seedable_settings(
             json!(default_values::DEFAULT_REQUEST_LOGS_RETENTION_DAYS),
         ),
         SettingDefaultDefinition::missing_or_null(
-            "request_logs_privacy_mode",
-            json!(default_values::DEFAULT_REQUEST_LOGS_PRIVACY_MODE),
-        ),
-        SettingDefaultDefinition::missing_or_null(
             "posthog_analytics_enabled",
             json!(default_values::DEFAULT_POSTHOG_ANALYTICS_ENABLED),
         ),
@@ -449,6 +445,17 @@ mod tests {
             .iter()
             .find(|definition| definition.key == key)
             .unwrap_or_else(|| panic!("missing default definition for {key}"))
+    }
+
+    #[test]
+    fn retired_payload_privacy_toggle_is_not_seeded() {
+        let definitions = seedable_settings(&PipelineConfig::default()).expect("defaults");
+        assert!(!definitions
+            .iter()
+            .any(|definition| definition.key == "request_logs_privacy_mode"));
+        assert!(definitions
+            .iter()
+            .any(|definition| definition.key == "request_logs_retention_amount"));
     }
 
     #[test]

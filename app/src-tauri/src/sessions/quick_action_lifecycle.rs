@@ -174,7 +174,6 @@ pub(crate) struct QuickAskGlobalConfig {
     pub(crate) fallback_provider: Option<String>,
     pub(crate) conversation_history_enabled: bool,
     pub(crate) conversation_history_count_raw: u64,
-    pub(crate) request_logs_privacy_mode: bool,
 }
 
 /// Effective Quick Ask config after profile -> global Quick Ask -> global rewrite fallback.
@@ -191,7 +190,6 @@ pub(crate) struct QuickAskEffectiveConfig {
     pub(crate) include_clipboard_context: bool,
     pub(crate) conversation_history_enabled: bool,
     pub(crate) conversation_history_count: usize,
-    pub(crate) request_logs_privacy_mode: bool,
 }
 
 impl QuickAskEffectiveConfig {
@@ -240,7 +238,6 @@ impl QuickAskEffectiveConfig {
             include_clipboard_context: profile.include_clipboard_context,
             conversation_history_enabled: global.conversation_history_enabled,
             conversation_history_count: global.conversation_history_count_raw.clamp(1, 20) as usize,
-            request_logs_privacy_mode: global.request_logs_privacy_mode,
         };
         if let Some(choice) = selection {
             config.provider = choice.provider_id;
@@ -681,7 +678,6 @@ mod tests {
                 fallback_provider: Some("rewrite-provider".into()),
                 conversation_history_enabled: true,
                 conversation_history_count_raw: 200,
-                request_logs_privacy_mode: true,
             },
         );
 
@@ -695,7 +691,6 @@ mod tests {
         assert!(cfg.include_clipboard_context);
         assert!(cfg.conversation_history_enabled);
         assert_eq!(cfg.conversation_history_count, 20);
-        assert!(cfg.request_logs_privacy_mode);
 
         let fallback_cfg = QuickAskEffectiveConfig::resolve(
             &QuickAskProfileConfig::default(),

@@ -1,20 +1,12 @@
 import {
-	Badge,
 	Button,
 	Group,
 	Stack,
-	Switch,
 	Text,
 	Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import {
-	useSettings,
-	useUpdateRequestLogsPrivacyMode,
-} from "../../lib/queries";
-import { getPolicyPathEnforcement } from "../../lib/tauri";
-import { SettingsRow } from "./SettingsRow";
 
 const AGPL_URL = "https://www.gnu.org/licenses/agpl-3.0.en.html";
 
@@ -32,14 +24,6 @@ export function PrivacySettings({
 }: {
 	onNavigateToTab: (tab: SettingsTabId) => void;
 }) {
-	const { data: settings } = useSettings();
-	const updateRequestLogsPrivacyMode = useUpdateRequestLogsPrivacyMode();
-	const requestLogsPrivacyMode = settings?.request_logs_privacy_mode ?? false;
-	const requestLogsPrivacyPolicy = getPolicyPathEnforcement(
-		settings?.policy_state,
-		"request_logs_privacy_mode",
-	);
-
 	const tryOpenUrl = async (url: string) => {
 		try {
 			await openUrl(url);
@@ -83,40 +67,6 @@ export function PrivacySettings({
 					still treat exported logs as sensitive.
 				</Text>
 			</Stack>
-
-			<SettingsRow
-				label="Privacy mode for payloads"
-				description="When on, payloads hide full request content (like prompts and context). Turn off to see exact payloads in the modal."
-				right={
-					<Stack gap={4} align="flex-end">
-						{requestLogsPrivacyPolicy.enforced ? (
-							<Group gap={6} justify="flex-end" wrap="wrap">
-								<Badge variant="light" color="orange">
-									Policy enforced
-								</Badge>
-								{requestLogsPrivacyPolicy.reason ? (
-									<Text size="xs" c="dimmed">
-										{requestLogsPrivacyPolicy.reason}
-									</Text>
-								) : null}
-							</Group>
-						) : null}
-						<Switch
-							checked={requestLogsPrivacyMode}
-							onChange={(event) =>
-								updateRequestLogsPrivacyMode.mutate(event.currentTarget.checked)
-							}
-							disabled={
-								!settings ||
-								updateRequestLogsPrivacyMode.isPending ||
-								requestLogsPrivacyPolicy.enforced
-							}
-							color="gray"
-							size="md"
-						/>
-					</Stack>
-				}
-			/>
 
 			<Stack gap="xs">
 				<Title order={4}>What gets stored on your computer</Title>

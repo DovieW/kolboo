@@ -35,9 +35,6 @@ vi.mock("./HotkeySettings", () => ({
 vi.mock("./NetworkSettings", () => ({
 	NetworkSettings: () => <div>Network controls</div>,
 }));
-vi.mock("./PolicySettings", () => ({
-	PolicySettings: () => <div>Policy controls</div>,
-}));
 vi.mock("./PrivacySettings", () => ({
 	PrivacySettings: () => <div>Privacy controls</div>,
 }));
@@ -138,7 +135,9 @@ describe("Settings shell", () => {
 		expect(
 			host.querySelector("[role='tab'][aria-selected='true']")?.textContent,
 		).toBe("AI");
-		expect(host.querySelectorAll("[role='tab']")).toHaveLength(9);
+		expect(host.querySelectorAll("[role='tab']")).toHaveLength(8);
+		expect([...host.querySelectorAll('[role="tab"]')].some(tab => tab.textContent === "Policy")).toBe(false);
+		expect(host.textContent).not.toContain("Policy controls");
 		const ui = [
 			...host.querySelectorAll<HTMLButtonElement>("[role='tab']"),
 		].find((tab) => tab.textContent === "UI");

@@ -1,6 +1,6 @@
 # Telemetry Governance (Kolboo desktop)
 
-Last updated: 2026-09-24
+Last updated: 2026-10-13
 
 This document describes the current launch posture for desktop telemetry in `kolboo`.
 It is meant to stay code-grounded: when telemetry behavior changes, update this doc in
@@ -41,7 +41,7 @@ Current desktop rules:
   events also use the linked ID; additional cloud-sync/settings events remain
   opt-in. Signed-in events use the opaque Kolboo subject UUID and signed-out
   events use a random installation ID. No email or PostHog person profile is sent,
-  and the two IDs are not merged. Re-review of the v2 disclosure is mandatory
+  and the two IDs are not merged. Re-review of the v3 language disclosure is mandatory
   before any linked event may send. Disabling the toggle returns basic events to
   fresh per-event IDs immediately.
 - Organization policy can force both streams off via the provider-neutral
@@ -77,7 +77,7 @@ Basic, unlinked events:
 | `desktop_opened`                 | Main window opens after disclosure is reviewed      | None       |
 | `page_viewed`                    | Active main view changes                            | `page` from fixed sidebar view names |
 | `recording_started`              | Native recording-start event reaches main view     | None |
-| `recording_finished`             | New/transitioned terminal History item is observed | `status`, `mode`, rounded `duration_seconds` (0–14,400), known `stt_provider`, known `stt_model` |
+| `recording_finished`             | New/transitioned terminal History item is observed | `status`, `mode`, rounded `duration_seconds` (0–14,400), known `stt_provider`, known `stt_model`, categorical `stt_language_hint`, provider-reported `stt_language` |
 | `pipeline_transcription_started` | Native transcription-start event reaches main view | None       |
 | `pipeline_transcript_ready`      | Native ready event has non-empty text               | None       |
 | `pipeline_error`                 | Native pipeline error event reaches main view       | None       |
@@ -88,6 +88,17 @@ it never sends history IDs, previews or error messages. It can miss an outcome
 when the main view is closed or more than 50 items arrive between observations.
 Model IDs are sent only if present in the bundled, code-reviewed STT catalog;
 dynamic/custom values become `other`. Page views include programmatic navigation.
+
+Language metadata does not inspect transcript text or make additional provider
+requests. `stt_language_hint` is the resolved recording-owned hint (`auto`, a
+known hint, `unknown`, or `other`), not evidence of the language spoken.
+`stt_language` projects provider response metadata onto a shared finite language
+code list, including `yi` and `he`. Multiple reported codes become `mixed`; absent
+or unsupported metadata becomes `unknown`. Many models do not report language,
+and resumed chunk checkpoints may lack earlier metadata. These fields are not
+an accuracy benchmark or a complete detector of code-switching. Old history
+remains unknown; it is not reprocessed. The v3 disclosure must be reviewed before
+any events send with the expanded fields.
 
 Optional, linked events:
 

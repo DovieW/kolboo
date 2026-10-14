@@ -215,7 +215,7 @@ impl SttProvider for DeepgramSttProvider {
         if let Some(store) = &self.request_log_store {
             let result_for_log = result.clone();
             store.with_current(|log| {
-                log.stt_response_json = Some(result_for_log);
+                log.set_stt_response(result_for_log);
             });
         }
 

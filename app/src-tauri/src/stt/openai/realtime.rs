@@ -706,7 +706,7 @@ async fn run_streaming_task(
         });
         store.with_current(|log| {
             log.raw_transcript = Some(final_text.clone());
-            log.stt_response_json = Some(response_json);
+            log.set_stt_response(response_json);
         });
     }
 
@@ -784,12 +784,20 @@ mod tests {
                 None,
             )
             .with_api_base_url(format!("http://{address}"));
+            let store = crate::request_log::RequestLogStore::new();
+            store.start_request("openai".into(), None);
+            let provider = provider.with_request_log_store(Some(store.clone()));
             let mut session = start_streaming_session(&provider, 24000).await.unwrap();
             let mut previews = session.take_partial_rx().unwrap();
             session.audio_tx.send(vec![0.1; 4800]).await.unwrap();
             let result = session.finalize().await;
             if scenario == "ordered" {
                 assert_eq!(result.unwrap(), "first second");
+                assert!(store.get_logs(None)[0].stt_detected_languages.is_empty());
+                assert_eq!(
+                    store.get_logs(None)[0].raw_transcript.as_deref(),
+                    Some("first second")
+                );
                 let mut commits = Vec::new();
                 while let Some(partial) = previews.recv().await {
                     if let Some(text) = partial.committed_text {

@@ -37,6 +37,8 @@ export interface HistoryEntry {
 	preset_name?: string | null;
 	stt_provider?: string | null;
 	stt_model?: string | null;
+	stt_language_hint?: string | null;
+	stt_detected_languages?: string[];
 	llm_provider?: string | null;
 	llm_model?: string | null;
 	// Request id of the WAV recording to use for playback/rerun.
@@ -1048,8 +1050,6 @@ export interface AppSettings {
 	request_logs_retention_amount: number;
 	// Only used when mode === "time" (0 = forever)
 	request_logs_retention_days: number;
-	// When true, hide full request payloads in the UI (privacy mode).
-	request_logs_privacy_mode: boolean;
 
 	// Product analytics / telemetry disclosure.
 	// Analytics stay opt-out-by-default, but disclosure must still be resolved
