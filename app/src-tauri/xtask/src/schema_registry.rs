@@ -236,6 +236,10 @@ fn gen_export_quick_ask_started_payload_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::QuickAskStartedPayload)
 }
 
+fn gen_export_quick_ask_partial_payload_schema() -> RootSchema {
+    schemars::schema_for!(kolboo_lib::QuickAskPartialPayload)
+}
+
 fn gen_export_recording_start_schema() -> RootSchema {
     schemars::schema_for!(kolboo_lib::EmptyEventPayload)
 }
@@ -555,6 +559,7 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "QuickAskStartedPayload",
         gen_export_quick_ask_started_payload_schema
     ),
+    schema_spec!("quick-ask-partial-payload.schema.json", "QuickAskPartialPayload", gen_export_quick_ask_partial_payload_schema),
     schema_spec!(
         "recording-start.schema.json",
         stringify!(kolboo_lib::events::EVENT_RECORDING_START),

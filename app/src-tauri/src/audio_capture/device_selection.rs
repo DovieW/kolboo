@@ -53,7 +53,7 @@ fn normalize_input_device_selection(input_device: Option<&str>) -> Option<(Strin
     Some((raw.to_string(), 0, false))
 }
 
-fn select_input_device_index_from_names(
+pub(crate) fn select_input_device_index_from_names(
     names: &[String],
     selection: Option<&str>,
 ) -> Option<usize> {

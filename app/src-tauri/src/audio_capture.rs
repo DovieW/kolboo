@@ -32,6 +32,7 @@ mod preprocessing;
 #[path = "audio_capture/tests/streaming.rs"]
 mod streaming_tests;
 
+pub(crate) use device_selection::select_input_device_index_from_names;
 pub use device_selection::{
     get_default_input_device_info, list_input_devices, list_input_devices_v2, AudioInputDeviceInfo,
 };

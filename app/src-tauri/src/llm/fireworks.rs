@@ -97,6 +97,28 @@ impl FireworksLlmProvider {
 
 #[async_trait]
 impl LlmProvider for FireworksLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("fireworks".into()));
+        }
+        let request = serde_json::json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true,"max_tokens":4096,"temperature":0.3,"stream_options":{"include_usage":true}});
+        super::openai_compat::stream(
+            self.client
+                .post(&self.api_base_url)
+                .bearer_auth(&self.api_key)
+                .json(&request),
+            self.timeout,
+            self.request_log_store.as_ref(),
+            notify,
+        )
+        .await
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey("fireworks".to_string()));

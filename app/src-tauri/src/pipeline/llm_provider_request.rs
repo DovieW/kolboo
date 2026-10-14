@@ -100,6 +100,7 @@ impl OneOffLlmProviderRequest {
         base_config: &LlmConfig,
         llm_api_keys: &HashMap<String, String>,
         proxy_settings: &crate::settings::ProxySettings,
+        request_log_store: Option<RequestLogStore>,
     ) -> Result<Arc<dyn LlmProvider>, PipelineError> {
         create_one_off_llm_provider_unstructured(
             base_config,
@@ -107,6 +108,7 @@ impl OneOffLlmProviderRequest {
             self.provider_id.as_str(),
             self.params.clone(),
             proxy_settings,
+            request_log_store,
         )
     }
 

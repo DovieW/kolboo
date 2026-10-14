@@ -18,6 +18,7 @@ mod openai;
 mod openai_compat;
 pub(crate) mod profile_conversion;
 mod prompts;
+pub(crate) mod streaming;
 
 pub use anthropic::AnthropicLlmProvider;
 pub use cerebras::CerebrasLlmProvider;
@@ -66,6 +67,15 @@ pub enum LlmError {
 pub trait LlmProvider: Send + Sync {
     /// Complete a prompt and return the response
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError>;
+
+    /// Free-form streaming, used only by Quick Ask. Notifications contain the
+    /// accumulated answer, not reasoning. Completion must validate termination.
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: streaming::Delta<'_>,
+    ) -> Result<String, LlmError>;
 
     /// Complete a prompt and return a structured JSON response.
     ///

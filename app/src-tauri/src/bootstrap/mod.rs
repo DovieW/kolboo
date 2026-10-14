@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Listener, Manager,
 };
 
 use crate::commands;
@@ -26,6 +26,7 @@ const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
 pub(crate) mod main_window;
 pub(crate) mod startup;
+mod tray_controls;
 
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();
@@ -174,6 +175,8 @@ fn build_history_submenu(app: &AppHandle) -> tauri::Result<Submenu<tauri::Wry>> 
 
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+    let microphones = tray_controls::build(app, &crate::audio_capture::list_input_devices_v2())?;
+    let [profile, preset] = tray_controls::context_items(app)?;
     let history_submenu = build_history_submenu(app)?;
     let diagnostics_item = MenuItem::with_id(
         app,
@@ -185,7 +188,15 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     Menu::with_items(
         app,
-        &[&show_item, &history_submenu, &diagnostics_item, &quit_item],
+        &[
+            &show_item,
+            &microphones,
+            &profile,
+            &preset,
+            &history_submenu,
+            &diagnostics_item,
+            &quit_item,
+        ],
     )
 }
 
@@ -308,7 +319,48 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         keepalive.set(tray);
     }
 
+    app.on_menu_event(tray_controls::on_menu_event);
+
+    for event in [
+        events::EVENT_SETTINGS_CHANGED,
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        events::EVENT_HISTORY_CHANGED,
+    ] {
+        let handle = app.clone();
+        app.listen(event, move |_| refresh_tray_menu(&handle, build_tray_menu));
+    }
+
     Ok(())
+}
+
+fn refresh_tray_menu(
+    app: &AppHandle,
+    build_menu: fn(&AppHandle) -> tauri::Result<Menu<tauri::Wry>>,
+) {
+    if !app.state::<TrayKeepAlive>().refresh.request() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        loop {
+            app.state::<TrayKeepAlive>().refresh.begin();
+            if let Ok(menu) = build_menu(&app) {
+                // Release the state mutex before native menu dispatch (Windows GUI thread).
+                let tray = app
+                    .state::<TrayKeepAlive>()
+                    .tray
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone());
+                if let Some(tray) = tray {
+                    let _ = tray.set_menu(Some(menu));
+                }
+            }
+            if !app.state::<TrayKeepAlive>().refresh.finish() {
+                break;
+            }
+        }
+    });
 }
 
 /// Initialize the recording pipeline from settings in the store

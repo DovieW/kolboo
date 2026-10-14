@@ -43,6 +43,7 @@ pub struct OverlayOcrContextUnavailablePayload {
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct QuickAskStartedPayload {
+    pub request_id: Option<String>,
     pub question: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
@@ -50,6 +51,7 @@ pub struct QuickAskStartedPayload {
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct QuickAskAnswerOkPayload {
+    pub request_id: Option<String>,
     pub ok: bool,
     pub answer: String,
     pub provider_used: Option<String>,
@@ -59,6 +61,7 @@ pub struct QuickAskAnswerOkPayload {
 
 #[derive(Debug, Clone, serde::Serialize, JsonSchema)]
 pub struct QuickAskAnswerErrorPayload {
+    pub request_id: Option<String>,
     pub ok: bool,
     pub error: String,
 }
@@ -68,6 +71,13 @@ pub struct QuickAskAnswerErrorPayload {
 pub enum QuickAskAnswerPayload {
     Ok(QuickAskAnswerOkPayload),
     Err(QuickAskAnswerErrorPayload),
+}
+
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct QuickAskPartialPayload {
+    pub request_id: String,
+    pub seq: u64,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]

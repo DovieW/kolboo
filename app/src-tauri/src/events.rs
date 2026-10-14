@@ -107,6 +107,7 @@ pub const EVENT_REQUEST_DISCONNECT: &str = "request-disconnect";
 
 /// Emitted when a Quick Ask session starts.
 pub const EVENT_QUICK_ASK_STARTED: &str = "quick-ask-started";
+pub const EVENT_QUICK_ASK_PARTIAL: &str = "quick-ask-partial";
 
 /// Emitted when a Quick Ask response is ready.
 pub const EVENT_QUICK_ASK_ANSWER: &str = "quick-ask-answer";

@@ -114,6 +114,72 @@ pub(super) fn extract_first_choice_text(response_json: &serde_json::Value) -> Op
     extract_content_from_choice(first)
 }
 
+/// Shared Chat Completions stream for Groq, Cerebras, Fireworks and custom endpoints.
+pub(crate) async fn stream(
+    request: reqwest::RequestBuilder,
+    timeout: Option<std::time::Duration>,
+    store: Option<&crate::request_log::RequestLogStore>,
+    notify: super::streaming::Delta<'_>,
+) -> Result<String, super::LlmError> {
+    use super::streaming::{self, Output};
+    let mut output = Output::default();
+    let mut stopped = false;
+    streaming::read(request, timeout, true, &mut |data| {
+        if data == "[DONE]" {
+            return if stopped {
+                Ok(true)
+            } else {
+                Err(streaming::invalid("Provider did not finish the answer"))
+            };
+        }
+        let value = streaming::json(data)?;
+        if value.get("error").is_some() {
+            return Err(streaming::invalid(
+                "Model provider reported a streaming error",
+            ));
+        }
+        if let Some(usage) = value
+            .get("usage")
+            .or_else(|| value.pointer("/x_groq/usage"))
+        {
+            output.usage = Some(serde_json::json!({"usage": streaming::usage(usage)}));
+        }
+        if let Some(choice) = value
+            .get("choices")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|choices| {
+                choices.iter().find(|choice| {
+                    choice.get("index").and_then(serde_json::Value::as_u64) == Some(0)
+                })
+            })
+        {
+            if let Some(text) = choice
+                .pointer("/delta/content")
+                .and_then(serde_json::Value::as_str)
+            {
+                if stopped {
+                    return Err(streaming::invalid("Text arrived after answer completion"));
+                }
+                output.push(text, notify)?;
+            }
+            if let Some(reason) = choice
+                .get("finish_reason")
+                .and_then(serde_json::Value::as_str)
+            {
+                if reason != "stop" {
+                    return Err(streaming::invalid(
+                        "Provider stopped before completing the answer",
+                    ));
+                }
+                stopped = true;
+            }
+        }
+        Ok(false)
+    })
+    .await?;
+    output.finish(store)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

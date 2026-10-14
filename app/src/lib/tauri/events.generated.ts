@@ -31,6 +31,7 @@ export const BACKEND_EVENT_NAMES = [
 	"connection-state-changed",
 	"request-disconnect",
 	"quick-ask-started",
+	"quick-ask-partial",
 	"quick-ask-answer",
 	"quick-ask-dismiss-requested",
 	"local-whisper-model-load",

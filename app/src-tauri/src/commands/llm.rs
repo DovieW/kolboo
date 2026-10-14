@@ -911,6 +911,7 @@ pub async fn llm_complete(
             &config.llm_config,
             &config.llm_api_keys,
             &config.proxy_settings,
+            None,
         )
         .map_err(|e| llm_error(e.to_string()))?;
     let output = provider

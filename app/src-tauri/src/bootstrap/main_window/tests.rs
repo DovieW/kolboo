@@ -50,6 +50,10 @@ fn native_window_manager_integration() {
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
+        .manage(crate::sessions::quick_ask::QuickAskSessions::default())
+        .manage(crate::state::QuickAskConversationMemory::default())
+        .manage(crate::state::TrayKeepAlive::default())
+        .manage(crate::state::MicTestMeterState::default())
         .manage(crate::recordings::RecordingStore::new(
             history_directory.path().into(),
         ))
@@ -95,7 +99,77 @@ fn native_window_manager_integration() {
         );
     }
     crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
+    crate::sessions::quick_ask::tests::native_cancel(app.handle());
     crate::pipeline::native_model_actions(app.handle());
+    crate::bootstrap::tray_controls::tests::native_controls(app.handle());
+    static MENU_FAILURE_ATTEMPTS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    fn failed_menu(_app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+        MENU_FAILURE_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(tauri::Error::FailedToReceiveMessage)
+    }
+    // Inject only the native construction failure, not the refresh lifecycle.
+    // Failure must release ownership so the next real menu rebuild can run.
+    crate::bootstrap::refresh_tray_menu(app.handle(), failed_menu);
+    let refresh_deadline = Instant::now() + Duration::from_secs(5);
+    while app
+        .state::<crate::state::TrayKeepAlive>()
+        .refresh
+        .is_running_for_test()
+    {
+        assert!(
+            Instant::now() < refresh_deadline,
+            "failed menu construction cannot spin forever"
+        );
+        app.run_iteration(|_, _| {});
+    }
+    assert_eq!(
+        MENU_FAILURE_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    crate::bootstrap::tray_controls::on_menu_event(
+        app.handle(),
+        tauri::menu::MenuEvent {
+            id: tauri::menu::MenuId::new("tray-refresh"),
+        },
+    );
+    let refresh_deadline = Instant::now() + Duration::from_secs(5);
+    while app
+        .state::<crate::state::TrayKeepAlive>()
+        .refresh
+        .is_running_for_test()
+    {
+        assert!(
+            Instant::now() < refresh_deadline,
+            "refresh without a retained tray must finish"
+        );
+        app.run_iteration(|_, _| {});
+    }
+    crate::bootstrap::setup_tray(app.handle()).unwrap();
+    crate::bootstrap::tray_controls::on_menu_event(
+        app.handle(),
+        tauri::menu::MenuEvent {
+            id: tauri::menu::MenuId::new("tray-refresh"),
+        },
+    );
+    crate::bootstrap::tray_controls::on_menu_event(
+        app.handle(),
+        tauri::menu::MenuEvent {
+            id: tauri::menu::MenuId::new("tray-mic::missing"),
+        },
+    );
+    let refresh_deadline = Instant::now() + Duration::from_secs(5);
+    while app
+        .state::<crate::state::TrayKeepAlive>()
+        .refresh
+        .is_running_for_test()
+    {
+        assert!(
+            Instant::now() < refresh_deadline,
+            "tray refresh must complete"
+        );
+        app.run_iteration(|_, _| {});
+    }
     crate::history_request_lifecycle::tests::native_superseded_history(app.handle());
     crate::pipeline::native_streaming_consumer(app.handle());
     crate::text::live_target::native_test(app.handle());

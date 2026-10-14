@@ -809,10 +809,19 @@ export interface QuickAskAnswerOkPayload {
   model_used?: string | null;
   ok: boolean;
   provider_used?: string | null;
+  request_id?: string | null;
 }
 export interface QuickAskAnswerErrorPayload {
   error: string;
   ok: boolean;
+  request_id?: string | null;
+}
+
+// From: quick-ask-partial-payload.schema.json
+export interface QuickAskPartialPayload {
+  request_id: string;
+  seq: number;
+  text: string;
 }
 
 // From: quick-ask-started-payload.schema.json
@@ -820,6 +829,7 @@ export interface QuickAskStartedPayload {
   model?: string | null;
   provider?: string | null;
   question?: string | null;
+  request_id?: string | null;
 }
 
 // From: recording-preferences.schema.json

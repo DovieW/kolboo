@@ -298,3 +298,24 @@ this BYOK catalog does not grant service access or transmit managed credentials.
 Rewrite, Quick Ask and Quick Replace label automatic active-window OCR as
 **Always**. This is a wording correction: the stored value remains `auto`, existing
 settings are unchanged, and no additional screen capture is enabled on upgrade.
+
+## Quick Ask answers and tray controls
+
+Quick Ask displays genuine incremental answer text with Markdown and automatic
+text direction. OpenAI, Anthropic, Gemini, Cohere, Groq, Cerebras, Fireworks,
+Ollama and OpenAI-compatible custom endpoints use their own streaming protocols.
+Custom endpoints must support Chat Completions streaming; a rejected or interrupted
+stream is not silently resent as a paid batch request. Partial answers remain
+visible with an incomplete-answer notice. Dismissing the panel or starting another
+recording cancels local answer work; it cannot undo vendor processing or charges.
+
+Managed Quick Ask streams through Kolboo's authenticated Edge route when that
+backend advertises support. An older backend's discovery 404 retains the existing
+batch answer behavior without pretending to stream. Choosing a provider/model
+continues to preserve its payment source, profile inheritance and reasoning controls.
+
+The tray menu includes a **Microphone** submenu with System default, available
+devices and Refresh microphones. Duplicate device names are disambiguated, and a
+missing saved device remains visible. Selection updates the same saved setting as
+the Audio tab; recording or mic testing blocks device changes. Last profile and
+Last preset show the context actually used most recently, not unsaved settings edits.

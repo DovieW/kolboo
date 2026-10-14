@@ -138,6 +138,12 @@ explicitly; do not expand that list merely to make a patch pass. Coverage proves
 execution, not correctness, so changed behavior still needs meaningful assertions
 and the appropriate unit, component, integration, or native-platform test.
 
+A Rust file absent from LLVM reports is declaration-only only when its **entire
+source** consists of comments, whitespace and string-literal `const ...: &str`
+declarations. The strict classifier rejects attributes, macros, functions and
+computed initializers; existing zero-hit executable counters still fail. This
+handles the event-name registry without exempting executable behavior.
+
 When the remote merge base predates `.coverage-patch-v1`, enforcement starts at
 the first policy-introduction commit on the branch, not at HEAD and not only
 after merging to master. This grandfathers pre-policy code, **not subsequent
@@ -275,6 +281,13 @@ startup process runs in a network namespace without external connectivity; no
 developer environment files, account, recordings or API calls are used. Its
 profiles are merged into the same Rust LCOV report, without new coverage waivers.
 Normal `cargo:test` stays headless; Windows/macOS still require native acceptance.
+Quick Ask fixtures exercise real adapters against loopback HTTP/SSE/NDJSON,
+incremental events, dismissal during a preview, replacement during context waiting,
+request-scoped logging and missing credentials without a log store. Tray fixtures
+exercise busy capture/mic-test refusal, persisted device/default selections,
+settings-write rollback, interrupted runtime access and refresh recovery after
+native menu construction fails. Device snapshots are synthetic; no physical
+microphone or paid inference is used.
 The isolated Wry fixture also executes the generated update-status, check and
 install IPC handlers. Signed synthetic downloads target private fake AppImages,
 never the test runner or an installed app. It exercises busy-pipeline refusal,

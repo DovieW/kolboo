@@ -13,6 +13,7 @@ import type {
 	PolicyState,
 	QuickAskAnswerPayload,
 	QuickAskStartedPayload,
+	QuickAskPartialPayload,
 	SettingsChangedPayload,
 	SttPartialTranscriptPayload,
 	SystemEvent,
@@ -40,6 +41,7 @@ export type EventMap = {
 	"quick-ask-answer": QuickAskAnswerPayload;
 	"quick-ask-dismiss-requested": EmptyEventPayload;
 	"quick-ask-started": QuickAskStartedPayload;
+	"quick-ask-partial": QuickAskPartialPayload;
 	"recording-start": EmptyEventPayload;
 	"recording-stop": EmptyEventPayload;
 	"request-disconnect": EmptyEventPayload;

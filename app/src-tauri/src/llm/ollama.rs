@@ -177,6 +177,53 @@ fn parse_ollama_error_message(body: &str) -> Option<String> {
 
 #[async_trait]
 impl LlmProvider for OllamaLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        use super::streaming::{self, Output};
+        let url = crate::http::join_base_url(&self.base_url, "/api/chat");
+        let request = json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true,"options":{"temperature":0.3,"num_predict":4096}});
+        let mut output = Output::default();
+        streaming::read(
+            self.client.post(url).json(&request),
+            self.timeout,
+            false,
+            &mut |data| {
+                let value = streaming::json(data)?;
+                if value.get("error").is_some() {
+                    return Err(streaming::invalid(
+                        "Model provider reported a streaming error",
+                    ));
+                }
+                if let Some(text) = value
+                    .pointer("/message/content")
+                    .and_then(serde_json::Value::as_str)
+                {
+                    output.push(text, notify)?;
+                }
+                if value.get("done").and_then(serde_json::Value::as_bool) == Some(true) {
+                    if value
+                        .get("done_reason")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|reason| reason != "stop")
+                    {
+                        return Err(streaming::invalid(
+                            "Provider stopped before completing the answer",
+                        ));
+                    }
+                    output.usage = Some(json!(streaming::usage(&value)));
+                    return Ok(true);
+                }
+                Ok(false)
+            },
+        )
+        .await?;
+        output.finish(self.request_log_store.as_ref())
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         let url = crate::http::join_base_url(&self.base_url, "/api/chat");
 

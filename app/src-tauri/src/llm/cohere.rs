@@ -161,6 +161,63 @@ fn parse_cohere_error_message(body: &str) -> Option<String> {
 
 #[async_trait]
 impl LlmProvider for CohereLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        use super::streaming::{self, Output};
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("cohere".into()));
+        }
+        let request = json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true,"temperature":0.0,"max_tokens":4096});
+        let mut output = Output::default();
+        streaming::read(
+            self.client
+                .post(&self.api_base_url)
+                .bearer_auth(&self.api_key)
+                .json(&request),
+            self.timeout,
+            true,
+            &mut |data| {
+                let value = streaming::json(data)?;
+                match value.get("type").and_then(serde_json::Value::as_str) {
+                    Some("content-delta") => output.push(
+                        value
+                            .pointer("/delta/message/content/text")
+                            .and_then(serde_json::Value::as_str)
+                            .ok_or_else(|| streaming::invalid("Missing answer delta"))?,
+                        notify,
+                    )?,
+                    Some("message-end") => {
+                        if value
+                            .pointer("/delta/finish_reason")
+                            .and_then(serde_json::Value::as_str)
+                            != Some("COMPLETE")
+                        {
+                            return Err(streaming::invalid(
+                                "Provider stopped before completing the answer",
+                            ));
+                        }
+                        output.usage =
+                            Some(json!({"usage":streaming::usage(&value["delta"]["usage"])}));
+                        return Ok(true);
+                    }
+                    Some("error") => {
+                        return Err(streaming::invalid(
+                            "Model provider reported a streaming error",
+                        ))
+                    }
+                    _ => {}
+                }
+                Ok(false)
+            },
+        )
+        .await?;
+        output.finish(self.request_log_store.as_ref())
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey("cohere".to_string()));

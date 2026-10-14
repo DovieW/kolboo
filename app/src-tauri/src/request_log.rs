@@ -736,6 +736,7 @@ pub struct RequestLogStore {
     logs: Arc<Mutex<VecDeque<RequestLog>>>,
     current: Arc<Mutex<Option<RequestLog>>>,
     retention: Arc<Mutex<RequestLogsRetentionConfig>>,
+    owner_id: Option<String>,
 }
 
 impl Default for RequestLogStore {
@@ -745,6 +746,14 @@ impl Default for RequestLogStore {
 }
 
 impl RequestLogStore {
+    /// A request-scoped mutation view. Late provider callbacks and finalization
+    /// cannot write to or complete a newer recording's log.
+    pub(crate) fn for_request(&self, id: &str) -> Self {
+        Self {
+            owner_id: Some(id.into()),
+            ..self.clone()
+        }
+    }
     /// Background helpers share the retained archive but own their current
     /// request. Starting/completing one must not cancel or alter dictation.
     pub(crate) fn fork_current(&self) -> Self {
@@ -752,6 +761,7 @@ impl RequestLogStore {
             logs: self.logs.clone(),
             current: Arc::new(Mutex::new(None)),
             retention: self.retention.clone(),
+            owner_id: None,
         }
     }
     /// Create a new log store
@@ -770,6 +780,7 @@ impl RequestLogStore {
             logs: Arc::new(Mutex::new(VecDeque::with_capacity(initial_capacity))),
             current: Arc::new(Mutex::new(None)),
             retention: Arc::new(Mutex::new(retention)),
+            owner_id: None,
         }
     }
 
@@ -857,7 +868,11 @@ impl RequestLogStore {
         F: FnOnce(&mut RequestLog) -> R,
     {
         let mut current = lock_or_recover(&self.current);
-        current.as_mut().map(f)
+        let log = current.as_mut()?;
+        if !self.owns_request(log) {
+            return None;
+        }
+        Some(f(log))
     }
 
     /// Modify the current request log only when it still matches `request_id`.
@@ -871,16 +886,30 @@ impl RequestLogStore {
     {
         let mut current = lock_or_recover(&self.current);
         let log = current.as_mut()?;
-        if log.id == request_id {
+        if log.id == request_id && self.owns_request(log) {
             Some(f(log))
         } else {
             None
         }
     }
 
+    fn owns_request(&self, log: &RequestLog) -> bool {
+        match &self.owner_id {
+            None => true,
+            Some(id) => &log.id == id,
+        }
+    }
+
     /// Complete the current request and store it
     pub fn complete_current(&self) {
         let mut current = lock_or_recover(&self.current);
+        if self
+            .owner_id
+            .as_ref()
+            .is_some_and(|id| current.as_ref().is_none_or(|log| &log.id != id))
+        {
+            return;
+        }
         if let Some(log) = current.take() {
             self.store_log(log);
         }
@@ -914,6 +943,17 @@ impl RequestLogStore {
             .cloned()
             .map(redact_request_log_json_fields)
             .collect()
+    }
+
+    /// Read only names for the tray; do not clone transcripts or provider payloads.
+    pub(crate) fn latest_profile_preset(&self) -> Option<(Option<String>, Option<String>)> {
+        let current = lock_or_recover(&self.current);
+        let logs = lock_or_recover(&self.logs);
+        current
+            .iter()
+            .chain(logs.iter().rev())
+            .find(|log| log.profile_name.is_some())
+            .map(|log| (log.profile_name.clone(), log.preset_name.clone()))
     }
 
     /// History needs availability only, not sensitive transcript/provider payloads.

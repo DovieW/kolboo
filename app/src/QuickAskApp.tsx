@@ -20,7 +20,8 @@ import type {
 	QuickAskStartedPayload,
 } from "./lib/tauri";
 import { tauriAPI } from "./lib/tauri";
-import { listenTyped } from "./lib/tauri/events";
+import { useBackendEvent } from "./lib/tauri/useBackendEvent";
+import { QuickAskStream } from "./lib/quickAskStream";
 import "./app.css";
 
 function sanitizeExternalHref(href: string | undefined | null): string | null {
@@ -161,7 +162,7 @@ export default function QuickAskApp() {
 	const [phase, setPhase] = useState<"idle" | "loading" | "ready" | "error">(
 		"idle",
 	);
-	const awaitingAnswerRef = useRef(false);
+	const stream = useRef(new QuickAskStream());
 	const [closing, setClosing] = useState(false);
 	const [question, setQuestion] = useState<string>("");
 	const [answer, setAnswer] = useState<string>("");
@@ -241,22 +242,28 @@ export default function QuickAskApp() {
 		setClickThrough(phase === "idle");
 	}, [phase, setClickThrough]);
 
-	useEffect(() => {
-		const panel = panelRef.current;
-		if (!panel || typeof ResizeObserver === "undefined") return;
-		let raf = 0;
-		const observer = new ResizeObserver(() => {
-			if (raf) cancelAnimationFrame(raf);
-			raf = requestAnimationFrame(() => {
-				resizeWindowToPanel();
+	// The answer key replaces this node. Own observation through the DOM ref,
+	// rather than an effect that can remain attached to a detached old panel.
+	const observePanel = useCallback(
+		(panel: HTMLDivElement | null) => {
+			panelRef.current = panel;
+			if (!panel || typeof ResizeObserver === "undefined") return;
+			let raf = 0;
+			const observer = new ResizeObserver(() => {
+				if (raf) cancelAnimationFrame(raf);
+				raf = requestAnimationFrame(() => {
+					resizeWindowToPanel();
+				});
 			});
-		});
-		observer.observe(panel);
-		return () => {
-			if (raf) cancelAnimationFrame(raf);
-			observer.disconnect();
-		};
-	}, [resizeWindowToPanel]);
+			observer.observe(panel);
+			return () => {
+				if (raf) cancelAnimationFrame(raf);
+				observer.disconnect();
+				panelRef.current = null;
+			};
+		},
+		[resizeWindowToPanel],
+	);
 
 	const clearState = useCallback(() => {
 		setPhase("idle");
@@ -267,18 +274,31 @@ export default function QuickAskApp() {
 		setActiveProfileId(null);
 	}, []);
 
+	const cancelAnswer = useCallback(() => {
+		const requestId = stream.current.cancel();
+		if (requestId) void tauriAPI.cancelQuickAsk(requestId).catch(() => {});
+	}, []);
+	useEffect(() => () => cancelAnswer(), [cancelAnswer]);
+
+	useBackendEvent("quick-ask-partial", (payload) => {
+		const text = stream.current.partial(payload);
+		if (text !== null) setAnswer(text);
+	});
+
 	const hideNow = useCallback(() => {
 		if (dismissTimerRef.current) {
 			window.clearTimeout(dismissTimerRef.current);
 			dismissTimerRef.current = null;
 		}
-		awaitingAnswerRef.current = false;
+		cancelAnswer();
+		const version = stream.current.version;
 		win
 			.hide()
 			.catch(() => {
 				// ignore
 			})
 			.finally(() => {
+				if (stream.current.version !== version) return;
 				setClickThrough(true);
 				tauriAPI.setQuickAskEscapeEnabled(false).catch(() => {
 					// ignore
@@ -286,7 +306,7 @@ export default function QuickAskApp() {
 				setClosing(false);
 				clearState();
 			});
-	}, [clearState, setClickThrough, win]);
+	}, [cancelAnswer, clearState, setClickThrough, win]);
 
 	useEffect(() => {
 		return () => {
@@ -333,23 +353,27 @@ export default function QuickAskApp() {
 	}, []);
 
 	const resolveActiveProfileId = useCallback(async () => {
+		const version = stream.current.version;
 		try {
 			const result = await invoke<ActiveProfileInfo>(
 				"pipeline_get_active_profile_for_foreground_app",
 			);
-			setActiveProfileId(result?.profile_id ?? null);
-		} catch (error) {
-			console.warn("Quick Ask: failed to resolve active profile", error);
-			setActiveProfileId(null);
+			if (stream.current.version === version)
+				setActiveProfileId(result?.profile_id ?? null);
+		} catch {
+			console.warn("Quick Ask: failed to resolve active profile");
+			if (stream.current.version === version) setActiveProfileId(null);
 		}
 	}, []);
 
 	const dismiss = useCallback(() => {
 		// Let CSS animate before hiding the window.
 		if (dismissTimerRef.current) return;
-		awaitingAnswerRef.current = false;
+		cancelAnswer();
+		const version = stream.current.version;
 		setClosing(true);
 		window.requestAnimationFrame(() => {
+			if (stream.current.version !== version) return;
 			dismissTimerRef.current = window.setTimeout(() => {
 				dismissTimerRef.current = null;
 				win
@@ -358,6 +382,7 @@ export default function QuickAskApp() {
 						// ignore
 					})
 					.finally(() => {
+						if (stream.current.version !== version) return;
 						setClickThrough(true);
 						tauriAPI.setQuickAskEscapeEnabled(false).catch(() => {
 							// ignore
@@ -367,150 +392,77 @@ export default function QuickAskApp() {
 					});
 			}, 210);
 		});
-	}, [clearState, setClickThrough, win]);
+	}, [cancelAnswer, clearState, setClickThrough, win]);
 
-	useEffect(() => {
-		let unlistenStarted: (() => void) | null = null;
-		let unlistenAnswer: (() => void) | null = null;
-		let unlistenDismiss: (() => void) | null = null;
-		let unlistenRecordingStart: (() => void) | null = null;
-		let unlistenTranscriptionStart: (() => void) | null = null;
+	useBackendEvent("quick-ask-started", (payload) => {
+		if (dismissTimerRef.current) {
+			window.clearTimeout(dismissTimerRef.current);
+			dismissTimerRef.current = null;
+		}
+		const safePayload: QuickAskStartedPayload =
+			payload && typeof payload === "object" ? payload : {};
+		stream.current.begin(safePayload.request_id ?? null);
+		setPanelKey((k) => k + 1);
+		setClosing(false);
+		setPhase("loading");
+		setQuestion(
+			typeof safePayload.question === "string" ? safePayload.question : "",
+		);
+		setAnswer("");
+		setError("");
+		setAnswerScrollable(false);
+		tauriAPI.setQuickAskEscapeEnabled(true).catch(() => {
+			// ignore
+		});
+		setClickThrough(false);
+		win.setAlwaysOnTop(true).catch(() => {
+			// ignore
+		});
+		win.show().catch(() => {
+			// ignore
+		});
+		win.setFocus().catch(() => {
+			// ignore
+		});
+		resizeWindowToPanel();
+		void resolveActiveProfileId();
+	});
 
-		listenTyped("quick-ask-started", (payload) => {
-			const safePayload: QuickAskStartedPayload =
-				payload && typeof payload === "object" ? payload : {};
-			awaitingAnswerRef.current = true;
-			setPanelKey((k) => k + 1);
+	useBackendEvent("quick-ask-answer", (payload) => {
+		// If we aren't actively waiting for an answer, ignore late/stale events.
+		const safePayload = payload as QuickAskAnswerPayload;
+		if (!stream.current.finish(safePayload)) return;
+		if (safePayload.ok) {
 			setClosing(false);
-			setPhase("loading");
-			setQuestion(
-				typeof safePayload.question === "string" ? safePayload.question : "",
-			);
-			setAnswer("");
-			setError("");
+			setPhase("ready");
 			setAnswerScrollable(false);
-			tauriAPI.setQuickAskEscapeEnabled(true).catch(() => {
-				// ignore
-			});
+			setAnswer(safePayload.answer);
+			setError("");
 			setClickThrough(false);
 			win.setAlwaysOnTop(true).catch(() => {
 				// ignore
 			});
-			win.show().catch(() => {
-				// ignore
-			});
-			win.setFocus().catch(() => {
-				// ignore
-			});
 			resizeWindowToPanel();
-			void resolveActiveProfileId();
-		})
-			.then((fn) => {
-				unlistenStarted = fn;
-			})
-			.catch(() => {
-				// ignore
-			});
+			return;
+		}
 
-		listenTyped("quick-ask-answer", (payload) => {
-			// If we aren't actively waiting for an answer, ignore late/stale events.
-			if (!awaitingAnswerRef.current) return;
-			awaitingAnswerRef.current = false;
-			const safePayload = payload as QuickAskAnswerPayload;
-			if (
-				safePayload &&
-				typeof safePayload === "object" &&
-				"ok" in safePayload
-			) {
-				if (safePayload.ok) {
-					setClosing(false);
-					setPhase("ready");
-					setAnswerScrollable(false);
-					setAnswer(safePayload.answer);
-					setError("");
-					setClickThrough(false);
-					win.setAlwaysOnTop(true).catch(() => {
-						// ignore
-					});
-					win.show().catch(() => {
-						// ignore
-					});
-					win.setFocus().catch(() => {
-						// ignore
-					});
-					resizeWindowToPanel();
-					return;
-				}
-			}
+		setClosing(false);
+		setPhase("error");
+		setError(safePayload.error);
+		setAnswerScrollable(false);
+	});
 
-			setClosing(false);
-			setPhase("error");
-			setAnswer("");
-			setError(
-				safePayload && typeof safePayload === "object" && "error" in safePayload
-					? String((safePayload as { error?: string }).error ?? "Unknown error")
-					: "Unknown error",
-			);
-			setAnswerScrollable(false);
-		})
-			.then((fn) => {
-				unlistenAnswer = fn;
-			})
-			.catch(() => {
-				// ignore
-			});
+	useBackendEvent("quick-ask-dismiss-requested", () => {
+		dismiss();
+	});
 
-		listenTyped("quick-ask-dismiss-requested", () => {
-			dismiss();
-		})
-			.then((fn) => {
-				unlistenDismiss = fn;
-			})
-			.catch(() => {
-				// ignore
-			});
+	useBackendEvent("recording-start", () => {
+		hideNow();
+	});
 
-		// Starting a new recording/transcription should dismiss Quick Ask.
-		listenTyped("recording-start", () => {
-			if (awaitingAnswerRef.current) return;
-			hideNow();
-		})
-			.then((fn) => {
-				unlistenRecordingStart = fn;
-			})
-			.catch(() => {
-				// ignore
-			});
-
-		listenTyped("pipeline-transcription-started", () => {
-			if (awaitingAnswerRef.current) return;
-			hideNow();
-		})
-			.then((fn) => {
-				unlistenTranscriptionStart = fn;
-			})
-			.catch(() => {
-				// ignore
-			});
-
-		return () => {
-			unlistenStarted?.();
-			unlistenAnswer?.();
-			unlistenDismiss?.();
-			unlistenRecordingStart?.();
-			unlistenTranscriptionStart?.();
-		};
-	}, [
-		dismiss,
-		hideNow,
-		resolveActiveProfileId,
-		resizeWindowToPanel,
-		setClickThrough,
-		win.setAlwaysOnTop,
-		win.setFocus,
-		win.show,
-	]);
-
+	useBackendEvent("pipeline-transcription-started", () => {
+		hideNow();
+	});
 	const effectiveDismissMode: QuickAskDismissMode = useMemo(() => {
 		if (!settings) return "manual";
 		const profiles = settings.rewrite_program_prompt_profiles ?? [];
@@ -565,7 +517,7 @@ export default function QuickAskApp() {
 			<div
 				className={`quick-ask-panel${closing ? " closing" : ""}`}
 				key={panelKey}
-				ref={panelRef}
+				ref={observePanel}
 			>
 				{phase !== "idle" ? (
 					<div className="quick-ask-question-row">
@@ -594,18 +546,19 @@ export default function QuickAskApp() {
 					<div className="quick-ask-loading">
 						<Loader size="sm" color="orange" />
 						<Text size="sm" c="dimmed">
-							Thinking…
+							{answer ? "Answering…" : "Thinking…"}
 						</Text>
 					</div>
 				) : null}
 
 				{phase === "error" ? (
 					<Text size="sm" c="red" className="quick-ask-error">
+						{answer ? "Answer incomplete: " : ""}
 						{error}
 					</Text>
 				) : null}
 
-				{phase === "ready" ? (
+				{answer ? (
 					<ScrollArea.Autosize
 						className={`quick-ask-answer${answerScrollable ? " quick-ask-answer--scrollable" : ""}`}
 						type="auto"
@@ -613,7 +566,11 @@ export default function QuickAskApp() {
 						mah={320}
 						onOverflowChange={setAnswerScrollable}
 					>
-						<div className="quick-ask-answer-md">
+						<div
+							className="quick-ask-answer-md"
+							dir="auto"
+							aria-busy={phase === "loading"}
+						>
 							<ReactMarkdown
 								remarkPlugins={[remarkGfm]}
 								components={{

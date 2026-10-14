@@ -14,7 +14,7 @@ use tauri::{AppHandle, Manager};
 use crate::clipboard_context;
 use crate::event_payloads::{
     QuickAskAnswerErrorPayload, QuickAskAnswerOkPayload, QuickAskAnswerPayload,
-    QuickAskStartedPayload,
+    QuickAskPartialPayload, QuickAskStartedPayload,
 };
 use crate::llm;
 use crate::pipeline::llm_provider_request::{
@@ -99,6 +99,13 @@ pub(crate) fn resolve_quick_ask_config(
 }
 
 pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
+    // A superseded STT completion must not claim the answer session or cancel its successor.
+    if let (Some(store), Some(id)) = (input.app.try_state::<RequestLogStore>(), input.request_id) {
+        if store.with_current_id(id, |_| ()).is_none() {
+            recording_finalization::end_ocr_session_for_request(input.pipeline, input.request_id);
+            return;
+        }
+    }
     let question = crate::sanitize_transcript(&input.result.stt_text)
         .unwrap_or_else(|| input.fallback_text.to_string())
         .trim()
@@ -110,11 +117,46 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
     }
 
     let quick_ask_config = resolve_quick_ask_config(input.app, input.profile_config);
+    let session = input.app.state::<quick_ask::QuickAskSessions>().begin(
+        input
+            .request_id
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        input.pipeline.get_cancel_token(),
+    );
+    let log_store = input
+        .app
+        .try_state::<RequestLogStore>()
+        .map(|store| store.for_request(&session.id));
+    let audio_secs = input
+        .pipeline
+        .clone_last_wav_bytes()
+        .as_deref()
+        .and_then(|wav| stats::wav_duration_secs(wav));
+    let active = || {
+        session.current()
+            && (input.request_id.is_none()
+                || log_store
+                    .as_ref()
+                    .is_none_or(|store| store.with_current(|_| ()).is_some()))
+    };
     let provider = quick_ask_config.provider.clone();
     let model = quick_ask_config.model.clone();
     let system_prompt = quick_ask_config.system_prompt.clone();
 
-    if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+    if !active() {
+        complete_quick_ask_answer(
+            input.app,
+            input.pipeline,
+            input.request_id,
+            stats::EventStatus::Cancelled,
+            log_store.as_ref(),
+            audio_secs,
+        );
+        return;
+    }
+
+    if let Some(log_store) = &log_store {
         log_store.with_current(|log| {
             log.kind = QuickActionKind::QuickAsk.request_kind();
             log.quick_ask_question = Some(question.clone());
@@ -135,6 +177,7 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
         input.app,
         quick_ask::EVENT_QUICK_ASK_STARTED,
         QuickAskStartedPayload {
+            request_id: Some(session.id.clone()),
             question: Some(question.clone()),
             provider: Some(provider.clone()),
             model: model.clone(),
@@ -161,11 +204,12 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
         &pipeline_config.llm_config,
         &pipeline_config.llm_api_keys,
         &pipeline_config.proxy_settings,
+        log_store.clone(),
     ) {
         Ok(provider) => provider,
         Err(e) => {
             let err = e.to_string();
-            if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+            if let Some(log_store) = &log_store {
                 log_store.with_current(|log| {
                     log.kind = QuickActionKind::QuickAsk.request_kind();
                     log.error(format!("Quick Ask failed: {}", err));
@@ -173,17 +217,20 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
                 });
             }
 
-            complete_current_request_with_cost(
+            complete_quick_ask_answer(
                 input.app,
                 input.pipeline,
                 input.request_id,
                 stats::EventStatus::Error,
+                log_store.as_ref(),
+                audio_secs,
             );
 
             quick_ask::emit_to_quick_ask(
                 input.app,
                 quick_ask::EVENT_QUICK_ASK_ANSWER,
                 QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                    request_id: Some(session.id.clone()),
                     ok: false,
                     error: err,
                 }),
@@ -192,74 +239,121 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
         }
     };
 
-    let request_context = context_collection::collect_quick_ask_context(
-        input.app,
-        input.probe_plan,
-        &quick_ask_config,
-    )
-    .await;
-    let selected_context_trimmed = request_context.selected_text_for_prompt();
-    let surrounding_context_trimmed = request_context.surrounding_text_for_prompt();
-    let clipboard_trimmed = request_context.clipboard_context_for_prompt();
-
-    let cap = 8_000usize;
-    let selected_context_capped =
-        clipboard_context::cap_optional_context_text_for_prompt(selected_context_trimmed, cap);
-    let surrounding_context_capped =
-        clipboard_context::cap_optional_context_text_for_prompt(surrounding_context_trimmed, cap);
-    let clipboard_context_capped =
-        clipboard_context::cap_optional_context_text_for_prompt(clipboard_trimmed, cap);
-
-    // This is the exact context text (if any) attached to the question and surfaced in logs/UI.
-    let quick_ask_context_text_for_log = selected_context_capped
-        .clone()
-        .or_else(|| surrounding_context_capped.clone());
-    let quick_ask_clipboard_context_for_log = clipboard_context_capped.clone();
-
-    let ocr_context = crate::sessions::ocr_usage::collect_ocr_context(
-        input.pipeline,
-        input.ocr_mode,
-        input.ocr_config,
-    )
-    .await;
-    let ocr_text = ocr_context.text().map(str::to_string);
-
-    record_quick_ask_ocr_start_context(input.app, &ocr_context);
-
-    let question_with_context = prompt_builders::build_quick_ask_user_message_with_context(
-        question.as_str(),
-        selected_context_capped.as_deref(),
-        surrounding_context_capped.as_deref(),
-        clipboard_context_capped.as_deref(),
-        ocr_text.as_deref(),
-    );
-
-    let question_with_context = if quick_ask_config.conversation_history_enabled {
-        prepend_quick_ask_history(
-            input.app,
-            question_with_context,
-            quick_ask_config.conversation_history_count,
-        )
-    } else {
-        question_with_context
+    let mut t0 = Instant::now();
+    let mut seq = 0;
+    let mut last_preview = None;
+    let mut preview = |text: &str| {
+        if active() && last_preview.is_none_or(|last: Instant| last.elapsed().as_millis() >= 50) {
+            seq += 1;
+            last_preview = Some(Instant::now());
+            quick_ask::emit_to_quick_ask(
+                input.app,
+                crate::events::EVENT_QUICK_ASK_PARTIAL,
+                QuickAskPartialPayload {
+                    request_id: session.id.clone(),
+                    seq,
+                    text: text.to_string(),
+                },
+            );
+        }
     };
+    // Cancellation owns context/OCR waiting as well as the provider request. Dropping this
+    // future cannot leave a detached answer task that dispatches after dismissal.
+    let operation = async {
+        let request_context = context_collection::collect_quick_ask_context(
+            input.app,
+            input.probe_plan,
+            &quick_ask_config,
+        )
+        .await;
+        let selected_context_trimmed = request_context.selected_text_for_prompt();
+        let surrounding_context_trimmed = request_context.surrounding_text_for_prompt();
+        let clipboard_trimmed = request_context.clipboard_context_for_prompt();
 
-    record_quick_ask_prompt_context(
-        input.app,
-        input.pipeline,
-        quick_ask_context_text_for_log,
-        quick_ask_clipboard_context_for_log,
-        selected_context_trimmed,
-        surrounding_context_trimmed,
-        clipboard_trimmed,
-        ocr_text.clone(),
-    );
+        let cap = 8_000usize;
+        let selected_context_capped =
+            clipboard_context::cap_optional_context_text_for_prompt(selected_context_trimmed, cap);
+        let surrounding_context_capped = clipboard_context::cap_optional_context_text_for_prompt(
+            surrounding_context_trimmed,
+            cap,
+        );
+        let clipboard_context_capped =
+            clipboard_context::cap_optional_context_text_for_prompt(clipboard_trimmed, cap);
 
-    let t0 = Instant::now();
-    match provider_impl
-        .complete(system_prompt.as_str(), question_with_context.as_str())
-        .await
-    {
+        // This is the exact context text (if any) attached to the question and surfaced in logs/UI.
+        let quick_ask_context_text_for_log = selected_context_capped
+            .clone()
+            .or_else(|| surrounding_context_capped.clone());
+        let quick_ask_clipboard_context_for_log = clipboard_context_capped.clone();
+
+        let ocr_context = crate::sessions::ocr_usage::collect_ocr_context(
+            input.pipeline,
+            input.ocr_mode,
+            input.ocr_config,
+        )
+        .await;
+        if !active() {
+            return Err(llm::LlmError::Api("Answer cancelled".into()));
+        }
+        let ocr_text = ocr_context.text().map(str::to_string);
+
+        record_quick_ask_ocr_start_context(log_store.as_ref(), &ocr_context);
+
+        let question_with_context = prompt_builders::build_quick_ask_user_message_with_context(
+            question.as_str(),
+            selected_context_capped.as_deref(),
+            surrounding_context_capped.as_deref(),
+            clipboard_context_capped.as_deref(),
+            ocr_text.as_deref(),
+        );
+
+        let question_with_context = if quick_ask_config.conversation_history_enabled {
+            prepend_quick_ask_history(
+                input.app,
+                question_with_context,
+                quick_ask_config.conversation_history_count,
+            )
+        } else {
+            question_with_context
+        };
+
+        record_quick_ask_prompt_context(
+            log_store.as_ref(),
+            input.pipeline,
+            quick_ask_context_text_for_log,
+            quick_ask_clipboard_context_for_log,
+            selected_context_trimmed,
+            surrounding_context_trimmed,
+            clipboard_trimmed,
+            ocr_text.clone(),
+        );
+
+        t0 = Instant::now();
+        provider_impl
+            .complete_streaming(
+                system_prompt.as_str(),
+                question_with_context.as_str(),
+                &mut preview,
+            )
+            .await
+    };
+    let answer = tokio::select! {
+        biased;
+        _ = session.cancel.cancelled() => Err(llm::LlmError::Api("Answer cancelled".into())),
+        result = operation => result,
+    };
+    if !active() {
+        complete_quick_ask_answer(
+            input.app,
+            input.pipeline,
+            input.request_id,
+            stats::EventStatus::Cancelled,
+            log_store.as_ref(),
+            audio_secs,
+        );
+        return;
+    }
+    match answer {
         Ok(answer) => {
             let answer = answer.trim().to_string();
             let duration_ms = t0.elapsed().as_millis() as u64;
@@ -268,35 +362,40 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
                 memory.push_turn(question.clone(), answer.clone());
             }
 
-            if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+            if let Some(log_store) = &log_store {
                 log_store.with_current(|log| {
                     log.kind = QuickActionKind::QuickAsk.request_kind();
                     log.quick_ask_answer = Some(answer.clone());
                     log.quick_ask_provider = Some(provider_impl.name().to_string());
                     log.quick_ask_model = Some(provider_impl.model().to_string());
                     log.quick_ask_duration_ms = Some(duration_ms);
-                    log.quick_ask_response_json = Some(json!({
+                    let mut response = log.llm_response_json.clone().unwrap_or_else(|| json!({}));
+                    response["result"] = json!({
                         "ok": true,
                         "answer": answer.clone(),
                         "provider_used": provider_impl.name(),
                         "model_used": provider_impl.model(),
                         "duration_ms": duration_ms,
-                    }));
+                    });
+                    log.quick_ask_response_json = Some(response);
                     log.complete_success();
                 });
             }
 
-            complete_current_request_with_cost(
+            complete_quick_ask_answer(
                 input.app,
                 input.pipeline,
                 input.request_id,
                 stats::EventStatus::Success,
+                log_store.as_ref(),
+                audio_secs,
             );
 
             quick_ask::emit_to_quick_ask(
                 input.app,
                 quick_ask::EVENT_QUICK_ASK_ANSWER,
                 QuickAskAnswerPayload::Ok(QuickAskAnswerOkPayload {
+                    request_id: Some(session.id.clone()),
                     ok: true,
                     answer,
                     provider_used: Some(provider_impl.name().to_string()),
@@ -304,13 +403,10 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
                     duration_ms: Some(duration_ms),
                 }),
             );
-
-            // Show the Quick Ask window only once we have something to display.
-            quick_ask::ensure_quick_ask_window_visible(input.app);
         }
         Err(e) => {
             let err = e.to_string();
-            if let Some(log_store) = input.app.try_state::<RequestLogStore>() {
+            if let Some(log_store) = &log_store {
                 log_store.with_current(|log| {
                     log.kind = QuickActionKind::QuickAsk.request_kind();
                     log.quick_ask_answer = None;
@@ -323,23 +419,46 @@ pub(crate) async fn answer_quick_ask(input: QuickAskExecution<'_>) {
                 });
             }
 
-            complete_current_request_with_cost(
+            complete_quick_ask_answer(
                 input.app,
                 input.pipeline,
                 input.request_id,
                 stats::EventStatus::Error,
+                log_store.as_ref(),
+                audio_secs,
             );
 
             quick_ask::emit_to_quick_ask(
                 input.app,
                 quick_ask::EVENT_QUICK_ASK_ANSWER,
                 QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+                    request_id: Some(session.id.clone()),
                     ok: false,
                     error: err,
                 }),
             );
         }
     }
+}
+
+fn complete_quick_ask_answer(
+    app: &AppHandle,
+    pipeline: &SharedPipeline,
+    request_id: Option<&str>,
+    status: stats::EventStatus,
+    log_store: Option<&RequestLogStore>,
+    audio_secs: Option<f64>,
+) {
+    if let Some(store) = log_store {
+        if matches!(status, stats::EventStatus::Cancelled) {
+            store.with_current(|log| log.complete_cancelled());
+        }
+        if audio_secs.is_some() {
+            stats::emit_cost_events_for_log_store(app, status, audio_secs, store);
+        }
+        store.complete_current();
+    }
+    recording_finalization::end_ocr_session_for_request(pipeline, request_id);
 }
 
 pub(crate) fn complete_quick_ask_empty_transcript_error(
@@ -363,6 +482,7 @@ pub(crate) fn complete_quick_ask_empty_transcript_error(
         app,
         quick_ask::EVENT_QUICK_ASK_STARTED,
         QuickAskStartedPayload {
+            request_id: request_id.map(str::to_string),
             question: Some(String::new()),
             provider: None,
             model: None,
@@ -373,6 +493,7 @@ pub(crate) fn complete_quick_ask_empty_transcript_error(
         app,
         quick_ask::EVENT_QUICK_ASK_ANSWER,
         QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
+            request_id: request_id.map(str::to_string),
             ok: false,
             error: "No transcript to answer (empty)".to_string(),
         }),
@@ -451,6 +572,7 @@ pub(crate) async fn try_quick_replace(
                 &pipeline_config.llm_config,
                 &pipeline_config.llm_api_keys,
                 &pipeline_config.proxy_settings,
+                None,
             ) {
                 Ok(provider_impl) => provider_impl,
                 Err(e) => {
@@ -527,10 +649,10 @@ pub(crate) async fn try_quick_replace(
 }
 
 fn record_quick_ask_ocr_start_context(
-    app: &AppHandle,
+    log_store: Option<&RequestLogStore>,
     ocr_context: &crate::sessions::ocr_usage::CollectedOcrContext,
 ) {
-    let Some(log_store) = app.try_state::<RequestLogStore>() else {
+    let Some(log_store) = log_store else {
         return;
     };
 
@@ -580,7 +702,7 @@ fn record_quick_ask_ocr_start_context(
 
 #[allow(clippy::too_many_arguments)]
 fn record_quick_ask_prompt_context(
-    app: &AppHandle,
+    log_store: Option<&RequestLogStore>,
     pipeline: &SharedPipeline,
     quick_ask_context_text_for_log: Option<String>,
     quick_ask_clipboard_context_for_log: Option<String>,
@@ -589,7 +711,7 @@ fn record_quick_ask_prompt_context(
     clipboard_trimmed: Option<&str>,
     ocr_text: Option<String>,
 ) {
-    let Some(log_store) = app.try_state::<RequestLogStore>() else {
+    let Some(log_store) = log_store else {
         return;
     };
 

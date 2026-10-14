@@ -94,6 +94,14 @@ struct FlowLlmProvider {
 
 #[async_trait]
 impl LlmProvider for FlowLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(&self, _system: &str, user: &str) -> Result<String, LlmError> {
         assert!(user.contains("raw transcript"));
         Ok("corrected transcript".into())
@@ -309,6 +317,14 @@ async fn routing_cancellation_never_rewrites_or_overwrites_the_new_log() {
 
 #[async_trait]
 impl crate::llm::LlmProvider for PanicLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(
         &self,
         _system_prompt: &str,

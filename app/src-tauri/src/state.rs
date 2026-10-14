@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(desktop)]
 use std::sync::Mutex;
 
@@ -227,6 +227,36 @@ impl Default for QuickAskProbe {
 pub struct TrayKeepAlive {
     #[cfg(desktop)]
     pub tray: Mutex<Option<tauri::tray::TrayIcon<tauri::Wry>>>,
+    pub(crate) refresh: TrayRefresh,
+}
+
+/// Coalesce refresh notifications without keeping a lock across native GUI
+/// dispatch. The final handoff handles a notification racing worker shutdown.
+#[derive(Default)]
+pub(crate) struct TrayRefresh {
+    dirty: std::sync::atomic::AtomicBool,
+    running: std::sync::atomic::AtomicBool,
+}
+impl TrayRefresh {
+    #[cfg(test)]
+    pub(crate) fn is_running_for_test(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+    pub(crate) fn request(&self) -> bool {
+        self.dirty.store(true, Ordering::SeqCst);
+        !self.running.swap(true, Ordering::SeqCst)
+    }
+    pub(crate) fn begin(&self) {
+        self.dirty.store(false, Ordering::SeqCst);
+    }
+    pub(crate) fn finish(&self) -> bool {
+        self.running.store(false, Ordering::SeqCst);
+        self.dirty.load(Ordering::SeqCst)
+            && self
+                .running
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+    }
 }
 
 /// Backend-managed microphone test meter.

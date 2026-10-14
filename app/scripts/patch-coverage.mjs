@@ -222,6 +222,13 @@ export function evaluatePatchCoverage(changed, coverage, sources = new Map()) {
 		if (!isCoverageSource(filePath)) continue;
 		const fileCoverage = coverage.get(filePath);
 		if (!fileCoverage) {
+			// Literal-only event metadata has no LLVM executable records. Any
+			// initializer expression, attribute, macro or function fails closed.
+			if (
+				filePath.endsWith(".rs") &&
+				literalOnlyRustMetadata(sources.get(filePath))
+			)
+				continue;
 			failures.push({ filePath, missingReport: true });
 			continue;
 		}
@@ -267,6 +274,15 @@ export function evaluatePatchCoverage(changed, coverage, sources = new Map()) {
 	}
 
 	return { failures, executableLines, metadataExceptions };
+}
+
+function literalOnlyRustMetadata(source) {
+	if (typeof source !== "string") return false;
+	return (
+		/^(?:\s+|\/\/[^\r\n]*(?:\r?\n|$)|(?:pub(?:\(crate\))?\s+)?const\s+[A-Z][A-Z0-9_]*\s*:\s*&(?:'static\s+)?str\s*=\s*"(?:[^"\\]|\\[^\r\n])*"\s*;)+$/u.test(
+			source,
+		) && /^\s*(?:pub(?:\(crate\))?\s+)?const\s+/mu.test(source)
+	);
 }
 
 // Exceptions are reviewed source snapshots, never file/folder exclusions. A
@@ -514,6 +530,17 @@ export function runPatchCoverageCli(argv = process.argv.slice(2)) {
 			}),
 		]);
 		const sources = new Map();
+		for (const filePath of changed.keys()) {
+			if (
+				isCoverageSource(filePath) &&
+				filePath.endsWith(".rs") &&
+				!coverage.has(filePath)
+			)
+				sources.set(
+					filePath,
+					readFileSync(path.join(REPO_ROOT, filePath), "utf8"),
+				);
+		}
 		for (const filePath of TAURI_METADATA_EXCEPTIONS.keys()) {
 			if (changed.has(filePath)) {
 				sources.set(

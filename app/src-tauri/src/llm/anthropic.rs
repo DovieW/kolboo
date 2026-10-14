@@ -198,6 +198,101 @@ struct ThinkingParam {
 
 #[async_trait]
 impl LlmProvider for AnthropicLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        use super::streaming::{self, Output};
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("anthropic".into()));
+        }
+        let thinking = self.effective_thinking();
+        let mut request = json!({"model":self.model,"max_tokens":thinking.as_ref().map_or(4096, |thinking| thinking.budget_tokens.saturating_add(4096)),"system":system_prompt,"messages":[{"role":"user","content":[{"type":"text","text":user_message}]}],"stream":true});
+        if let Some(thinking) = thinking {
+            request["thinking"] = json!(thinking);
+        }
+        let mut output = Output::default();
+        let mut usage = serde_json::Map::new();
+        let mut stopped = false;
+        streaming::read(
+            self.client
+                .post(&self.api_base_url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", API_VERSION)
+                .json(&request),
+            self.timeout,
+            true,
+            &mut |data| {
+                let value = streaming::json(data)?;
+                match value.get("type").and_then(serde_json::Value::as_str) {
+                    Some("message_start") => {
+                        usage.extend(streaming::usage(&value["message"]["usage"]));
+                    }
+                    Some("content_block_start")
+                        if value
+                            .pointer("/content_block/type")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("text") =>
+                    {
+                        output.push(
+                            value
+                                .pointer("/content_block/text")
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(""),
+                            notify,
+                        )?;
+                    }
+                    Some("content_block_delta")
+                        if value
+                            .pointer("/delta/type")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("text_delta") =>
+                    {
+                        output.push(
+                            value
+                                .pointer("/delta/text")
+                                .and_then(serde_json::Value::as_str)
+                                .ok_or_else(|| streaming::invalid("Missing answer delta"))?,
+                            notify,
+                        )?;
+                    }
+                    Some("message_delta") => {
+                        usage.extend(streaming::usage(&value["usage"]));
+                        if let Some(reason) = value
+                            .pointer("/delta/stop_reason")
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            if !matches!(reason, "end_turn" | "stop_sequence") {
+                                return Err(streaming::invalid(
+                                    "Provider stopped before completing the answer",
+                                ));
+                            }
+                            stopped = true;
+                        }
+                    }
+                    Some("message_stop") => {
+                        if !stopped {
+                            return Err(streaming::invalid("Provider did not finish the answer"));
+                        }
+                        output.usage = Some(json!({"usage":usage}));
+                        return Ok(true);
+                    }
+                    Some("error") => {
+                        return Err(streaming::invalid(
+                            "Model provider reported a streaming error",
+                        ))
+                    }
+                    _ => {}
+                }
+                Ok(false)
+            },
+        )
+        .await?;
+        output.finish(self.request_log_store.as_ref())
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey("anthropic".to_string()));

@@ -84,8 +84,8 @@ pub use event_payloads::{
     ConnectionStateChangedPayload, ConnectionStateEvent, EmptyEventPayload,
     OverlayAudioLevelPayload, OverlayOcrContextUnavailablePayload, PipelineErrorPayload,
     PipelineStateEvent, PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload,
-    QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskStartedPayload, SettingsChangedPayload,
-    SttPartialTranscriptPayload, SystemEvent,
+    QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskPartialPayload, QuickAskStartedPayload,
+    SettingsChangedPayload, SttPartialTranscriptPayload, SystemEvent,
 };
 
 pub use audio_capture::AudioCaptureDiagnostics;
@@ -1128,6 +1128,7 @@ pub fn run() {
         .plugin(automatic_updates::init())
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
+        .manage(sessions::quick_ask::QuickAskSessions::default())
         .manage(TrayKeepAlive::default())
         .manage(MicTestMeterState::default())
         .manage(commands::whisper::WhisperDownloadManager::default())
@@ -1196,6 +1197,7 @@ pub fn run() {
             commands::overlay::set_overlay_mode,
             commands::overlay::set_widget_position,
             commands::overlay::set_quick_ask_escape_enabled,
+            sessions::quick_ask::cancel_quick_ask,
             // Pipeline commands for all-in-app STT
             commands::recording::pipeline_start_recording,
             commands::recording::recording_computer_audio_available,

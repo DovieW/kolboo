@@ -16,6 +16,22 @@ use tokio_util::sync::CancellationToken;
 
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
+mod quick_ask;
+
+impl SharedPipeline {
+    pub(crate) fn set_runtime_state_for_native_test(&self, state: PipelineState) {
+        self.inner.lock().unwrap().state = state;
+    }
+    pub(crate) fn poison_runtime_for_native_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.inner.lock().unwrap();
+            panic!("synthetic interrupted runtime access");
+        }));
+    }
+    pub(crate) fn recover_runtime_for_native_test(&self) {
+        self.inner.clear_poison();
+    }
+}
 
 #[tokio::test]
 async fn meeting_uploads_receive_owned_job_context_and_completed_chunks_are_not_resubmitted() {
@@ -641,6 +657,7 @@ pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
             );
         }
         pipeline.update_config(original_config).unwrap();
+        quick_ask::native_answers(app).await;
     });
     window.close().unwrap();
 }
@@ -1203,6 +1220,14 @@ impl ConditionalOcrLlmProvider {
 
 #[async_trait]
 impl crate::llm::LlmProvider for MockLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(
         &self,
         _system_prompt: &str,
@@ -1228,6 +1253,14 @@ impl crate::llm::LlmProvider for MockLlmProvider {
 
 #[async_trait]
 impl crate::llm::LlmProvider for ConditionalOcrLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(
         &self,
         _system_prompt: &str,

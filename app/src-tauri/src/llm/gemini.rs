@@ -329,6 +329,87 @@ struct Candidate {
 
 #[async_trait]
 impl LlmProvider for GeminiLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        use super::streaming::{self, Output};
+        if self.api_key.trim().is_empty() {
+            return Err(LlmError::NoApiKey("gemini".into()));
+        }
+        let mut generation = json!({"maxOutputTokens":4096,"responseMimeType":"text/plain"});
+        if !self.model.contains("gemini-3") {
+            generation["temperature"] = 0.0.into();
+        }
+        if let Some(thinking) = self.effective_thinking_config() {
+            generation["thinkingConfig"] = json!(thinking);
+        }
+        let request = json!({"systemInstruction":{"parts":[{"text":system_prompt}]},"contents":[{"role":"user","parts":[{"text":user_message}]}],"generationConfig":generation});
+        let model = Self::normalize_model_name(&self.model);
+        let url = crate::http::join_base_url(
+            &self.api_base_url,
+            &format!("{model}:streamGenerateContent"),
+        );
+        let mut output = Output::default();
+        streaming::read(
+            self.client
+                .post(format!("{url}?alt=sse"))
+                .header("x-goog-api-key", &self.api_key)
+                .json(&request),
+            self.timeout,
+            true,
+            &mut |data| {
+                let value = streaming::json(data)?;
+                if value.get("error").is_some()
+                    || value.pointer("/promptFeedback/blockReason").is_some()
+                {
+                    return Err(streaming::invalid("Model provider rejected the answer"));
+                }
+                if let Some(usage) = value.get("usageMetadata") {
+                    output.usage = Some(json!({"usageMetadata":streaming::usage(usage)}));
+                }
+                if let Some(candidate) = value
+                    .get("candidates")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|candidates| candidates.first())
+                {
+                    if let Some(parts) = candidate
+                        .pointer("/content/parts")
+                        .and_then(serde_json::Value::as_array)
+                    {
+                        for part in parts {
+                            if part.get("thought").and_then(serde_json::Value::as_bool)
+                                != Some(true)
+                            {
+                                if let Some(text) =
+                                    part.get("text").and_then(serde_json::Value::as_str)
+                                {
+                                    output.push(text, notify)?;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(reason) = candidate
+                        .get("finishReason")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        if reason != "STOP" {
+                            return Err(streaming::invalid(
+                                "Provider stopped before completing the answer",
+                            ));
+                        }
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            },
+        )
+        .await?;
+        output.finish(self.request_log_store.as_ref())
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.trim().is_empty() {
             return Err(LlmError::NoApiKey("gemini".to_string()));
