@@ -90,6 +90,9 @@ pub(super) struct CaptureDispatch {
 }
 
 impl CaptureDispatch {
+    pub(super) fn fail_current(&self) {
+        self.fence.fail(self.fence.state.load(Ordering::SeqCst));
+    }
     pub(super) fn enqueue<T: Copy>(&self, data: &[T], convert: fn(T) -> f32) {
         let _callback = CountPermit::new(&self.fence.callbacks);
         let epoch = self.fence.state.load(Ordering::SeqCst);

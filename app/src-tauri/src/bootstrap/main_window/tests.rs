@@ -45,6 +45,7 @@ fn native_window_manager_integration() {
         "Run only through the isolated native-window test runner"
     );
     crate::text::selection_probe::tests::native_selection_probe_copy_transaction();
+    crate::audio_capture::native_inputs();
     let history_directory = tempfile::tempdir().unwrap();
     let (native_context, updater_server) = crate::automatic_updates::tests::native_context();
     let mut app = tauri::Builder::<tauri::Wry>::default()

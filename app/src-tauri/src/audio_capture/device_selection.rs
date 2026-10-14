@@ -8,9 +8,36 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use cpal::traits::{DeviceTrait, HostTrait};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+#[cfg(not(target_os = "linux"))]
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+pub(super) enum InputDevice {
+    Cpal(cpal::Device),
+    #[cfg(target_os = "linux")]
+    Pulse(String),
+}
+
+impl InputDevice {
+    pub(super) fn default_input_config(
+        &self,
+    ) -> Result<cpal::SupportedStreamConfig, cpal::DefaultStreamConfigError> {
+        match self {
+            Self::Cpal(device) => device.default_input_config(),
+            #[cfg(target_os = "linux")]
+            Self::Pulse(_) => Ok(cpal::SupportedStreamConfig::new(
+                1,
+                48000,
+                cpal::SupportedBufferSize::Unknown,
+                cpal::SampleFormat::F32,
+            )),
+        }
+    }
+}
 
 const MIC_DEVICE_ID_PREFIX: &str = "mic:v1:";
+#[cfg(target_os = "linux")]
+const ALSA_ID_PREFIX: &str = "mic:alsa:v1:";
 
 /// Public device descriptor for the frontend.
 ///
@@ -22,6 +49,7 @@ pub struct AudioInputDeviceInfo {
     pub name: String,
 }
 
+#[cfg(any(not(target_os = "linux"), test))]
 fn encode_mic_device_id(name: &str, ordinal_for_name: usize) -> String {
     // Base64url without padding so the token remains URL/UI friendly.
     let name_b64 = URL_SAFE_NO_PAD.encode(name.as_bytes());
@@ -88,6 +116,34 @@ pub(crate) fn select_input_device_index_from_names(
 pub(super) fn select_input_device_from_host(
     host: &cpal::Host,
     selection: Option<&str>,
+) -> Result<InputDevice, super::AudioCaptureError> {
+    #[cfg(target_os = "linux")]
+    if let Some(id) = selection.filter(|id| id.starts_with(super::linux_input::ID_PREFIX)) {
+        return super::linux_input::source_name(id)
+            .map(InputDevice::Pulse)
+            .ok_or(super::AudioCaptureError::NoInputDevice);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(id) = selection.and_then(|id| id.strip_prefix(ALSA_ID_PREFIX)) {
+        let id = URL_SAFE_NO_PAD
+            .decode(id)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|id| id.parse::<cpal::DeviceId>().ok());
+        return id
+            .and_then(|id| host.device_by_id(&id))
+            .map(InputDevice::Cpal)
+            .ok_or(super::AudioCaptureError::NoInputDevice);
+    }
+    select_legacy_input_device_from_host(host, selection)
+        .or_else(|| host.default_input_device())
+        .map(InputDevice::Cpal)
+        .ok_or(super::AudioCaptureError::NoInputDevice)
+}
+
+fn select_legacy_input_device_from_host(
+    host: &cpal::Host,
+    selection: Option<&str>,
 ) -> Option<cpal::Device> {
     let Ok(devices) = host.input_devices() else {
         return None;
@@ -131,42 +187,116 @@ pub fn list_input_devices() -> Vec<String> {
 
 /// Get the list of available input devices, with unique IDs suitable for UI option values.
 ///
-/// The ID format is `mic:v1:<base64url(name)>:<ordinal>` where ordinal is the 0-based
-/// occurrence index for that exact name in the CPAL enumeration order.
+/// Linux uses sound-server source IDs or canonical ALSA route IDs; other
+/// platforms retain legacy `mic:v1:<base64url(name)>:<ordinal>` selections.
 pub fn list_input_devices_v2() -> Vec<AudioInputDeviceInfo> {
-    let host = cpal::default_host();
+    #[cfg(target_os = "linux")]
+    let server_devices = super::linux_input::list_devices();
+    #[cfg(not(target_os = "linux"))]
+    let server_devices = None;
+    input_device_options(&cpal::default_host(), server_devices)
+}
 
+pub(super) fn input_device_options(
+    host: &cpal::Host,
+    server_devices: Option<Vec<AudioInputDeviceInfo>>,
+) -> Vec<AudioInputDeviceInfo> {
+    if let Some(devices) = server_devices {
+        return devices;
+    }
     let Ok(devices) = host.input_devices() else {
         return Vec::new();
     };
 
-    let mut name_ordinals: HashMap<String, usize> = HashMap::new();
-    let mut out: Vec<AudioInputDeviceInfo> = Vec::new();
-
-    for d in devices {
-        let Ok(desc) = d.description() else { continue };
-        let name = desc.to_string();
-        let ordinal = name_ordinals.get(&name).copied().unwrap_or(0);
-        name_ordinals.insert(name.clone(), ordinal.saturating_add(1));
-
-        out.push(AudioInputDeviceInfo {
-            id: encode_mic_device_id(&name, ordinal),
-            name,
-        });
+    #[cfg(target_os = "linux")]
+    {
+        alsa_fallback_options(
+            devices
+                .filter_map(|device| {
+                    Some((
+                        device.id().ok()?.to_string(),
+                        device.description().ok()?.to_string(),
+                    ))
+                })
+                .collect(),
+        )
     }
 
-    // Extra defensive: ensure uniqueness even if encoding logic changes.
-    // (Should never trigger, but guarantees the UI can't crash.)
-    let mut seen_ids: HashMap<String, usize> = HashMap::new();
-    for device in &mut out {
-        let n = seen_ids.get(&device.id).copied().unwrap_or(0);
-        if n > 0 {
-            device.id = format!("{}:dup{}", device.id, n);
+    #[cfg(not(target_os = "linux"))]
+    {
+        let mut name_ordinals: HashMap<String, usize> = HashMap::new();
+        let mut out: Vec<AudioInputDeviceInfo> = Vec::new();
+
+        for d in devices {
+            let Ok(desc) = d.description() else { continue };
+            let name = desc.to_string();
+            let ordinal = name_ordinals.get(&name).copied().unwrap_or(0);
+            name_ordinals.insert(name.clone(), ordinal.saturating_add(1));
+
+            out.push(AudioInputDeviceInfo {
+                id: encode_mic_device_id(&name, ordinal),
+                name,
+            });
         }
-        seen_ids.insert(device.id.clone(), n.saturating_add(1));
-    }
 
-    out
+        // Extra defensive: ensure uniqueness even if encoding logic changes.
+        // (Should never trigger, but guarantees the UI can't crash.)
+        let mut seen_ids: HashMap<String, usize> = HashMap::new();
+        for device in &mut out {
+            let n = seen_ids.get(&device.id).copied().unwrap_or(0);
+            if n > 0 {
+                device.id = format!("{}:dup{}", device.id, n);
+            }
+            seen_ids.insert(device.id.clone(), n.saturating_add(1));
+        }
+
+        out
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn alsa_fallback_options(devices: Vec<(String, String)>) -> Vec<AudioInputDeviceInfo> {
+    let mut seen = HashSet::new();
+    devices
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let (_, pcm) = id.split_once(':')?;
+            let route = pcm.split(':').next()?;
+            // CPAL enumerates hw + plughw + hints for the same endpoints. Keep the
+            // converting physical route and intentional user-defined PCM names.
+            if matches!(
+                route,
+                "null"
+                    | "default"
+                    | "sysdefault"
+                    | "pulse"
+                    | "pipewire"
+                    | "hw"
+                    | "front"
+                    | "rear"
+                    | "center_lfe"
+                    | "side"
+                    | "surround21"
+                    | "surround40"
+                    | "surround41"
+                    | "surround50"
+                    | "surround51"
+                    | "surround71"
+                    | "iec958"
+                    | "hdmi"
+                    | "dmix"
+                    | "dsnoop"
+                    | "usbstream"
+            ) || !seen.insert(id.clone())
+            {
+                return None;
+            }
+            Some(AudioInputDeviceInfo {
+                id: format!("{ALSA_ID_PREFIX}{}", URL_SAFE_NO_PAD.encode(id.as_bytes())),
+                name: format!("{name} · {pcm}"),
+            })
+        })
+        .collect()
 }
 
 /// Get information about the default input device.
@@ -182,6 +312,43 @@ pub fn get_default_input_device_info() -> Option<(String, u32, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_only_fallback_excludes_aliases_without_merging_distinct_ports() {
+        let candidates = [
+            ("alsa:null", "Discard"),
+            ("alsa:default", "Default"),
+            ("alsa:pipewire", "PipeWire"),
+            ("alsa:pulse", "Pulse"),
+            ("alsa:hw:CARD=1,DEV=0", "Built-in"),
+            ("alsa:dsnoop:CARD=1,DEV=0", "Built-in"),
+            ("alsa:plughw:CARD=1,DEV=0", "Built-in"),
+            ("alsa:plughw:CARD=1,DEV=6", "Built-in"),
+            ("alsa:plughw:CARD=2,DEV=0", "USB"),
+            ("alsa:plughw:CARD=2,DEV=0", "Duplicate"),
+            ("alsa:my_custom_microphone", "Virtual microphone"),
+            ("not-an-id", "Malformed"),
+        ];
+        let devices = alsa_fallback_options(
+            candidates
+                .into_iter()
+                .map(|(id, name)| (id.into(), name.into()))
+                .collect(),
+        );
+        assert_eq!(devices.len(), 4);
+        assert_ne!(devices[0].id, devices[1].id);
+        assert!(devices[3].name.contains("Virtual microphone"));
+        assert_eq!(
+            String::from_utf8(
+                URL_SAFE_NO_PAD
+                    .decode(devices[0].id.strip_prefix(ALSA_ID_PREFIX).unwrap())
+                    .unwrap()
+            )
+            .unwrap(),
+            "alsa:plughw:CARD=1,DEV=0"
+        );
+    }
 
     #[test]
     fn mic_device_id_roundtrips_duplicate_ordinals() {

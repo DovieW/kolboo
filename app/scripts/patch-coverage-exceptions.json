@@ -390,20 +390,6 @@
 		]
 	},
 	{
-		"filePath": "app/src-tauri/src/audio_capture.rs",
-		"reason": "Explicitly approved 2026-10-12: only forwarding the owned CaptureDispatch at two cold native microphone-watchdog rebuild/rebind calls is exempt. F32/I16/U16 callbacks, unsupported-format startup cleanup, capture/VAD epoch ownership, queue failure and worker shutdown execute in deterministic and isolated null-PCM tests. No callback, provider protocol or frontend implementation is waived; real hot-plug/stall recovery remains native acceptance.",
-		"evidence": [
-			"app/src-tauri/src/audio_capture/dispatch.rs",
-			"app/src-tauri/src/audio_capture.rs",
-			"app/src-tauri/src/bootstrap/main_window/tests.rs",
-			"docs/Dev Docs/TESTING.md"
-		],
-		"lines": [2117, 2163],
-		"functions": [],
-		"instantiations": [],
-		"sha256": "1ec0992acbfbd31d15b27108bd3c44e058372cc7f9f73675a6cfc386d3d5dc86"
-	},
-	{
 		"filePath": "app/src-tauri/src/stt/mod.rs",
 		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after adding cfg(test) to the fixture-only File variant: only the same 21 named, unused compiler-generated default-method/vtable copies for cfg(test) fixture types are exempt. Definitions shifted by three lines; names and scope are unchanged. The shared upload and credential-renewal definitions and every real adapter's changed executable code are measured. Exact record names prevent a new untested production adapter instance from inheriting this waiver; a compiler/name change requires review.",
 		"evidence": [

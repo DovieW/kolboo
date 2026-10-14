@@ -304,9 +304,18 @@ timeouts name the operation so a geometry failure is diagnosable in CI logs.
 On Ubuntu/Kubuntu install the optional acceptance prerequisites:
 
 ```sh
-sudo apt-get install xvfb openbox x11-utils xauth keyutils
+sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils
 pnpm cargo:test:window-native
 ```
+
+The fixture also starts a private PulseAudio server with generated-silence
+inputs and an output-monitor decoy. It verifies source filtering, exact native
+source selection, channel/rate negotiation, Hot Mic switching, and recovery
+from an injected stream-construction failure. All capture uses those generated
+sources or ALSA null PCM; no operator microphone is opened. The capture recovery
+test injects only the native stream factory and monotonic origin, not the
+recovery state machine. The former two-line watchdog coverage exception is no
+longer needed.
 
 Coverage fails rather than silently skipping this boundary when its prerequisites
 or local unprivileged user/network namespaces are unavailable. Failed-run artifacts remain

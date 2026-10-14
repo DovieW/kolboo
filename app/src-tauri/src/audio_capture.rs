@@ -7,7 +7,9 @@
 
 use crate::stt::streaming::StreamingAudioSender;
 use crate::vad::{VadConfig, VadEvent, VadFrameProcessor};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(test)]
+use cpal::traits::HostTrait;
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::SampleFormat;
 use crossbeam_queue::ArrayQueue;
 use hound::{WavSpec, WavWriter};
@@ -18,13 +20,18 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 pub mod computer_audio;
 mod device_selection;
 mod dispatch;
+#[cfg(target_os = "linux")]
+mod linux_input;
 use dispatch::{
     append_recorded_chunk, normalize_i16, normalize_u16, CaptureDispatch, CaptureFence,
 };
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use linux_input::tests::native_inputs;
 pub mod journal;
 mod meters;
 mod preprocessing;
@@ -47,7 +54,7 @@ pub use meters::{
 #[allow(dead_code)]
 pub const WAVEFORM_BINS: usize = meters::WAVEFORM_BINS;
 
-use device_selection::select_input_device_from_host;
+use device_selection::{select_input_device_from_host, InputDevice};
 use meters::{compute_rms_peak, detect_speech_presence, AudioLevelMeter, AudioWaveformMeter};
 use preprocessing::{
     apply_agc, apply_highpass_dc_block, apply_light_noise_suppression,
@@ -856,6 +863,7 @@ pub struct AudioCapture {
     buffer: Arc<StdMutex<AudioBuffer>>,
     pre_roll: Arc<StdMutex<RollingBuffer>>,
     capture_handle: Option<CaptureHandle>,
+    stream_device_name: Option<String>,
     // An unclean recovery-worker shutdown must not reuse its buffer for a new session.
     recovery_shutdown_failed: bool,
     sample_rate: u32,
@@ -886,6 +894,7 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            stream_device_name: None,
             recovery_shutdown_failed: false,
             computer_audio_enabled: false,
             computer_capture: None,
@@ -910,6 +919,7 @@ impl AudioCapture {
             buffer: Arc::new(StdMutex::new(AudioBuffer::new(44100, 1, 300.0))),
             pre_roll: Arc::new(StdMutex::new(RollingBuffer::new(0))),
             capture_handle: None,
+            stream_device_name: None,
             recovery_shutdown_failed: false,
             computer_audio_enabled: false,
             computer_capture: None,
@@ -1114,6 +1124,22 @@ impl AudioCapture {
         &mut self,
         input_device_name: Option<&str>,
     ) -> Result<(), AudioCaptureError> {
+        let selected = input_device_name
+            .map(str::trim)
+            .filter(|id| !id.is_empty() && *id != "default");
+        if self.capture_handle.is_some()
+            && self.stream_device_name.as_deref() != selected
+            && !self.recording_active.load(Ordering::Relaxed)
+        {
+            self.stop();
+        }
+        if self
+            .capture_handle
+            .as_ref()
+            .is_some_and(|handle| handle.thread_handle.is_finished())
+        {
+            self.stop();
+        }
         if self.capture_handle.is_some() {
             // Stream already running; ensure pre-roll buffer capacity matches current config.
             let (sr, ch) = self
@@ -1148,9 +1174,11 @@ impl AudioCapture {
 
         let host = cpal::default_host();
 
-        let device = select_input_device_from_host(&host, input_device_name)
-            .or_else(|| host.default_input_device())
-            .ok_or(AudioCaptureError::NoInputDevice)?;
+        let device = select_input_device_from_host(&host, input_device_name)?;
+        self.stream_device_name = input_device_name
+            .map(str::trim)
+            .filter(|id| !id.is_empty() && *id != "default")
+            .map(str::to_owned);
 
         let config = device
             .default_input_config()
@@ -1373,6 +1401,7 @@ impl AudioCapture {
 
     /// Stop recording without returning audio data
     pub fn stop(&mut self) {
+        self.stream_device_name = None;
         self.capture_fence.stop();
         self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
@@ -1682,7 +1711,7 @@ impl Drop for AudioCapture {
 
 struct CaptureThreadArgs {
     capture_fence: Arc<CaptureFence>,
-    device: cpal::Device,
+    device: InputDevice,
     config: cpal::StreamConfig,
     sample_format: SampleFormat,
     buffer: Arc<StdMutex<AudioBuffer>>,
@@ -1696,6 +1725,34 @@ struct CaptureThreadArgs {
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
     desired_device_name: Arc<StdMutex<Option<String>>>,
+}
+
+enum InputStream {
+    Cpal(cpal::Stream),
+    #[cfg(target_os = "linux")]
+    Pulse(linux_input::Capture),
+}
+
+impl InputStream {
+    fn play(&self) -> Result<(), cpal::PlayStreamError> {
+        match self {
+            Self::Cpal(stream) => stream.play(),
+            #[cfg(target_os = "linux")]
+            Self::Pulse(_) => Ok(()), // The owned helper starts recording on spawn.
+        }
+    }
+
+    fn check(&self) -> Result<(), AudioCaptureError> {
+        #[cfg(target_os = "linux")]
+        if let Self::Pulse(capture) = self {
+            if capture.is_finished() {
+                return Err(AudioCaptureError::StreamStart(
+                    "Linux microphone disconnected or its sound server stopped".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 // Native stream construction/play can fail after these workers have started.
@@ -1771,9 +1828,128 @@ fn forward_vad_events(
     }
 }
 
+fn stream_error_handler(dispatch: CaptureDispatch) -> impl FnMut(cpal::StreamError) {
+    move |err| {
+        dispatch.fail_current();
+        log::error!("Audio stream error: {}", err);
+    }
+}
+
+fn stream_build_error(err: cpal::BuildStreamError) -> AudioCaptureError {
+    AudioCaptureError::StreamBuild(err.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_stream(
+    device: &InputDevice,
+    config: &cpal::StreamConfig,
+    sample_format: SampleFormat,
+    start: Instant,
+    last_callback_ms: Arc<AtomicU64>,
+    dispatch: &CaptureDispatch,
+) -> Result<InputStream, AudioCaptureError> {
+    let device = match device {
+        InputDevice::Cpal(device) => device,
+        #[cfg(target_os = "linux")]
+        InputDevice::Pulse(source) => {
+            return linux_input::Capture::start(
+                source,
+                config,
+                dispatch.clone(),
+                start,
+                last_callback_ms,
+            )
+            .map(InputStream::Pulse)
+        }
+    };
+    match sample_format {
+        SampleFormat::F32 => {
+            let last_callback_ms = last_callback_ms.clone();
+            let error_handler = stream_error_handler(dispatch.clone());
+            let dispatch = dispatch.clone();
+
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms
+                            .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        dispatch.enqueue(data, std::convert::identity);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(stream_build_error)
+        }
+        SampleFormat::I16 => {
+            let last_callback_ms = last_callback_ms.clone();
+            let error_handler = stream_error_handler(dispatch.clone());
+            let dispatch = dispatch.clone();
+
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms
+                            .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        dispatch.enqueue(data, normalize_i16);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(stream_build_error)
+        }
+        SampleFormat::U16 => {
+            let last_callback_ms = last_callback_ms.clone();
+            let error_handler = stream_error_handler(dispatch.clone());
+            let dispatch = dispatch.clone();
+
+            device
+                .build_input_stream(
+                    config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        last_callback_ms
+                            .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        dispatch.enqueue(data, normalize_u16);
+                    },
+                    error_handler,
+                    None,
+                )
+                .map_err(stream_build_error)
+        }
+        _ => Err(AudioCaptureError::DeviceConfig(format!(
+            "Unsupported sample format: {:?}",
+            sample_format
+        ))),
+    }
+    .map(InputStream::Cpal)
+}
+
 /// Run the audio capture in a dedicated thread
 fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> {
-    use std::time::{Duration, Instant};
+    run_capture_thread_with_builder(args, std::time::Instant::now(), build_stream)
+}
+
+// Keep native stream creation at one boundary; recovery owns its state machine.
+fn run_capture_thread_with_builder<F>(
+    args: CaptureThreadArgs,
+    start: std::time::Instant,
+    mut build_stream: F,
+) -> Result<(), AudioCaptureError>
+where
+    F: FnMut(
+        &InputDevice,
+        &cpal::StreamConfig,
+        SampleFormat,
+        std::time::Instant,
+        Arc<AtomicU64>,
+        &CaptureDispatch,
+    ) -> Result<InputStream, AudioCaptureError>,
+{
+    use std::time::Duration;
 
     let CaptureThreadArgs {
         capture_fence,
@@ -1795,12 +1971,8 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     let sample_rate = config.sample_rate;
 
     // Used for watchdog timing (monotonic).
-    let start = Instant::now();
-    let last_callback_ms = Arc::new(AtomicU64::new(0));
 
-    fn stream_err(err: cpal::StreamError) {
-        log::error!("Audio stream error: {}", err);
-    }
+    let last_callback_ms = Arc::new(AtomicU64::new(0));
 
     // Channel + pool for passing samples to the VAD processing thread.
     // The pool avoids per-callback allocations; the callback takes a Vec from the pool,
@@ -1987,77 +2159,6 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
         vad_sender: Some(vad_samples_tx),
     };
 
-    #[allow(clippy::too_many_arguments)]
-    fn build_stream(
-        device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        sample_format: SampleFormat,
-        start: Instant,
-        last_callback_ms: Arc<AtomicU64>,
-        dispatch: &CaptureDispatch,
-    ) -> Result<cpal::Stream, AudioCaptureError> {
-        match sample_format {
-            SampleFormat::F32 => {
-                let last_callback_ms = last_callback_ms.clone();
-                let dispatch = dispatch.clone();
-
-                device
-                    .build_input_stream(
-                        config,
-                        move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                            last_callback_ms
-                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
-
-                            dispatch.enqueue(data, std::convert::identity);
-                        },
-                        stream_err,
-                        None,
-                    )
-                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
-            }
-            SampleFormat::I16 => {
-                let last_callback_ms = last_callback_ms.clone();
-                let dispatch = dispatch.clone();
-
-                device
-                    .build_input_stream(
-                        config,
-                        move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                            last_callback_ms
-                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
-
-                            dispatch.enqueue(data, normalize_i16);
-                        },
-                        stream_err,
-                        None,
-                    )
-                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
-            }
-            SampleFormat::U16 => {
-                let last_callback_ms = last_callback_ms.clone();
-                let dispatch = dispatch.clone();
-
-                device
-                    .build_input_stream(
-                        config,
-                        move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                            last_callback_ms
-                                .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
-
-                            dispatch.enqueue(data, normalize_u16);
-                        },
-                        stream_err,
-                        None,
-                    )
-                    .map_err(|e| AudioCaptureError::StreamBuild(e.to_string()))
-            }
-            _ => Err(AudioCaptureError::DeviceConfig(format!(
-                "Unsupported sample format: {:?}",
-                sample_format
-            ))),
-        }
-    }
-
     let mut stream = build_stream(
         &device,
         &config,
@@ -2079,6 +2180,7 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
             Ok(CaptureCommand::Stop) => break,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                stream.check()?;
                 // Watchdog: if we're idle and callbacks have stalled, attempt to restart.
                 if !auto_recover_enabled.load(Ordering::Relaxed) {
                     continue;
@@ -2138,9 +2240,8 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
                 // Optional: try rebinding to the desired/default device using the same config.
                 let maybe_name = desired_device_name.lock().ok().and_then(|n| n.clone());
                 let host = cpal::default_host();
-                let rebound = select_input_device_from_host(&host, maybe_name.as_deref())
-                    .or_else(|| host.default_input_device());
-                if let Some(new_device) = rebound {
+                let rebound = select_input_device_from_host(&host, maybe_name.as_deref());
+                if let Ok(new_device) = rebound {
                     device = new_device;
                     if let Ok(mut buf) = buffer.lock() {
                         buf.set_format(config.sample_rate, config.channels);
@@ -2236,9 +2337,11 @@ pub(crate) fn native_null_pcm_callbacks() {
             event_rx,
             thread_handle: thread::spawn(move || {
                 run_capture_thread(CaptureThreadArgs {
-                    device: cpal::default_host()
-                        .default_input_device()
-                        .expect("isolated null PCM"),
+                    device: InputDevice::Cpal(
+                        cpal::default_host()
+                            .default_input_device()
+                            .expect("isolated null PCM"),
+                    ),
                     config: cpal::StreamConfig {
                         channels: 1,
                         sample_rate: 16000,
@@ -2494,6 +2597,7 @@ mod tests {
     fn test_set_capture_behavior_enabling_hot_mic_reuses_running_stream_and_resizes_pre_roll() {
         let mut capture = AudioCapture::new();
         let (_event_tx, _stopped) = attach_running_capture(&mut capture);
+        capture.stream_device_name = Some("Built-in Mic".to_string());
         set_capture_format_for_tests(&mut capture, 1000, 2);
         if let Ok(mut pre_roll) = capture.pre_roll.lock() {
             pre_roll.set_capacity(10);

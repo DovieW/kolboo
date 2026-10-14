@@ -38,10 +38,13 @@ if (!inside) {
 		"unshare",
 		"keyctl",
 		"python3",
+		"pulseaudio",
+		"pactl",
+		"parec",
 	]) {
 		if (!commandExists(tool, env)) {
 			console.error(
-				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils",
+				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils",
 			);
 			process.exit(1);
 		}
@@ -52,7 +55,7 @@ if (!inside) {
 	// Native callback tests use ALSA's null PCM, never the operator's microphone.
 	writeFileSync(
 		path.join(directory, "asound.conf"),
-		"pcm.!default { type null }\n",
+		"ctl.hw { @args [ CARD ] @args.CARD { type string default 0 } type hw card $CARD }\npcm.!default { type null }\npcm.kolboo_alsa_fixture { type null hint { show on description KolbooTestALSA ioid Input } }\n",
 	);
 	let namespaceRunner = ["unshare", "--user", "--map-current-user", "--"];
 	if (env.KOLBOO_NATIVE_USER_NAMESPACE_RUNNER) {
@@ -102,6 +105,7 @@ if (!inside) {
 				KOLBOO_NATIVE_WINDOW_TEST: "1",
 				KOLBOO_NATIVE_WINDOW_DIRECTORY: directory,
 				ALSA_CONFIG_PATH: path.join(directory, "asound.conf"),
+				PULSE_SERVER: `unix:${path.join(directory, "runtime", "pulse-test")}`,
 				NO_AT_BRIDGE: "1",
 				GDK_BACKEND: "x11",
 				WINIT_UNIX_BACKEND: "x11",
@@ -143,7 +147,28 @@ const manager = spawn("openbox", ["--sm-disable"], {
 	env,
 	stdio: ["ignore", "ignore", "inherit"],
 });
+const pulse = spawn(
+	"pulseaudio",
+	[
+		"--daemonize=no",
+		"--use-pid-file=no",
+		"--exit-idle-time=-1",
+		"--disable-shm=yes",
+		"-n",
+		`--load=module-native-protocol-unix socket=${path.join(env.XDG_RUNTIME_DIR, "pulse-test")} auth-anonymous=1`,
+		"--load=module-null-source source_name=kolboo_test_a description=KolbooTestA",
+		"--load=module-null-source source_name=kolboo_test_b description=KolbooTestB",
+		"--load=module-null-sink sink_name=kolboo_test_output",
+	],
+	{ env, stdio: ["ignore", "ignore", "inherit"] },
+);
 try {
+	const pulseDeadline = Date.now() + 10000;
+	while (spawnSync("pactl", ["info"], { env, stdio: "ignore" }).status !== 0) {
+		if (pulse.exitCode !== null || Date.now() >= pulseDeadline)
+			throw new Error("Isolated sound server did not start");
+		await new Promise((resolve) => setTimeout(resolve, 30));
+	}
 	const deadline = Date.now() + 10000;
 	for (;;) {
 		const probe = spawnSync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"], {
@@ -268,5 +293,6 @@ try {
 		}
 	}
 } finally {
+	pulse.kill("SIGTERM");
 	manager.kill("SIGTERM");
 }

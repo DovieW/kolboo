@@ -8,6 +8,22 @@ import {
 } from "./audioDevices";
 
 describe("audioDevices read model", () => {
+	it.each(["mic:pulse:v1:c291cmNl", "mic:alsa:v1:YWxzYTpwbHVnaHc"])(
+		"keeps disconnected Linux inputs readable without exposing routing IDs: %s",
+		(id) => {
+			expect(decodeMicDeviceIdName(id)).toBe(
+				"Previously selected Linux microphone",
+			);
+			const missing = buildMicSelectorModel({
+				devices: [],
+				defaultDeviceName: "Default",
+				storedMicId: id,
+			});
+			expect(missing.missingSelected?.label).toBe(
+				"Missing microphone: Previously selected Linux microphone",
+			);
+		},
+	);
 	it("disambiguates duplicate device names", () => {
 		const model = buildMicSelectorModel({
 			devices: [
