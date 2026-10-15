@@ -245,6 +245,10 @@ Verification on 2026-10-15:
   marked reauthentication required; a fresh user login remains necessary.
 - This verifies handled-error ingestion, not development email notification,
   fresh user login, or native Windows/macOS behavior.
+- Ingested user ID, email, username and IP fields were empty. Sentry nevertheless
+  attached approximate country/city/region metadata server-side. Client-side
+  scrubbing alone is therefore not proof of anonymous ingestion. Project-level
+  location scrubbing was not changed by this desktop fix.
 
 Verification on 2026-09-24:
 
