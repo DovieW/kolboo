@@ -10,7 +10,6 @@ pub(crate) struct IvritAiSttProvider {
     pub client: reqwest::Client,
     pub gateway: String,
     pub token: String,
-    pub language: Option<String>,
     pub prompt: Option<String>,
 }
 
@@ -42,7 +41,9 @@ impl SttProvider for IvritAiSttProvider {
             audio,
             MODEL,
             self.prompt.as_deref(),
-            self.language.as_deref(),
+            // Selecting this Hebrew-only model determines its language. Never
+            // forward an inherited multilingual-model hint or an old snapshot.
+            Some("he"),
             None,
             |request| {
                 openai_compat::with_managed_selection(

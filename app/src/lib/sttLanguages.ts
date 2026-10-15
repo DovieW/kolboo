@@ -19,6 +19,19 @@ export const STT_LANGUAGE_VALUES = [
 
 export type SttLanguageValue = (typeof STT_LANGUAGE_VALUES)[number];
 
+/** A monolingual model owns its language; other models retain the saved hint. */
+export function fixedSttLanguage(
+	provider?: string | null,
+	model?: string | null,
+): "he" | null {
+	return provider === "ivritai" && model === "ivrit-ai/whisper-large-v3-turbo"
+		? "he"
+		: null;
+}
+
+export const FIXED_HEBREW_NOTICE =
+	"Hebrew is automatic for this model. Your language preference for other models is unchanged.";
+
 export const STT_LANGUAGE_OPTIONS: Array<{
 	value: SttLanguageValue;
 	label: string;

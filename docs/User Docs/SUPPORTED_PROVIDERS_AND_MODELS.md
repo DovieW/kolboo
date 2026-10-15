@@ -34,9 +34,13 @@ Notes:
 When published by your Kolboo service, **ivritAI Hebrew Turbo** appears under
 **Kolboo Managed** for dictation, imported files, and meetings. Its provider ID
 is `ivritai`; the raw model ID is `ivrit-ai/whisper-large-v3-turbo`.
-It is batch transcription, not realtime. Auto-detect uses Hebrew for this
-Hebrew-specific model; other explicit language hints are rejected. This is not
-a claim of tested Yiddish or mixed-language accuracy.
+It is batch transcription, not realtime. Selecting this Hebrew-only model
+automatically uses Hebrew; no separate language setting is needed. The language
+control explains this instead of offering incompatible hints. Your saved
+profile and meeting hints remain unchanged for multilingual models. Imported
+files snapshot Hebrew; meetings and older retry snapshots also resolve to Hebrew
+for this model, regardless of their saved hint. This is not a claim of tested
+Yiddish or mixed-language accuracy.
 
 This experimental route runs on Kolboo's resident GPU host and consumes your
 normal audio-second allowance. Availability depends on that host being awake

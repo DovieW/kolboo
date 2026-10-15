@@ -17,6 +17,8 @@ import {
 } from "../lib/modelSelection";
 import { useModelChoices } from "../lib/queries/modelChoices";
 import {
+	fixedSttLanguage,
+	FIXED_HEBREW_NOTICE,
 	normalizeSttLanguage,
 	sttLanguageOptionsForModel,
 } from "../lib/sttLanguages";
@@ -50,6 +52,10 @@ export function MeetingModelDialog({
 		recordingModelSelection(preferences.meeting_model),
 	);
 	const [language, setLanguage] = useState(preferences.language_hint ?? "auto");
+	const fixedLanguage = fixedSttLanguage(
+		selection?.provider_id,
+		selection?.model_id,
+	);
 	const selectionKey = selection ? modelSelectionKey(selection) : "";
 	const chosen = choices.find(
 		(choice) => modelSelectionKey(choice.selection) === selectionKey,
@@ -111,20 +117,24 @@ export function MeetingModelDialog({
 					onSetup={navigation?.setup}
 					onManagedAccess={navigation?.account}
 				/>
-				<Select
-					label="Language hint"
-					aria-label="Meeting language hint"
-					description="Auto-detect unless you choose a hint. Saved with the recording for retries."
-					data={sttLanguageOptionsForModel(
-						selection?.provider_id,
-						selection?.model_id,
-						language,
-					)}
-					value={language}
-					allowDeselect={false}
-					disabled={saving}
-					onChange={(value) => setLanguage(normalizeSttLanguage(value))}
-				/>
+				{fixedLanguage ? (
+					<Text size="sm">{FIXED_HEBREW_NOTICE}</Text>
+				) : (
+					<Select
+						label="Language hint"
+						aria-label="Meeting language hint"
+						description="Auto-detect unless you choose a hint. Saved with the recording for retries."
+						data={sttLanguageOptionsForModel(
+							selection?.provider_id,
+							selection?.model_id,
+							language,
+						)}
+						value={language}
+						allowDeselect={false}
+						disabled={saving}
+						onChange={(value) => setLanguage(normalizeSttLanguage(value))}
+					/>
+				)}
 				<Text size="xs" c="dimmed">
 					For speaker labels, select GPT-4o Transcribe · speaker labels. Managed
 					models must be enabled by Kolboo; other cloud models require your key

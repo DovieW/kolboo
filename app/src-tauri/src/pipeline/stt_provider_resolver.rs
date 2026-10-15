@@ -83,6 +83,11 @@ pub(super) fn resolve_stt_provider_for_transcription(
         )
     };
     let model_used = model_for_log(inner, provider_id_used.as_str(), effective.model.clone());
+    if provider_id_used == "ivritai" {
+        // Model-owned language; keep the stored profile/retry preference intact
+        // while reporting and caching the language actually sent to the service.
+        effective.language = Some("he".into());
+    }
     let language_used = effective.language.clone();
 
     log_stt_provider_selection(
@@ -954,6 +959,49 @@ mod tests {
             assert_eq!(resolved.language.as_deref(), expected);
             assert_eq!(resolved.model.as_deref(), Some("snapshot-model"));
             assert_eq!(inner.config.stt_language.as_deref(), Some("en"));
+        }
+    }
+
+    #[test]
+    fn ivritai_resolution_uses_hebrew_without_mutating_inherited_or_snapshot_hints() {
+        let store = RequestLogStore::new();
+        store.start_request("synthetic".into(), None);
+        let mut inner = PipelineInner::new(PipelineConfig {
+            stt_provider: "ivritai".into(),
+            stt_model: Some(crate::stt::ivritai::MODEL.into()),
+            stt_language: Some("en".into()),
+            request_log_store: Some(store.clone()),
+            ..Default::default()
+        });
+        insert_cached_fake_provider(
+            &mut inner,
+            "ivritai",
+            Some(crate::stt::ivritai::MODEL.into()),
+            Some("he".into()),
+        );
+        let profile = profile_with_stt(None, None, Some("yi"), None);
+        for forced_language in [None, Some("en"), Some("auto"), Some("he")] {
+            let resolved = resolve_stt_provider_for_transcription(
+                &mut inner,
+                SttProviderResolutionRequest {
+                    active_profile: Some(&profile),
+                    active_preset: None,
+                    forced_provider: Some("ivritai"),
+                    forced_model: Some(crate::stt::ivritai::MODEL),
+                    forced_language,
+                },
+            )
+            .unwrap();
+            assert_eq!(resolved.language.as_deref(), Some("he"));
+            assert_eq!(
+                store
+                    .with_current(|log| log.stt_language_hint.clone())
+                    .flatten()
+                    .as_deref(),
+                Some("he")
+            );
+            assert_eq!(inner.config.stt_language.as_deref(), Some("en"));
+            assert_eq!(profile.stt_language.as_deref(), Some("yi"));
         }
     }
 

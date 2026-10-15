@@ -137,6 +137,12 @@ where
 
     if !response.status().is_success() {
         let status = response.status();
+        if provider == "ivritai" {
+            return Err(SttError::Api(format!(
+                "ivritAI could not transcribe this recording ({}).",
+                status
+            )));
+        }
         let error_text = response
             .text()
             .await

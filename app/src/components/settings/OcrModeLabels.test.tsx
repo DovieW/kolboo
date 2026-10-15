@@ -455,6 +455,42 @@ it("does not select any first model when the shared pickers are unset", async ()
 	}
 });
 
+it("shows the model-owned Hebrew language and restores multilingual profile controls", async () => {
+	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+	const host = document.createElement("div");
+	document.body.append(host);
+	const root = createRoot(host);
+	const change = vi.fn();
+	const render = async (provider: string, model: string) => {
+		await act(async () =>
+			root.render(
+				<MantineProvider env="test">
+					<TranscribeSettingsSection
+						{...transcribe}
+						effectiveSttProvider={provider}
+						selectedSttModelForUi={model}
+						localProfileSttLanguage="en"
+						sttLanguageOptions={[{ value: "en", label: "English" }]}
+						onSttLanguageChange={change}
+					/>
+				</MantineProvider>,
+			),
+		);
+	};
+	try {
+		await render("ivritai", "ivrit-ai/whisper-large-v3-turbo");
+		expect(host.textContent).toContain("Hebrew is automatic for this model");
+		expect(host.textContent).toContain("Hebrew · Model default");
+		expect(host.querySelector('input[value="English"]')).toBeNull();
+		await render("groq", "whisper-large-v3-turbo");
+		expect(host.querySelector('input[value="English"]')).not.toBeNull();
+		expect(change).not.toHaveBeenCalled();
+	} finally {
+		await act(async () => root.unmount());
+		host.remove();
+	}
+});
+
 it("saves input mode at its own scope and preserves inheritance", async () => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	const host = document.createElement("div");

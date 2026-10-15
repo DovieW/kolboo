@@ -78,7 +78,6 @@ pub(crate) fn create_cloud_stt_provider(
             client,
             gateway,
             token: api_key,
-            language,
             prompt: transcription_prompt,
         }));
     }

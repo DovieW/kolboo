@@ -10,6 +10,10 @@ import {
 	Tooltip,
 } from "@mantine/core";
 import { ActionModelPicker } from "../../ActionModelPicker";
+import {
+	fixedSttLanguage,
+	FIXED_HEBREW_NOTICE,
+} from "../../../lib/sttLanguages";
 import { Info, RotateCcw } from "lucide-react";
 import {
 	isRealtimeSttModel,
@@ -94,6 +98,10 @@ export function TranscribeSettingsSection({
 	const { data: globalSettings } = useSettings();
 	const { data: providers } = useAvailableProviders();
 	const { choices } = useModelChoices("dictation");
+	const fixedLanguage = fixedSttLanguage(
+		effectiveSttProvider,
+		selectedSttModelForUi,
+	);
 	const updateSTTLiveOutput = useUpdateSTTLiveOutput();
 	const updateSTTSimulatedStreaming = useUpdateSTTSimulatedStreaming();
 	const updateSTTInputMode = useUpdateSTTInputMode();
@@ -246,43 +254,52 @@ export function TranscribeSettingsSection({
 				<div>
 					<p className="settings-label">STT Language</p>
 					<p className="settings-description">
-						Language hint for transcription (Auto-detect available)
+						{fixedLanguage
+							? FIXED_HEBREW_NOTICE
+							: "Language hint for transcription (Auto-detect available)"}
 					</p>
 				</div>
-				<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-					{!isDefaultScope && sttLanguageInheriting && (
-						<Tooltip label={inheritTooltip} withArrow>
-							<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-						</Tooltip>
-					)}
-					{!isDefaultScope && !sttLanguageInheriting && (
-						<Tooltip label="Disable override (inherit from Default)" withArrow>
-							<ActionIcon
-								variant="subtle"
-								color="gray"
-								size="sm"
-								onClick={onDisableSttLanguageOverride}
+				{fixedLanguage ? (
+					<Text size="sm">Hebrew · Model default</Text>
+				) : (
+					<div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+						{!isDefaultScope && sttLanguageInheriting && (
+							<Tooltip label={inheritTooltip} withArrow>
+								<Info size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
+							</Tooltip>
+						)}
+						{!isDefaultScope && !sttLanguageInheriting && (
+							<Tooltip
+								label="Disable override (inherit from Default)"
+								withArrow
 							>
-								<RotateCcw size={14} style={{ opacity: 0.65 }} />
-							</ActionIcon>
-						</Tooltip>
-					)}
-					<Select
-						data={sttLanguageOptions}
-						value={localProfileSttLanguage}
-						onChange={onSttLanguageChange}
-						placeholder="Auto-detect"
-						withCheckIcon={false}
-						styles={{
-							input: {
-								backgroundColor: "var(--bg-elevated)",
-								borderColor: "var(--border-default)",
-								color: "var(--text-primary)",
-								minWidth: 200,
-							},
-						}}
-					/>
-				</div>
+								<ActionIcon
+									variant="subtle"
+									color="gray"
+									size="sm"
+									onClick={onDisableSttLanguageOverride}
+								>
+									<RotateCcw size={14} style={{ opacity: 0.65 }} />
+								</ActionIcon>
+							</Tooltip>
+						)}
+						<Select
+							data={sttLanguageOptions}
+							value={localProfileSttLanguage}
+							onChange={onSttLanguageChange}
+							placeholder="Auto-detect"
+							withCheckIcon={false}
+							styles={{
+								input: {
+									backgroundColor: "var(--bg-elevated)",
+									borderColor: "var(--border-default)",
+									color: "var(--text-primary)",
+									minWidth: 200,
+								},
+							}}
+						/>
+					</div>
+				)}
 			</div>
 
 			<div className="settings-row no-divider">

@@ -6,6 +6,91 @@ use wiremock::{
 };
 
 #[tokio::test]
+async fn ivritai_owns_hebrew_for_legacy_hints_uploads_and_renewed_sessions() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text":"synthetic"})),
+        )
+        .expect(5)
+        .mount(&server)
+        .await;
+    for hint in [None, Some("auto"), Some("en"), Some("yi"), Some("he")] {
+        let provider = create_cloud_stt_provider(
+            reqwest::Client::new(),
+            SttProviderParams {
+                provider_id: "ivritai".into(),
+                model: Some(crate::stt::ivritai::MODEL.into()),
+                language: hint.map(String::from),
+                api_key: "synthetic-session".into(),
+                proxy_settings: Default::default(),
+                managed_gateway_url: Some(server.uri()),
+                transcription_prompt: None,
+                request_log_store: None,
+            },
+        )
+        .unwrap()
+        .with_renewed_managed_token("renewed-session")
+        .unwrap();
+        assert_eq!(
+            provider
+                .transcribe_upload(
+                    b"synthetic audio",
+                    &AudioFormat::default(),
+                    &SttUploadContext {
+                        purpose: UploadPurpose::File,
+                        chunk_offset: 0,
+                        checkpoint_path: "unused-ivrit-checkpoint".into(),
+                    }
+                )
+                .await
+                .unwrap()
+                .text,
+            "synthetic"
+        );
+    }
+    for request in server.received_requests().await.unwrap() {
+        let body = String::from_utf8_lossy(&request.body);
+        assert!(body.contains("\r\nhe\r\n"));
+        assert!(!body.contains("\r\nen\r\n"));
+        assert!(!body.contains("\r\nyi\r\n"));
+    }
+}
+
+#[tokio::test]
+async fn ivritai_errors_expose_status_without_raw_service_payloads() {
+    for status in [400, 401, 429, 503] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).respond_with(ResponseTemplate::new(status)
+            .set_body_json(serde_json::json!({"message":"private-provider-body", "request_id":"private-id", "error":{"message":"private-provider-body"}})))
+            .expect(1).mount(&server).await;
+        let provider = create_cloud_stt_provider(
+            reqwest::Client::new(),
+            SttProviderParams {
+                provider_id: "ivritai".into(),
+                model: Some(crate::stt::ivritai::MODEL.into()),
+                language: Some("en".into()),
+                api_key: "synthetic-session".into(),
+                proxy_settings: Default::default(),
+                managed_gateway_url: Some(server.uri()),
+                transcription_prompt: None,
+                request_log_store: None,
+            },
+        )
+        .unwrap();
+        let error = provider
+            .transcribe(b"synthetic", &AudioFormat::default())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&status.to_string()));
+        assert!(error.contains("ivritAI could not transcribe this recording"));
+        assert!(!error.contains("private"));
+        assert!(!error.contains('{'));
+    }
+}
+
+#[tokio::test]
 async fn ivritai_is_managed_only_and_renews_without_changing_identity_or_options() {
     let server = MockServer::start().await;
     let build = |gateway: Option<String>, model: Option<String>| {
