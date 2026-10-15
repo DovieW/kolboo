@@ -67,6 +67,22 @@ pub(crate) fn create_cloud_stt_provider(
         .map(|url| url.trim().to_string())
         .filter(|url| !url.is_empty());
 
+    if provider_id == "ivritai" {
+        let gateway = managed_gateway_url.ok_or_else(|| {
+            PipelineError::Config("ivritAI requires an explicit Kolboo Managed connection".into())
+        })?;
+        if model.as_deref() != Some(crate::stt::ivritai::MODEL) {
+            return Err(PipelineError::Config("Unsupported ivritAI model".into()));
+        }
+        return Ok(Arc::new(crate::stt::ivritai::IvritAiSttProvider {
+            client,
+            gateway,
+            token: api_key,
+            language,
+            prompt: transcription_prompt,
+        }));
+    }
+
     let adapter = stt_cloud_adapters::adapter_for(provider_id.as_str())
         .ok_or_else(|| PipelineError::Config(format!("Unknown STT provider: {}", provider_id)))?;
 

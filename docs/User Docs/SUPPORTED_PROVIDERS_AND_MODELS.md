@@ -29,6 +29,22 @@ Notes:
 
 ---
 
+## Managed ivritAI Hebrew Turbo
+
+When published by your Kolboo service, **ivritAI Hebrew Turbo** appears under
+**Kolboo Managed** for dictation, imported files, and meetings. Its provider ID
+is `ivritai`; the raw model ID is `ivrit-ai/whisper-large-v3-turbo`.
+It is batch transcription, not realtime. Auto-detect uses Hebrew for this
+Hebrew-specific model; other explicit language hints are rejected. This is not
+a claim of tested Yiddish or mixed-language accuracy.
+
+This experimental route runs on Kolboo's resident GPU host and consumes your
+normal audio-second allowance. Availability depends on that host being awake
+and online. If it is warming, busy or offline, your recording is retained and
+the app does not silently switch providers. Only compatible app builds request
+this entry; older releases do not see an unusable choice. No model-host or
+Cloudflare credential is distributed with the app.
+
 ## Custom OpenAI-compatible providers
 
 In **Settings → Providers → Custom providers**, add a name, API base URL

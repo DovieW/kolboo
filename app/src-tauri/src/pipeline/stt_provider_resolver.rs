@@ -251,6 +251,9 @@ fn log_stt_provider_selection(
 }
 
 pub(super) fn managed_stt_model_supported(provider_id: &str, model: Option<&str>) -> bool {
+    if provider_id == "ivritai" {
+        return model == Some(crate::stt::ivritai::MODEL);
+    }
     if provider_id == "yiddishlabs" {
         return matches!(
             model,
@@ -831,6 +834,12 @@ mod tests {
 
     #[test]
     fn managed_stt_support_is_limited_to_cataloged_groq_models() {
+        assert!(managed_stt_model_supported(
+            "ivritai",
+            Some(crate::stt::ivritai::MODEL)
+        ));
+        assert!(!managed_stt_model_supported("ivritai", None));
+        assert!(!managed_stt_model_supported("ivritai", Some("wrong")));
         assert!(managed_stt_model_supported(
             "groq",
             Some("whisper-large-v3-turbo")

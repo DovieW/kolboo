@@ -6,8 +6,68 @@ use wiremock::{
 };
 
 #[tokio::test]
+async fn ivritai_is_managed_only_and_renews_without_changing_identity_or_options() {
+    let server = MockServer::start().await;
+    let build = |gateway: Option<String>, model: Option<String>| {
+        create_cloud_stt_provider(
+            reqwest::Client::new(),
+            SttProviderParams {
+                provider_id: "ivritai".into(),
+                model,
+                language: Some("he".into()),
+                api_key: "original-session".into(),
+                proxy_settings: Default::default(),
+                managed_gateway_url: gateway,
+                transcription_prompt: Some("synthetic context".into()),
+                request_log_store: None,
+            },
+        )
+    };
+    let model = || Some(crate::stt::ivritai::MODEL.into());
+    assert!(build(None, model()).is_err());
+    assert!(build(Some(server.uri()), None).is_err());
+    assert!(build(Some(server.uri()), Some("wrong".into())).is_err());
+    let provider = build(Some(server.uri()), model()).unwrap();
+    assert_eq!(provider.name(), "ivritai");
+    assert!(!provider.supports_streaming());
+    assert!(provider.with_renewed_managed_token(" ").is_none());
+    let renewed = provider
+        .with_renewed_managed_token("renewed-session")
+        .unwrap();
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/transcriptions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"text":"synthetic"})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert_eq!(
+        renewed
+            .transcribe(b"synthetic audio", &AudioFormat::default())
+            .await
+            .unwrap(),
+        "synthetic"
+    );
+    let request = server.received_requests().await.unwrap().pop().unwrap();
+    assert_eq!(request.headers["authorization"], "Bearer renewed-session");
+    assert_eq!(request.headers["x-kolboo-model-provider"], "ivritai");
+    let body = String::from_utf8_lossy(&request.body);
+    assert!(body.contains(crate::stt::ivritai::MODEL));
+    assert!(body.contains("synthetic context"));
+    assert!(body.contains("\r\nhe\r\n"));
+    assert!(!body.contains("original-session"));
+}
+
+#[tokio::test]
 async fn managed_transcription_requests_keep_exact_provider_and_raw_model_identity() {
     for (provider, model, endpoint, response) in [
+        (
+            "ivritai",
+            crate::stt::ivritai::MODEL,
+            "/v1/audio/transcriptions",
+            serde_json::json!({"text":"synthetic"}),
+        ),
         (
             "groq",
             "whisper-large-v3",

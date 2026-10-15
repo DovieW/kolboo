@@ -153,7 +153,7 @@ export function useModelChoices(purpose: ModelPurpose) {
 					model_id: model.id,
 				},
 				displayName: model.display_name,
-				providerName: model.provider,
+				providerName: model.provider === "ivritai" ? "ivritAI" : model.provider,
 				ready: true,
 				capabilities: llm
 					? ["Text generation"]
@@ -167,11 +167,13 @@ export function useModelChoices(purpose: ModelPurpose) {
 				pricing:
 					"Uses your Kolboo allowance. Vendor pricing is unavailable, not assumed free.",
 				limitations:
-					model.provider === "yiddishlabs"
-						? standardJob
-							? "YiddishLabs stores submitted jobs and content. Local cancellation does not cancel provider processing or charges."
-							: "YiddishLabs says Flash does not store audio or transcripts. This is the provider's retention description, not an independent audit."
-						: undefined,
+					model.provider === "ivritai"
+						? "Hebrew transcription on Kolboo's hosted GPU. Auto uses Hebrew; other explicit language hints are unsupported. Availability depends on the host being online."
+						: model.provider === "yiddishlabs"
+							? standardJob
+								? "YiddishLabs stores submitted jobs and content. Local cancellation does not cancel provider processing or charges."
+								: "YiddishLabs says Flash does not store audio or transcripts. This is the provider's retention description, not an independent audit."
+							: undefined,
 			});
 		}
 	const managedMessage = auth.isPending

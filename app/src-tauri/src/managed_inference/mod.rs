@@ -40,7 +40,10 @@ pub(crate) async fn fetch_managed_model_catalog(
     reqwest::Url::parse(&url)
         .map_err(|_| "Managed inference gateway URL is invalid".to_string())?;
 
-    let mut request = client.get(url).bearer_auth(access_token);
+    let mut request = client
+        .get(url)
+        .bearer_auth(access_token)
+        .header("x-kolboo-managed-capabilities", "ivritai-v1");
     if let Some((client_id, client_secret)) = cloudflare_access {
         request = request
             .header("CF-Access-Client-Id", client_id)
@@ -217,6 +220,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/v1/managed/models"))
             .and(header("authorization", "Bearer session-token"))
+            .and(header("x-kolboo-managed-capabilities", "ivritai-v1"))
             .and(header("CF-Access-Client-Id", "cf-client-id"))
             .and(header("CF-Access-Client-Secret", "cf-client-secret"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
