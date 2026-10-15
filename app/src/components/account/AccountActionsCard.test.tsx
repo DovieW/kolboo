@@ -38,10 +38,15 @@ it("shows available account actions and preserves reauthentication", async () =>
     expect(host.textContent).not.toContain("Manage account");
     await click("Refresh access"); await click("Sign out");
     expect(props.onRefresh).toHaveBeenCalledOnce(); expect(props.onSignOut).toHaveBeenCalledOnce();
-    await render({ manageAvailable: true, reauthRequired: true });
-    expect(host.querySelector("form")).not.toBeNull();
-    expect(host.textContent).toContain("Sign in to Kolboo");
+    await render({ manageAvailable: true });
     await click("Manage account"); expect(props.onManage).toHaveBeenCalledOnce();
     await render({ refreshPending: true, logoutPending: true, managePending: true });
     for (const button of host.querySelectorAll("button")) expect(button.disabled).toBe(true);
+});
+it("makes recovery a single focused form without competing account actions", async () => {
+    await render({ signedIn: true, reauthRequired: true, manageAvailable: true });
+    expect(host.querySelector("h2")?.textContent).toBe("Restore your Kolboo session");
+    expect(host.querySelectorAll("form")).toHaveLength(1);
+    expect(host.textContent).toContain("Your saved sign-in is no longer valid");
+    expect(host.querySelector("button")).toBeNull();
 });

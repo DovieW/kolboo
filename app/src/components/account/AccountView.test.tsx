@@ -52,7 +52,7 @@ vi.mock("./AccountAdvancedPanel", () => ({
 }));
 vi.mock("./AccountUsageCard", () => ({ AccountUsageCard: () => null }));
 vi.mock("./AccountAuthentication", () => ({
-	AccountAuthentication: () => <form aria-label="Authentication" />,
+	AccountAuthentication: ({ initialEmail }: { initialEmail: string }) => <form aria-label="Authentication"><input aria-label="Email" defaultValue={initialEmail} /></form>,
 }));
 let host: HTMLDivElement;
 let root: Root;
@@ -77,13 +77,24 @@ beforeEach(() => {
 	vi.clearAllMocks();
 });
 it("shows code sign-in instead of offline access after a saved session is rejected", async () => {
-	state.license = { status: "grace", tier: "personal" };
+	state.license = { status: "grace", tier: "personal", email: "person@example.test" };
 	state.reason = "reauth_required";
 	await render();
 	expect(host.textContent).toContain("Sign in again");
 	expect(host.textContent).not.toContain("Offline access");
-	expect(host.textContent).toContain("Your own API keys still work");
+	expect(host.textContent).toContain("Restore your Kolboo session");
+	expect(host.textContent).not.toContain("Community");
+	expect(host.textContent).not.toContain("Refresh access");
+	expect(host.querySelector(".account-summary-card")).toBeNull();
+	expect(host.querySelector(".account-signin-layout")).not.toBeNull();
+	expect(host.querySelector<HTMLInputElement>('input[aria-label="Email"]')?.value).toBe("person@example.test");
 	expect(host.querySelector('form[aria-label="Authentication"]')).not.toBeNull();
+	const details = [...host.querySelectorAll("button")].find(button => button.textContent === "Account details");
+	await act(async () => details?.click());
+	const signOut = [...host.querySelectorAll("button")].find(button => button.textContent === "Sign out");
+	expect(signOut?.closest(".account-actions")).toBeNull();
+	await act(async () => signOut?.click());
+	expect(state.logout).toHaveBeenCalledWith(undefined, expect.any(Object));
 });
 it("runs refresh, sign-out and management actions and reports failures without losing the account", async () => {
 	state.license = {

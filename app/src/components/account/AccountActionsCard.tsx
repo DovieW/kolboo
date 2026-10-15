@@ -1,4 +1,4 @@
-import { Button, Card, Group, Stack, Title } from "@mantine/core";
+import { Button, Card, Group, Stack, Text, Title } from "@mantine/core";
 import type { ReactNode } from "react";
 
 export function AccountActionsCard(props: {
@@ -8,9 +8,10 @@ export function AccountActionsCard(props: {
 }) {
     return <Card withBorder radius="lg" className="account-panel account-actions">
         <Stack gap="md">
-            <Title order={2} size="h3">{!props.signedIn || props.reauthRequired ? "Sign in to Kolboo" : "Your account"}</Title>
+            <Title order={2} size="h3">{props.reauthRequired ? "Restore your Kolboo session" : !props.signedIn ? "Sign in to Kolboo" : "Your account"}</Title>
+            {props.reauthRequired && <Text size="sm" c="dimmed">Your saved sign-in is no longer valid. Sign in again to restore Managed access.</Text>}
             {(!props.signedIn || props.reauthRequired) && props.authForm}
-            {props.signedIn && <Group gap="sm">
+            {props.signedIn && !props.reauthRequired && <Group gap="sm">
                 <Button variant="default" onClick={props.onRefresh} loading={props.refreshPending}>Refresh access</Button>
                 {props.manageAvailable && <Button variant="light" onClick={props.onManage} loading={props.managePending}>Manage account</Button>}
                 <Button color="gray" variant="subtle" onClick={props.onSignOut} loading={props.logoutPending}>Sign out</Button>

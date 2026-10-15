@@ -12,7 +12,7 @@ Use this guide when account state appears stuck or degraded.
 
 1. Open **Account** and click **Refresh access**.
 2. Verify network connectivity.
-3. If the badge says **Sign in again**, use the email-code sign-in form on that
+3. If you see **Restore your Kolboo session**, use **Send sign-in code** on that
    page. The saved session was rejected; repeatedly refreshing cannot restore it.
 4. If still degraded without a sign-in warning, collect the safe diagnostic
    category before signing out so a service/network failure can be investigated.
@@ -20,7 +20,7 @@ Use this guide when account state appears stuck or degraded.
 ## Expected behavior
 
 - If refresh fails temporarily, state may move to **Grace**.
-- Rejected sessions are distinct from offline grace and show **Sign in again**.
+- Rejected sessions are distinct from offline grace and show **Restore your Kolboo session**.
 - Managed model loading refreshes expiring access tokens automatically. A 401
   receives one refresh/retry, without changing the selected model or payment source.
 - If refresh does not succeed before grace ends, state becomes **Expired**.

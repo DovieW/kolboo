@@ -8,8 +8,8 @@ import { EmailCodeSignIn, type EmailCodeSignInActions } from "./EmailCodeSignIn"
 let host: HTMLDivElement;
 let root: Root;
 let actions: EmailCodeSignInActions;
-async function render() {
-    await act(async () => root.render(<MantineProvider env="test"><EmailCodeSignIn actions={actions} /></MantineProvider>));
+async function render(initialEmail?: string) {
+    await act(async () => root.render(<MantineProvider env="test"><EmailCodeSignIn actions={actions} initialEmail={initialEmail} /></MantineProvider>));
 }
 function button(text: string) {
     const result = [...host.querySelectorAll("button")].find(button => button.textContent === text);
@@ -41,6 +41,31 @@ beforeEach(() => {
         browserSignIn: vi.fn().mockResolvedValue(undefined), cancel: vi.fn().mockResolvedValue(undefined) };
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); });
+it("prefills recovery email without sending automatically or overwriting edits", async () => {
+    await render();
+    expect((host.querySelector('input[type="email"]') as HTMLInputElement).value).toBe("");
+    await render("saved@example.test");
+    expect((host.querySelector('input[type="email"]') as HTMLInputElement).value).toBe("saved@example.test");
+    expect(actions.requestCode).not.toHaveBeenCalled();
+    expect(button("Send sign-in code").type).toBe("submit");
+    await fill('input[type="email"]', "other@example.test");
+    await render("saved@example.test");
+    expect((host.querySelector('input[type="email"]') as HTMLInputElement).value).toBe("other@example.test");
+    await submit();
+    expect(actions.requestCode).toHaveBeenCalledWith("other@example.test");
+});
+it("keeps a sent code bound to its email even if the cached account changes", async () => {
+    await render("saved@example.test");
+    await submit();
+    await render("updated@example.test");
+    expect(host.textContent).toContain("Code sent to saved@example.test");
+    await fill('[autocomplete="one-time-code"]', "123456"); await submit();
+    expect(actions.verifyCode).toHaveBeenCalledWith("saved@example.test", "123456");
+    await click("Change email");
+    await fill('input[type="email"]', "");
+    await render("updated@example.test");
+    expect((host.querySelector('input[type="email"]') as HTMLInputElement).value).toBe("");
+});
 it("requests a code, enforces resend cooldown and verifies without retaining the code", async () => {
     await render(); expect(host.querySelector('input[type="password"]')).toBeNull();
     await fill('input[type="email"]', "person@example.test"); await submit();

@@ -17,8 +17,6 @@ export function AccountSummaryCard(props: {
 	statusColor: string;
 	email: string | null;
 	organizationLabel: string | null;
-	signedIn: boolean;
-	reauthRequired: boolean;
 }) {
 	const {
 		loading,
@@ -28,10 +26,7 @@ export function AccountSummaryCard(props: {
 		statusColor,
 		email,
 		organizationLabel,
-		signedIn,
-		reauthRequired,
 	} = props;
-	const summaryTitle = signedIn ? modeLabel : "Community";
 
 	if (loading) {
 		return (
@@ -56,7 +51,7 @@ export function AccountSummaryCard(props: {
 				<Group justify="space-between" align="flex-start" gap="md" wrap="wrap">
 					<Stack gap={6}>
 						<Title order={2} className="account-summary-title">
-							{summaryTitle}
+							{modeLabel}
 						</Title>
 						<Text c="dimmed" size="sm" maw={620}>
 							{modeDescription}
@@ -74,14 +69,6 @@ export function AccountSummaryCard(props: {
 				</Group>
 
 				{email && <Text size="sm">{email}</Text>}
-
-				{reauthRequired ? (
-					<div className="account-callout account-callout-warning">
-						<Text size="sm">
-							Sign in again below. Your own API keys still work.
-						</Text>
-					</div>
-				) : null}
 			</Stack>
 		</Card>
 	);

@@ -21,7 +21,7 @@ at most one event per category/status every five minutes. Local warnings retain
 the same safe categories. This is not general request logging.
 
 A rejected refresh token is persisted separately from cached entitlement grace:
-Account shows **Sign in again**, not **Offline access**, and exposes email-code
+Account shows **Restore your Kolboo session**, not **Offline access**, and exposes email-code
 sign-in. Transient network/service failures retain offline grace. Catalog loads
 refresh expiring tokens under the shared session-rotation lock; a server 401
 allows one refresh/retry, never an unbounded loop or a silent BYOK switch.

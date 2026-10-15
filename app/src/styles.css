@@ -839,12 +839,13 @@ a:focus-visible {
 }
 
 .account-signin-layout .main-content-inner {
-	max-width: 480px;
-	padding-top: clamp(32px, 10vh, 100px);
+	max-width: 600px;
+	margin-inline: 0 auto;
+	padding-top: 32px;
 }
 
 .account-signin-layout .account-actions {
-	padding: 32px;
+	padding: clamp(20px, 3vw, 32px);
 }
 
 .account-page-grid {
