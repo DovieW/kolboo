@@ -58,7 +58,7 @@ export function AccountView() {
             {state && signedIn && <>
                 <AccountSummaryCard loading={license.isLoading || auth.isLoading}
                     modeLabel={modeLabel} modeDescription={getAccountModeDescription({ modeLabel, signedIn, reauthRequired })}
-                    statusLabel={formatAccountStatusLabel(state.status)} statusColor={getAccountStatusColor({ status: state.status, reauthRequired })}
+                    statusLabel={reauthRequired ? "Sign in again" : formatAccountStatusLabel(state.status)} statusColor={getAccountStatusColor({ status: state.status, reauthRequired })}
                     email={state.email ?? null} organizationLabel={state.org?.org_name ?? null} signedIn={signedIn} reauthRequired={reauthRequired} />
                 <AccountUsageCard loading={license.isLoading} modeLabel={modeLabel} licenseState={state} />
             </>}

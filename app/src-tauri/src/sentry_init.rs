@@ -3,6 +3,88 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 static SENTRY_GUARD: OnceLock<sentry::ClientInitGuard> = OnceLock::new();
+static ACCOUNT_REPORTS: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn safe_account_code(code: &str) -> &'static str {
+    match code {
+        "refresh_token_not_found" => "refresh_token_not_found",
+        "refresh_token_already_used" => "refresh_token_already_used",
+        "session_not_found" => "session_not_found",
+        "session_expired" => "session_expired",
+        "user_banned" => "user_banned",
+        "reauth_required" => "reauth_required",
+        "network" => "network",
+        "timeout" => "timeout",
+        "invalid_response" => "invalid_response",
+        "auth_session_save_failed" => "auth_session_save_failed",
+        "http_rejected" => "http_rejected",
+        _ => "unknown",
+    }
+}
+
+fn safe_account_tag(key: &str, value: &str) -> bool {
+    match key {
+        "account_stage" => matches!(
+            value,
+            "session_refresh" | "entitlement" | "model_catalog" | "session_storage"
+        ),
+        "account_code" => value == safe_account_code(value),
+        "http_status" => {
+            value == "none"
+                || value.parse::<u16>().is_ok_and(|status| {
+                    (100..=599).contains(&status) && status.to_string() == value
+                })
+        }
+        _ => false,
+    }
+}
+
+/// Explicit handled-failure reporting. No arbitrary text, identity, URL, token,
+/// request or response body enters logs/Sentry. At most one event per finite
+/// category/status every five minutes; ordinary logs remain local.
+pub(crate) fn report_account_failure(stage: &str, code: &str, status: Option<u16>) {
+    if !safe_account_tag("account_stage", stage) {
+        return;
+    }
+    let code = safe_account_code(code);
+    let status = status
+        .filter(|status| (100..=599).contains(status))
+        .map(|status| status.to_string())
+        .unwrap_or_else(|| "none".into());
+    log::warn!(
+        "Account operation failed: stage={} code={} http_status={}",
+        stage,
+        code,
+        status
+    );
+    let Some(client) = sentry::Hub::current().client() else {
+        return;
+    };
+    let key = format!("{stage}:{code}:{status}");
+    let now = std::time::Instant::now();
+    let mut reports = ACCOUNT_REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    reports.retain(|(_, at)| now.duration_since(*at) < std::time::Duration::from_secs(300));
+    if reports.iter().any(|(existing, _)| existing == &key) {
+        return;
+    }
+    reports.push((key, now));
+    drop(reports);
+    let mut event = sentry::protocol::Event {
+        level: sentry::Level::Error,
+        message: Some("Account operation failed".into()),
+        ..Default::default()
+    };
+    event
+        .tags
+        .insert("event_kind".into(), "account_failure".into());
+    event.tags.insert("account_stage".into(), stage.into());
+    event.tags.insert("account_code".into(), code.into());
+    event.tags.insert("http_status".into(), status);
+    client.capture_event(event, None);
+}
 
 fn env_non_empty(key: &str) -> Option<String> {
     std::env::var(key)
@@ -78,8 +160,8 @@ fn scrub_event(
             (
                 "surface",
                 "main" | "overlay" | "overlay_hover" | "quick_ask"
-            ) | ("event_kind", "smoke_test")
-        )
+            ) | ("event_kind", "smoke_test" | "account_failure")
+        ) || safe_account_tag(key, value)
     });
     event.tags.insert("service".into(), "desktop".into());
     event.tags.insert("runtime".into(), "tauri-backend".into());
@@ -115,6 +197,26 @@ fn scrub_event(
             DebugImage::Proguard(_) => {}
         }
     }
+    let account_failure = event
+        .tags
+        .get("event_kind")
+        .is_some_and(|value| value == "account_failure");
+    let fingerprint = if account_failure {
+        ["account_stage", "account_code", "http_status"]
+            .into_iter()
+            .map(|key| {
+                Cow::Owned(
+                    event
+                        .tags
+                        .get(key)
+                        .cloned()
+                        .unwrap_or_else(|| "unknown".into()),
+                )
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     Some(Event {
         event_id: event.event_id,
         timestamp: event.timestamp,
@@ -124,9 +226,14 @@ fn scrub_event(
         environment: event.environment,
         dist: event.dist,
         sdk: event.sdk,
-        message: event
-            .message
-            .map(|_| "Backend error (details withheld)".into()),
+        fingerprint: Cow::Owned(fingerprint),
+        message: if account_failure {
+            Some("Account operation failed".into())
+        } else {
+            event
+                .message
+                .map(|_| "Backend error (details withheld)".into())
+        },
         exception: event.exception,
         stacktrace: event.stacktrace,
         tags: event.tags,

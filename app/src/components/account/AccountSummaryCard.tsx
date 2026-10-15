@@ -78,7 +78,7 @@ export function AccountSummaryCard(props: {
 				{reauthRequired ? (
 					<div className="account-callout account-callout-warning">
 						<Text size="sm">
-							Refresh access or sign in again. Your own API keys still work.
+							Sign in again below. Your own API keys still work.
 						</Text>
 					</div>
 				) : null}

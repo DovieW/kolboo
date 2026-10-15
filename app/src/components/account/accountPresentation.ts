@@ -71,7 +71,7 @@ export function getAccountModeDescription(params: {
 		return "Community/BYOK works without an account. Sign in for eligible managed access and settings sync.";
 	}
 	if (params.reauthRequired) {
-		return "Your managed access needs attention. Try Refresh access to check your current entitlement.";
+		return "Your saved sign-in is no longer valid. Sign in again to restore Managed access. Your own API keys still work.";
 	}
 	if (params.modeLabel === "Managed Business") {
 		return "Your organization provides managed access, subject to its policies.";

@@ -1,6 +1,6 @@
 # Sentry Integration (Kolboo)
 
-Last updated: 2026-09-24
+Last updated: 2026-10-15
 
 This document covers desktop error reporting and release operations. Historical
 rehearsals below are evidence for their named builds, not a substitute for
@@ -12,6 +12,36 @@ The desktop reports UI exceptions (including React 19 root failures) and Rust
 panics. This is not a native crash handler: segmentation faults, aborts, OOM
 kills, hangs, and every handled provider/device failure are **not** automatically
 captured. Do not claim complete crash coverage or crash-free-session metrics.
+
+Account refresh, entitlement hydration, secure-session persistence and Managed
+catalog failures now explicitly emit handled error events. These use only a
+fixed stage, an allowlisted error code and HTTP status (no account identifiers,
+URLs, response bodies or tokens). The backend groups by those fields and sends
+at most one event per category/status every five minutes. Local warnings retain
+the same safe categories. This is not general request logging.
+
+A rejected refresh token is persisted separately from cached entitlement grace:
+Account shows **Sign in again**, not **Offline access**, and exposes email-code
+sign-in. Transient network/service failures retain offline grace. Catalog loads
+refresh expiring tokens under the shared session-rotation lock; a server 401
+allows one refresh/retry, never an unbounded loop or a silent BYOK switch.
+
+### Laptop development packages
+
+Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
+packaging a reporting-enabled laptop build, supply the existing repository
+variable `SENTRY_PUBLIC_DEV_DSN` through `desktopSentryConfig` in
+`.github/scripts/configure-desktop-sentry.mjs`, with `SENTRY_BUILD_KIND=development`
+and the build commit as `GITHUB_SHA`. Pass its returned environment to the
+package script along with the verified Cloud API/auth public configuration.
+Do not embed a Sentry administration/upload token. A normal unconfigured local
+build intentionally remains cloud-free.
+
+After installation verify the startup **Backend Sentry initialized** diagnostic;
+**no TAURI_SENTRY_DSN** means reporting is disabled, not that no failures occurred.
+The existing beta-only email alert does not cover the `development` environment.
+Development events can be inspected in `kolboo-public-dev`; ingestion and email
+notification are separate checks. Do not claim either without verifying it.
 
 CI uses `.github/scripts/configure-desktop-sentry.mjs` for all three platforms:
 

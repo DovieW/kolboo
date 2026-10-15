@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
 				org?: { org_name: string };
 		  },
 	loading: false,
+	reason: undefined as string | undefined,
 	error: null as Error | null,
 	refresh: vi.fn(),
 	logout: vi.fn(),
@@ -35,7 +36,7 @@ vi.mock("../../lib/queries", () => ({
 		isLoading: state.loading,
 		error: state.error,
 	}),
-	useLicenseAuthContext: () => ({ data: undefined, isLoading: state.loading }),
+	useLicenseAuthContext: () => ({ data: state.reason ? { reason_code: state.reason } : undefined, isLoading: state.loading }),
 	useLogoutLicense: () => ({ mutate: state.logout }),
 	useRefreshLicenseEntitlement: () => ({ mutate: state.refresh }),
 	useSignUpLicense: () => ({ mutate: vi.fn() }),
@@ -71,8 +72,18 @@ beforeEach(() => {
 	root = createRoot(host);
 	state.license = undefined;
 	state.loading = false;
+	state.reason = undefined;
 	state.error = null;
 	vi.clearAllMocks();
+});
+it("shows code sign-in instead of offline access after a saved session is rejected", async () => {
+	state.license = { status: "grace", tier: "personal" };
+	state.reason = "reauth_required";
+	await render();
+	expect(host.textContent).toContain("Sign in again");
+	expect(host.textContent).not.toContain("Offline access");
+	expect(host.textContent).toContain("Your own API keys still work");
+	expect(host.querySelector('form[aria-label="Authentication"]')).not.toBeNull();
 });
 it("runs refresh, sign-out and management actions and reports failures without losing the account", async () => {
 	state.license = {

@@ -424,6 +424,10 @@ export interface LicenseState {
   limits: TierLimits;
   org?: OrgContext | null;
   portal_available: boolean;
+  /**
+   * Session rejection is distinct from a transient entitlement/network outage.
+   */
+  reauth_required?: boolean;
   status: LicenseStatus;
   tier: LicenseTier;
   usage: UsageStats;

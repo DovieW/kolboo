@@ -1,9 +1,259 @@
 //! Real command/session/store wiring, with loopback HTTP and synthetic keyring.
 use super::*;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use std::os::unix::fs::PermissionsExt;
 use tauri::Manager;
 
 struct Environment(Vec<(&'static str, Option<String>)>);
+
+async fn catalog_session_recovery(app: &AppHandle, environment: &Environment, pro: &LicenseState) {
+    use crate::managed_inference::managed_inference_get_models;
+    let original = load_session_material(app).unwrap();
+    let expired = format!(
+        "header.{}.signature",
+        URL_SAFE_NO_PAD.encode(r#"{"exp":1}"#)
+    );
+    let fresh = format!(
+        "header.{}.signature",
+        URL_SAFE_NO_PAD.encode(r#"{"exp":4102444800}"#)
+    );
+    persist_session_material(
+        app,
+        &SessionMaterial {
+            access_token: expired,
+            refresh_token: "initial-refresh".into(),
+        },
+    )
+    .unwrap();
+    let rotated = json!({"access_token":fresh,"refresh_token":"rotated-refresh"}).to_string();
+    let (base, task) = server(vec![
+        (200, rotated.clone()),
+        (200, serde_json::to_string(pro).unwrap()),
+        (200, catalog_for_test()),
+        (200, catalog_for_test()),
+    ])
+    .await;
+    environment.configure(&base);
+    let (a, b) = tokio::join!(
+        managed_inference_get_models(app.clone()),
+        managed_inference_get_models(app.clone())
+    );
+    assert_eq!(a.unwrap().models.len(), 1);
+    assert_eq!(b.unwrap().models.len(), 1);
+    let requests = task.await.unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|r| r.starts_with("POST /auth/v1/token"))
+            .count(),
+        1
+    );
+    assert!(requests[2..]
+        .iter()
+        .all(|r| r.contains(&format!("Bearer {fresh}"))));
+    // Temporary failures retain grace, including successful rotation followed
+    // by unavailable entitlement service. An old access token may still work.
+    for (rotation_status, hydration_status) in [(503, 200), (503, 503), (200, 503)] {
+        save_license_state(app, pro, "test-active").unwrap();
+        let (base, task) = server(vec![
+            (rotation_status, rotated.clone()),
+            (hydration_status, serde_json::to_string(pro).unwrap()),
+        ])
+        .await;
+        environment.configure(&base);
+        let result = license_refresh_entitlement(app.clone(), None).await;
+        assert_eq!(result.is_ok(), hydration_status == 200);
+        assert!(!load_license_state(app).unwrap().reauth_required);
+        assert!(
+            license_get_auth_context(app.clone())
+                .await
+                .unwrap()
+                .authenticated
+        );
+        task.await.unwrap();
+    }
+    // A server-rejected but unexpired token gets exactly one forced rotation.
+    for final_status in [200, 401] {
+        persist_session_material(app, &original).unwrap();
+        let (base, task) = server(vec![
+            (401, "PRIVATE provider response".into()),
+            (200, rotated.clone()),
+            (200, serde_json::to_string(pro).unwrap()),
+            (final_status, catalog_for_test()),
+        ])
+        .await;
+        environment.configure(&base);
+        let result = managed_inference_get_models(app.clone()).await;
+        assert_eq!(result.is_ok(), final_status == 200);
+        if let Err(error) = result {
+            assert!(!error.contains("PRIVATE"));
+        }
+        assert_eq!(task.await.unwrap().len(), 4);
+    }
+    // Definitive refresh rejection preserves cached allowance but exposes re-login.
+    let (base, task) = server(vec![(
+        400,
+        json!({"error_code":"refresh_token_already_used", "msg":"PRIVATE"}).to_string(),
+    )])
+    .await;
+    environment.configure(&base);
+    let error = license_refresh_entitlement(app.clone(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code.as_deref(), Some("reauth_required"));
+    task.await.unwrap();
+    let state = load_license_state(app).unwrap();
+    assert!(state.reauth_required);
+    assert_eq!(state.tier, pro.tier);
+    assert!(
+        !license_get_auth_context(app.clone())
+            .await
+            .unwrap()
+            .authenticated
+    );
+    assert_eq!(
+        managed_access_token(app, None)
+            .await
+            .unwrap_err()
+            .code
+            .as_deref(),
+        Some("reauth_required")
+    );
+    assert!(managed_inference_get_models(app.clone())
+        .await
+        .unwrap_err()
+        .contains("Sign in again"));
+    // Fresh emailed-code login replaces the rejected session and clears the flag.
+    let (base, task) = server(vec![
+        (200, json!({"access_token":"new-login", "refresh_token":"new-refresh", "user":{"id":"synthetic-user"}}).to_string()),
+        (200, serde_json::to_string(pro).unwrap()),
+    ]).await;
+    environment.configure(&base);
+    let state = email_code::license_verify_email_code(
+        app.clone(),
+        "person@example.test".into(),
+        "123456".into(),
+    )
+    .await
+    .unwrap();
+    assert!(!state.reauth_required);
+    assert!(
+        license_get_auth_context(app.clone())
+            .await
+            .unwrap()
+            .authenticated
+    );
+    task.await.unwrap();
+    let (base, task) = server(vec![(403, "PRIVATE".into())]).await;
+    environment.configure(&base);
+    assert!(managed_inference_get_models(app.clone())
+        .await
+        .unwrap_err()
+        .contains("403"));
+    task.await.unwrap();
+    let (base, task) = server(vec![
+        (401, "PRIVATE".into()),
+        (400, json!({"error_code":"session_not_found"}).to_string()),
+    ])
+    .await;
+    environment.configure(&base);
+    assert!(managed_inference_get_models(app.clone())
+        .await
+        .unwrap_err()
+        .contains("sign in again"));
+    task.await.unwrap();
+    // The wallet can disappear after rotation. Never return the obsolete token.
+    save_license_state(app, pro, "test-active").unwrap();
+    persist_session_material(app, &original).unwrap();
+    let (base, task) = server(vec![
+        (200, rotated),
+        (200, serde_json::to_string(pro).unwrap()),
+    ])
+    .await;
+    environment.configure(&base);
+    use tauri::Listener;
+    let wallet = app.clone();
+    let listener = app.listen(events::EVENT_SETTINGS_CHANGED, move |_| {
+        clear_session_material(&wallet).unwrap();
+    });
+    let result = managed_access_token(app, Some(&original.access_token)).await;
+    app.unlisten(listener);
+    assert_eq!(result.unwrap_err().code.as_deref(), Some("reauth_required"));
+    task.await.unwrap();
+    license_logout(app.clone()).await.unwrap();
+    assert_eq!(
+        managed_access_token(app, None)
+            .await
+            .unwrap_err()
+            .code
+            .as_deref(),
+        Some("reauth_required")
+    );
+    persist_session_material(app, &original).unwrap();
+    save_license_state(app, pro, "test-restored").unwrap();
+}
+
+fn account_http_deadlines() {
+    // Pause only after a loopback peer has received the request, avoiding both
+    // real sleeps and the paused-clock/OS socket readiness race.
+    std::thread::spawn(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let environment = Environment::new();
+                for kind in 0..3 {
+                    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                    let base = format!("http://{}", listener.local_addr().unwrap());
+                    environment.configure(&base);
+                    let request = tokio::spawn(async move {
+                        match kind {
+                            0 => refresh_supabase_session(&SessionMaterial {
+                                access_token: "synthetic".into(),
+                                refresh_token: "synthetic".into(),
+                            })
+                            .await
+                            .map(|_| ()),
+                            1 => fetch_license_state_from_api(
+                                "synthetic",
+                                Method::GET,
+                                "/v1/license/state",
+                            )
+                            .await
+                            .map(|_| ()),
+                            _ => crate::managed_inference::fetch_managed_model_catalog(
+                                &reqwest::Client::new(),
+                                &base,
+                                "synthetic",
+                                None,
+                            )
+                            .await
+                            .map(|_| ()),
+                        }
+                    });
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut buffer = [0; 4096];
+                    assert!(socket.read(&mut buffer).await.unwrap() > 0);
+                    tokio::time::pause();
+                    tokio::time::advance(Duration::from_secs(21)).await;
+                    let error = request.await.unwrap().unwrap_err();
+                    tokio::time::resume();
+                    assert_eq!(
+                        error.code.as_deref(),
+                        Some(match kind {
+                            0 => "auth_refresh_failed",
+                            1 => "license_state_unavailable",
+                            _ => "catalog_unavailable",
+                        })
+                    );
+                }
+            });
+    })
+    .join()
+    .unwrap();
+}
+
 impl Environment {
     fn new() -> Self {
         Self(
@@ -207,10 +457,7 @@ pub(crate) fn email_code_session_lifecycle(
             .await
             .unwrap_err();
             assert!(!error.message.contains("private"));
-            assert_eq!(
-                refresh_error_requires_reauthentication(&error.message),
-                status == 400 || status == 401
-            );
+            assert!(!refresh_error_requires_reauthentication(&error.message));
             task.await.unwrap();
         }
         for signup in [false, true] {
@@ -964,6 +1211,8 @@ pub(crate) fn email_code_session_lifecycle(
         );
         task.await.unwrap();
         // A rotated session plus verified revocation must downgrade immediately.
+        catalog_session_recovery(app, &environment, &pro).await;
+        account_http_deadlines();
         let rotation = json!({"access_token":"rotated-access", "refresh_token":"rotated-refresh", "user":{"id":"synthetic-user","email":"person@example.test"}}).to_string();
         let community = build_signed_in_fallback_state(
             "synthetic-user".into(),

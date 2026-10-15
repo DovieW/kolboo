@@ -32,7 +32,8 @@ pub(crate) async fn fetch_managed_model_catalog(
     base_url: &str,
     access_token: &str,
     cloudflare_access: Option<(&str, &str)>,
-) -> Result<ManagedModelCatalogResponse, String> {
+) -> crate::commands::CommandResult<ManagedModelCatalogResponse> {
+    use crate::commands::CommandError;
     let url = format!(
         "{}/v1/managed/models",
         base_url.trim().trim_end_matches('/')
@@ -54,19 +55,53 @@ pub(crate) async fn fetch_managed_model_catalog(
         .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
-        .map_err(|error| format!("Managed model catalog request failed: {error}"))?;
+        .map_err(|error| {
+            crate::sentry_init::report_account_failure(
+                "model_catalog",
+                if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "network"
+                },
+                None,
+            );
+            CommandError::new(
+                "Managed models could not be reached. Please try again.",
+                "network",
+            )
+            .with_code("catalog_unavailable")
+            .with_retryable(true)
+        })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(format!(
-            "Managed model catalog request failed ({})",
-            status.as_u16()
-        ));
+        crate::sentry_init::report_account_failure(
+            "model_catalog",
+            "http_rejected",
+            Some(status.as_u16()),
+        );
+        return Err(CommandError::new(
+            format!("Managed model catalog request failed ({})", status.as_u16()),
+            "auth",
+        )
+        .with_code(if status == reqwest::StatusCode::UNAUTHORIZED {
+            "catalog_unauthorized"
+        } else {
+            "catalog_unavailable"
+        }));
     }
 
     response
         .json::<ManagedModelCatalogResponse>()
         .await
-        .map_err(|error| format!("Managed model catalog response was invalid: {error}"))
+        .map_err(|_| {
+            crate::sentry_init::report_account_failure(
+                "model_catalog",
+                "invalid_response",
+                Some(status.as_u16()),
+            );
+            CommandError::new("Managed model catalog response was invalid.", "network")
+                .with_code("catalog_invalid_response")
+        })
 }
 
 #[cfg(desktop)]
@@ -80,10 +115,9 @@ pub async fn managed_inference_get_models(
     let base_url =
         crate::public_config::read(&["TAURI_MANAGED_INFERENCE_GATEWAY_URL", "TAURI_API_BASE_URL"])
             .ok_or_else(|| "Managed inference gateway URL is not configured".to_string())?;
-    let access_token =
-        crate::secrets::get_secret(&app, crate::secrets::AUTH_SESSION_ACCESS_TOKEN_KEY)
-            .filter(|token| !token.trim().is_empty())
-            .ok_or_else(|| "Managed authentication is unavailable right now".to_string())?;
+    let access_token = crate::commands::licensing::managed_access_token(&app, None)
+        .await
+        .map_err(|error| error.to_string())?;
     let proxy_settings = app
         .store("settings.json")
         .ok()
@@ -97,7 +131,19 @@ pub async fn managed_inference_get_models(
         .as_ref()
         .map(|(id, secret)| (id.as_str(), secret.as_str()));
 
-    fetch_managed_model_catalog(&client, &base_url, &access_token, cloudflare_access).await
+    let result =
+        fetch_managed_model_catalog(&client, &base_url, &access_token, cloudflare_access).await;
+    match result {
+        Err(error) if error.code.as_deref() == Some("catalog_unauthorized") => {
+            let token = crate::commands::licensing::managed_access_token(&app, Some(&access_token))
+                .await
+                .map_err(|error| error.to_string())?;
+            fetch_managed_model_catalog(&client, &base_url, &token, cloudflare_access)
+                .await
+                .map_err(|error| error.to_string())
+        }
+        other => other.map_err(|error| error.to_string()),
+    }
 }
 
 #[cfg(not(desktop))]
@@ -213,6 +259,41 @@ mod tests {
         matchers::{header, method, path},
         Mock, MockServer, ResponseTemplate,
     };
+
+    #[tokio::test]
+    async fn catalog_errors_are_classified_without_provider_content() {
+        for (status, code) in [
+            (401, "catalog_unauthorized"),
+            (403, "catalog_unavailable"),
+            (503, "catalog_unavailable"),
+            (200, "catalog_invalid_response"),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(ResponseTemplate::new(status).set_body_string("PRIVATE response"))
+                .mount(&server)
+                .await;
+            let error = fetch_managed_model_catalog(
+                &reqwest::Client::new(),
+                &server.uri(),
+                "PRIVATE token",
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code.as_deref(), Some(code));
+            assert!(!error.to_string().contains("PRIVATE"));
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let error =
+            fetch_managed_model_catalog(&reqwest::Client::new(), &url, "PRIVATE token", None)
+                .await
+                .unwrap_err();
+        assert_eq!(error.code.as_deref(), Some("catalog_unavailable"));
+        assert!(!error.to_string().contains(&url));
+    }
 
     #[tokio::test]
     async fn fetches_catalog_with_session_and_cloudflare_access_headers() {
