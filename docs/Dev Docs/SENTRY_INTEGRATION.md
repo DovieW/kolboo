@@ -229,6 +229,23 @@ Current protections:
 
 ## Testing and validation notes
 
+Verification on 2026-10-15:
+
+- Desktop fix `97565b8` passed `check:ci`, 1,051 frontend tests, 1,191
+  ordinary Rust tests and isolated Linux native/startup checks. Patch coverage
+  against `acb61a2` is 100% of 371 changed executable lines, without new exceptions.
+- The reporting-enabled development DEB was installed on the laptop; package
+  and extracted-executable SHA-256 checks matched. Its running executable was
+  verified as `dev-97565b8-auth/usr/bin/kolboo`. No public release was published.
+- Startup confirmed backend Sentry initialization. A real session refresh
+  rejection (`refresh_token_not_found`, HTTP 400) produced event
+  `dd27e29d0dbf491ebfc98b3efac443cf` in
+  [KOLBOO-PUBLIC-DEV-V](https://dov-weinstock.sentry.io/issues/7794132446/),
+  tagged `development` / `kolboo@0.3.3-dev.97565b8`. The local cache correctly
+  marked reauthentication required; a fresh user login remains necessary.
+- This verifies handled-error ingestion, not development email notification,
+  fresh user login, or native Windows/macOS behavior.
+
 Verification on 2026-09-24:
 
 - `pnpm -C app setup:check`, `typecheck`, and `lint:ci` passed (11 existing lint
