@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateDesktopCloudConfig } from "../../.github/scripts/validate-desktop-cloud-config.mjs";
 import {
 	configureRustBuildEnv,
 	describeRustBuildEnv,
@@ -91,14 +92,14 @@ async function main() {
 		throw new Error("The fast Linux package path can only run on Linux.");
 	}
 	const { host, install } = parseArgs(process.argv.slice(2));
+	// Installable development builds need the same complete public configuration
+	// as releases. A fallback API URL cannot refresh a saved Supabase session.
+	validateDesktopCloudConfig(process.env);
 	const { env, status } = configureRustBuildEnv(process.env, {
 		requireTools: true,
 	});
 	const buildEnv = {
 		...env,
-		TAURI_API_BASE_URL: env.TAURI_API_BASE_URL ?? "https://kolboo.dovie.dev",
-		TAURI_MANAGED_INFERENCE_GATEWAY_URL:
-			env.TAURI_MANAGED_INFERENCE_GATEWAY_URL ?? "https://kolboo.dovie.dev",
 		VITE_SIGNED_UPDATER_ENABLED: env.VITE_SIGNED_UPDATER_ENABLED ?? "false",
 	};
 
