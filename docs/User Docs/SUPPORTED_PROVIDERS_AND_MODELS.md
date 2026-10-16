@@ -45,7 +45,9 @@ Yiddish or mixed-language accuracy.
 This experimental route runs on Kolboo's resident GPU host and consumes your
 normal audio-second allowance. Availability depends on that host being awake
 and online. If it is warming, busy or offline, your recording is retained and
-the app does not silently switch providers. Only compatible app builds request
+the app does not silently switch providers. Failed uploads are not automatically
+replayed; use Retry explicitly because an interrupted response can follow actual
+processing. Only compatible app builds request
 this entry; older releases do not see an unusable choice. No model-host or
 Cloudflare credential is distributed with the app.
 

@@ -40,9 +40,16 @@ pub(super) async fn run_stt_transcription(
 ) -> Result<SttResult, PipelineError> {
     let format = AudioFormat::default();
     let wav = Arc::new(wav_bytes.to_vec());
+    let mut retry_config = retry_config.clone();
+    if stt_provider.name() == "ivritai" {
+        // A failed response can follow actual GPU dispatch and a durable usage
+        // reservation. Keep the recording for an explicit retry, never replay
+        // this upload automatically after an ambiguous failure.
+        retry_config.max_retries = 0;
+    }
 
     let transcription_future = async {
-        with_retry_report(retry_config, || {
+        with_retry_report(&retry_config, || {
             let provider = stt_provider.clone();
             let wav = wav.clone();
             let format = format.clone();
@@ -124,6 +131,46 @@ mod tests {
     use crate::stt::SttError;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[tokio::test]
+    async fn ivritai_failures_never_automatically_replay_dictation_or_uploads() {
+        use wiremock::{matchers::method, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let provider = Arc::new(crate::stt::ivritai::IvritAiSttProvider {
+            client: reqwest::Client::new(),
+            gateway: server.uri(),
+            token: "synthetic-session".into(),
+            prompt: None,
+        });
+        let upload = crate::stt::SttUploadContext {
+            purpose: crate::stt::UploadPurpose::Meeting,
+            chunk_offset: 0,
+            checkpoint_path: "unused-ivrit-checkpoint".into(),
+        };
+        let config = no_delay_retry_config(3);
+        for context in [None, Some(&upload)] {
+            let error = run_stt_transcription(
+                provider.clone(),
+                b"synthetic wav",
+                &config,
+                None,
+                &CancellationToken::new(),
+                "synthetic ivrit failure",
+                context,
+            )
+            .await
+            .err()
+            .expect("the failed recording must remain recoverable");
+            assert!(error.to_string().contains("503"));
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        assert_eq!(config.max_retries, 3);
+    }
 
     struct FlakyProvider {
         calls: AtomicU32,
