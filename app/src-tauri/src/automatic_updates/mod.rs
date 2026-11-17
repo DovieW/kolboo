@@ -13,6 +13,7 @@ use tauri::{AppHandle, Manager, RunEvent, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use tokio_util::sync::CancellationToken;
 
+mod download;
 mod installation;
 use installation::InstallTarget;
 
@@ -20,7 +21,7 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(120);
 const DISABLED: &str = "This build uses manual downloads.";
 const CHECK_FAILED: &str =
-    "Couldn't check or download a verified update. Check your connection and try again.";
+    "Couldn't stage a signed update within its safety limits. Check your connection or download the release manually.";
 const INSTALL_FAILED: &str = "Couldn't install the update. Check installation-folder permissions and try again, or download the release.";
 
 #[derive(Clone, Copy, Debug, Default, Serialize, JsonSchema, PartialEq)]
@@ -48,7 +49,7 @@ pub struct UpdateStatus {
 
 #[derive(Default)]
 struct PendingUpdate {
-    download: Mutex<Option<(Update, Vec<u8>)>>,
+    download: Mutex<Option<(Update, download::VerifiedArchive)>>,
     status: Mutex<UpdateStatus>,
     target: Mutex<InstallTarget>,
     shutdown: CancellationToken,
@@ -176,13 +177,24 @@ async fn check_owned<R: Runtime>(app: &AppHandle<R>, _permit: OperationPermit) {
 }
 
 async fn stage<R: Runtime>(app: &AppHandle<R>) -> tauri_plugin_updater::Result<()> {
+    let key = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|config| config.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or(tauri_plugin_updater::Error::Network(
+            "Updater signing key unavailable".into(),
+        ))?;
     let updater = app.updater_builder().timeout(NETWORK_TIMEOUT).build()?;
-    stage_update(updater, &app.state::<PendingUpdate>()).await
+    stage_update(updater, &app.state::<PendingUpdate>(), key).await
 }
 
 async fn stage_update(
     updater: tauri_plugin_updater::Updater,
     pending: &PendingUpdate,
+    key: &str,
 ) -> tauri_plugin_updater::Result<()> {
     let found = updater.check().await?;
     pending.status.lock().unwrap().checked = true;
@@ -201,16 +213,14 @@ async fn stage_update(
     if !already_downloaded {
         phase(pending, UpdatePhase::Downloading, None);
         update.timeout = Some(NETWORK_TIMEOUT);
-        // Tauri verifies our public-key signature before returning any bytes.
-        let bytes = update.download(ignore_chunk, download_finished).await?;
+        // The bounded stager verifies the same Minisign contract as Tauri.
+        let bytes = download::download(&update, key).await?;
         *pending.download.lock().unwrap() = Some((update, bytes));
         log::info!("Signed update downloaded; will install when Kolboo is quit");
     }
     phase(pending, UpdatePhase::Ready, None);
     Ok(())
 }
-fn ignore_chunk(_: usize, _: Option<u64>) {}
-fn download_finished() {}
 
 fn status<R: Runtime>(app: &AppHandle<R>) -> UpdateStatus {
     let pending = app.state::<PendingUpdate>();
@@ -283,7 +293,11 @@ fn spawn_install(app: &AppHandle, quitting: bool) -> Result<(), String> {
     let app = app.clone();
     // Never hold a mutex or block the GUI thread across native installation.
     tauri::async_runtime::spawn_blocking(move || {
-        let failed = target.install(&update, &bytes).is_err();
+        let failed = bytes
+            .read_verified()
+            .map_err(|_| "Update verification failed".to_string())
+            .and_then(|contents| target.install(&update, &contents))
+            .is_err();
         let pending = app.state::<PendingUpdate>();
         // Release ownership atomically with reading any deferred Quit request.
         let quit = pending.installing.lock().unwrap().take().unwrap();

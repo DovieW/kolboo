@@ -55,6 +55,7 @@ tauri-utils = "~2.9.3"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-store = "2.4.4"
 tauri-plugin-updater = "~2.10.1"
+minisign-verify = "0.2.5"
 tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-cli = "~2.4.1"
 # IMPORTANT: Tauri CLI enforces that the JS package (@tauri-apps/plugin-dialog)
@@ -81,7 +82,7 @@ enigo = "0.6.1"
 arboard = "3.6.1"
 
 # Async runtime
-tokio = { version = "1.53.1", features = ["rt", "sync", "time", "net", "io-util"] }
+tokio = { version = "1.53.1", features = ["rt", "sync", "time", "net", "io-util", "fs"] }
 tokio-util = { version = "0.7.19", features = ["rt"] }  # CancellationToken
 
 # Settings and history
