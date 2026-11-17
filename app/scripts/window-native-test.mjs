@@ -292,6 +292,15 @@ try {
 				}),
 			]);
 			if (exited !== 0) throw new Error(`Native startup exited with ${exited}`);
+			const checkpoint = JSON.parse(
+				readFileSync(path.join(data, "diagnostics", "state.json"), "utf8"),
+			);
+			if (
+				checkpoint.phase !== "idle" ||
+				checkpoint.event.kind !== "shutdown" ||
+				checkpoint.clean_shutdown !== true
+			)
+				throw new Error("Orderly startup/exit must persist an idle, clean checkpoint");
 		} finally {
 			clearTimeout(exitTimer);
 			if (smoke && smoke.exitCode === null) smoke.kill("SIGTERM");

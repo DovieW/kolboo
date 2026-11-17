@@ -118,7 +118,7 @@
 		],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "04db1d2870d379cbb12227ab7c0e8c72f7aae57337fff1a7aaa2a355c31d8476"
+		"sha256": "c6938e1d96b3f11d87a86bb1ee14e6dc71e318e9be747be1cc7f82c40c95710d"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",

@@ -1665,6 +1665,9 @@ pub fn run() {
                 option_env!("VITE_SIGNED_UPDATER_ENABLED") == Some("true"),
             );
 
+            runtime_diagnostics::record(runtime_diagnostics::Event::Phase(
+                runtime_diagnostics::Phase::Idle,
+            ));
             Ok(())
         })
         .run(tauri::generate_context!())
