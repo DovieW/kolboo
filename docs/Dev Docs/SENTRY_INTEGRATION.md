@@ -87,6 +87,10 @@ that an unjournaled in-memory recording survives forced process termination.
 PulseAudio/FFmpeg discovery has time/output budgets and owned helper cleanup
 is bounded independently of a blocked reader.
 
+Playback uses eight workers and an eight-connection queue, an absolute
+three-second header deadline, and closes active sockets at shutdown. Native
+thread/descriptor exhaustion fails closed without growing the worker pool.
+
 ### Laptop development packages
 
 Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
