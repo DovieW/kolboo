@@ -67,6 +67,26 @@ run-local operation number; these are not account or transcript identifiers.
 This complements OS-level kill/resource monitoring. It does not install a
 privileged monitor and must not be presented as a fix for an unidentified kill.
 
+### Capture lifecycle hardening
+
+Native stream creation and its first delivered audio must acknowledge startup
+within eight seconds before the pipeline announces Recording. During recording,
+two seconds without input fails capture even when idle microphone recovery is
+disabled. A failed recording does not switch microphones silently. Epoch-scoped
+health watchers use the existing stop/error finalization path; stale watchers
+cannot stop a newer session or upload an incomplete capture.
+Terminal success/error/cancellation logging and local cost reporting are scoped to
+the originating request; late finalizers cannot finish the next recording's log.
+Empty normal transcripts also finalize their request rather than staying InProgress.
+
+Stop never reacquires the buffer lock of a worker that exceeded its join/drain
+deadline. Such a buffer is quarantined, its recovery path remains available
+without locking it, and mutating/reusing its audio is refused until process
+recovery. Existing saved recovery audio is retained; this is not a guarantee
+that an unjournaled in-memory recording survives forced process termination.
+PulseAudio/FFmpeg discovery has time/output budgets and owned helper cleanup
+is bounded independently of a blocked reader.
+
 ### Laptop development packages
 
 Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before

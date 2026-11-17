@@ -179,6 +179,7 @@ fn native_window_manager_integration() {
     crate::audio_capture::native_null_pcm_callbacks();
     crate::pipeline::native_recording_output(app.handle());
     crate::pipeline::native_completed_upload_retry(app.handle());
+    crate::pipeline::native_capture_health(&mut app);
     crate::sessions::normal_dictation_output::tests::native_output_warning(app.handle());
     crate::secrets::native_tests::native_wallet_reads(app.handle());
     // A real GTK screen with controlled fractional DPI, not a fake Window.

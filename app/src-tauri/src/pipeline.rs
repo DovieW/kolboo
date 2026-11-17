@@ -62,6 +62,8 @@ mod stt_provider_resolver;
 #[cfg(test)]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+pub(crate) use tests::native_capture_health;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::native_completed_upload_retry;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::native_live_output;
@@ -1105,6 +1107,20 @@ impl SharedPipeline {
         Ok(seconds)
     }
 
+    /// A stale health watcher cannot stop a newer recording. Busy transitions
+    /// are retried rather than blocking an executor thread on startup/cleanup.
+    pub(crate) fn capture_failed_for_epoch(&self, epoch: u64) -> Option<bool> {
+        let inner = match self.inner.try_lock() {
+            Ok(inner) => inner,
+            Err(std::sync::TryLockError::WouldBlock) => return Some(false),
+            Err(std::sync::TryLockError::Poisoned(_)) => return None,
+        };
+        if inner.session_epoch != epoch || inner.state != PipelineState::Recording {
+            return None;
+        }
+        Some(inner.audio_capture.recording_progress().1)
+    }
+
     pub fn recovery_path(&self) -> Option<std::path::PathBuf> {
         self.inner
             .lock()
@@ -1237,6 +1253,15 @@ impl SharedPipeline {
                 log::debug!("stt_complete reset to false (start_recording)");
                 inner.transition_to(PipelineState::Recording, "start_recording");
                 log::info!("Pipeline: Recording started");
+                let epoch = inner.session_epoch;
+                drop(inner);
+                if let Some(app) = self.app_handle.lock().ok().and_then(|app| app.clone()) {
+                    crate::recording_orchestration::spawn_capture_health_monitor(
+                        app,
+                        self.clone(),
+                        epoch,
+                    );
+                }
                 Ok(())
             }
             Err(e) => {

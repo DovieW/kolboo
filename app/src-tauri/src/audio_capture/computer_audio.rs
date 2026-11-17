@@ -1,4 +1,5 @@
 //! Linux opt-in microphone + monitor capture. No shell command interpolation.
+use super::helper_process::{query, retire};
 use super::{AudioBuffer, AudioCaptureError};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -9,23 +10,29 @@ use std::sync::{
 use std::thread::JoinHandle;
 
 pub struct Capture {
-    child: Child,
+    child: Option<Child>,
     worker: Option<JoinHandle<()>>,
     stopping: Arc<AtomicBool>,
+    clock: Arc<std::sync::atomic::AtomicU64>,
+    start: std::time::Instant,
 }
 
 pub fn available() -> bool {
     cfg!(target_os = "linux")
-        && Command::new("/usr/bin/ffmpeg")
-            .args(["-hide_banner", "-devices"])
-            .output()
-            .map(|output| {
-                output.status.success()
-                    && String::from_utf8_lossy(&output.stdout)
-                        .lines()
-                        .any(|line| line.contains("pulse"))
-            })
-            .unwrap_or(false)
+        && query(
+            {
+                let mut command = Command::new("/usr/bin/ffmpeg");
+                command.args(["-hide_banner", "-devices"]);
+                command
+            },
+            std::time::Duration::from_secs(2),
+        )
+        .map(|output| {
+            String::from_utf8_lossy(&output)
+                .lines()
+                .any(|line| line.contains("pulse"))
+        })
+        .unwrap_or(false)
 }
 
 impl Capture {
@@ -38,20 +45,18 @@ impl Capture {
                 "Computer audio requires Linux FFmpeg with PulseAudio input support".into(),
             ));
         }
-        let sink = Command::new("pactl")
-            .arg("get-default-sink")
-            .output()
-            .map_err(|_| {
-                AudioCaptureError::StreamStart(
-                    "Unable to find default computer audio output".into(),
-                )
-            })?;
-        if !sink.status.success() {
-            return Err(AudioCaptureError::StreamStart(
-                "Computer audio output is unavailable".into(),
-            ));
-        }
-        let monitor = format!("{}.monitor", String::from_utf8_lossy(&sink.stdout).trim());
+        let sink = query(
+            {
+                let mut command = Command::new("/usr/bin/pactl");
+                command.arg("get-default-sink");
+                command
+            },
+            std::time::Duration::from_secs(2),
+        )
+        .ok_or(AudioCaptureError::StreamStart(
+            "Unable to find default computer audio output".into(),
+        ))?;
+        let monitor = format!("{}.monitor", String::from_utf8_lossy(&sink).trim());
         Self::start_sources(buffer, active, "default", &monitor)
     }
 
@@ -98,6 +103,9 @@ impl Capture {
             .ok_or_else(|| AudioCaptureError::StreamStart("Capture pipe is unavailable".into()))?;
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = stopping.clone();
+        let clock = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let worker_clock = clock.clone();
+        let start = std::time::Instant::now();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let worker = std::thread::spawn(move || {
             let mut ready_tx = Some(ready_tx);
@@ -107,6 +115,11 @@ impl Capture {
                 if count == 0 {
                     break;
                 }
+                if worker_stopping.load(Ordering::Relaxed) {
+                    break;
+                }
+                worker_clock.store(start.elapsed().as_millis() as u64 + 1, Ordering::Relaxed);
+                crate::runtime_diagnostics::audio_callback(0);
                 if let Some(tx) = ready_tx.take() {
                     let _ = tx.send(());
                 }
@@ -126,9 +139,11 @@ impl Capture {
             mark_unexpected_end(&worker_stopping, &buffer);
         });
         let capture = Self {
-            child,
+            child: Some(child),
             worker: Some(worker),
             stopping,
+            clock,
+            start,
         };
         if ready_rx
             .recv_timeout(std::time::Duration::from_secs(8))
@@ -140,6 +155,28 @@ impl Capture {
             ));
         }
         Ok(capture)
+    }
+
+    pub(super) fn stop(&mut self) -> bool {
+        self.stopping.store(true, Ordering::Relaxed);
+        let stopped = retire(
+            self.child.take(),
+            self.worker.take(),
+            std::time::Duration::from_secs(1),
+        );
+        if !stopped {
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioStopTimedOut,
+            ));
+        }
+        stopped
+    }
+    pub(super) fn is_stalled(&self) -> bool {
+        self.worker.as_ref().is_none_or(JoinHandle::is_finished)
+            || super::callbacks_stalled(
+                self.start.elapsed().as_millis() as u64 + 1,
+                self.clock.load(Ordering::Relaxed),
+            )
     }
 }
 
@@ -156,12 +193,7 @@ fn mark_unexpected_end(stopping: &AtomicBool, buffer: &Mutex<AudioBuffer>) {
 
 impl Drop for Capture {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Relaxed);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        self.stop();
     }
 }
 
@@ -175,22 +207,45 @@ pub(crate) mod tests {
             Ok("1")
         );
         let buffer = Arc::new(Mutex::new(AudioBuffer::new(16000, 1, 10.0)));
-        let mut capture = Capture::start_sources(
-            buffer.clone(),
-            Arc::new(AtomicBool::new(true)),
-            "kolboo_test_a",
-            "kolboo_test_output.monitor",
-        )
-        .unwrap();
+        assert!(available());
+        let mut capture = Capture::start(buffer.clone(), Arc::new(AtomicBool::new(true))).unwrap();
+        assert!(!capture.is_stalled());
         assert!(!buffer.lock().unwrap().journal_failed);
-        capture.child.kill().unwrap(); // Actual unexpected helper loss, not a fake callback.
+        capture.child.as_mut().unwrap().kill().unwrap(); // Actual unexpected helper loss, not a fake callback.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while !capture.worker.as_ref().unwrap().is_finished() {
             assert!(std::time::Instant::now() < deadline);
             std::thread::yield_now();
         }
+        assert!(capture.is_stalled());
         drop(capture);
         assert!(buffer.lock().unwrap().journal_failed);
+        let buffer = Arc::new(Mutex::new(AudioBuffer::new(16000, 1, 10.0)));
+        let capture = Capture::start(buffer.clone(), Arc::new(AtomicBool::new(true))).unwrap();
+        capture.stopping.store(true, Ordering::Relaxed);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !capture.worker.as_ref().unwrap().is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(!buffer.lock().unwrap().journal_failed);
+        drop(capture);
+    }
+
+    pub(crate) fn stalled_capture() -> (Capture, std::sync::mpsc::Sender<()>) {
+        let (release, held) = std::sync::mpsc::channel();
+        (
+            Capture {
+                child: None,
+                worker: Some(std::thread::spawn(move || {
+                    let _ = held.recv();
+                })),
+                stopping: Arc::new(AtomicBool::new(false)),
+                clock: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                start: std::time::Instant::now() - std::time::Duration::from_secs(3),
+            },
+            release,
+        )
     }
 
     #[test]

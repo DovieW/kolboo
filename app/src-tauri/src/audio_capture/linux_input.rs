@@ -1,10 +1,11 @@
 //! PipeWire/PulseAudio input identity and owned capture. No shell, global audio
 //! routing changes, or process-wide PULSE_SOURCE environment mutations.
+use super::helper_process::{query, retire};
 use super::{dispatch::CaptureDispatch, AudioCaptureError, AudioInputDeviceInfo};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 use std::process::{Child, Command, Stdio};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -72,37 +73,6 @@ pub(super) fn source_name(id: &str) -> Option<String> {
     (!name.is_empty() && !name.contains('\0')).then_some(name)
 }
 
-// A stalled sound server must not freeze native tray construction. Redirecting
-// stdout to an anonymous file avoids both pipe deadlocks and unbounded RAM use.
-fn query(mut command: Command, timeout: Duration) -> Option<Vec<u8>> {
-    let mut output = tempfile::tempfile().ok()?;
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(output.try_clone().ok()?))
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let deadline = Instant::now() + timeout;
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    };
-    if !success || output.metadata().ok()?.len() > 1024 * 1024 {
-        return None;
-    }
-    output.seek(SeekFrom::Start(0)).ok()?;
-    let mut bytes = Vec::new();
-    output.take(1024 * 1024 + 1).read_to_end(&mut bytes).ok()?;
-    Some(bytes)
-}
-
 pub(super) fn list_devices() -> Option<Vec<AudioInputDeviceInfo>> {
     let mut command = Command::new("/usr/bin/pactl");
     command.args(["--format=json", "list", "sources"]);
@@ -117,9 +87,10 @@ fn discover(helper_available: bool, command: Command) -> Option<Vec<AudioInputDe
 }
 
 pub(super) struct Capture {
-    child: Child,
+    child: Option<Child>,
     worker: Option<JoinHandle<()>>,
     stopping: Arc<AtomicBool>,
+    fence: Arc<super::dispatch::CaptureFence>,
 }
 
 impl Capture {
@@ -170,6 +141,7 @@ impl Capture {
         let mut stdout = child.stdout.take().expect("capture stdout is piped");
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = stopping.clone();
+        let fence = dispatch.fence.clone();
         crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::AudioConfigured {
             sample_rate: None,
             channels: None,
@@ -180,6 +152,9 @@ impl Capture {
             let mut pending = Vec::with_capacity(4100);
             while let Ok(count) = stdout.read(&mut bytes) {
                 if count == 0 {
+                    break;
+                }
+                if worker_stopping.load(Ordering::Relaxed) {
                     break;
                 }
                 pending.extend_from_slice(&bytes[..count]);
@@ -201,23 +176,29 @@ impl Capture {
             }
         });
         Ok(Self {
-            child,
+            child: Some(child),
             worker: Some(worker),
             stopping,
+            fence,
         })
+    }
+
+    fn stop(&mut self, budget: Duration) {
+        self.stopping.store(true, Ordering::Relaxed);
+        if !retire(self.child.take(), self.worker.take(), budget) {
+            self.fence.fail_stream();
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioStopTimedOut,
+            ));
+        }
     }
 }
 
 impl Drop for Capture {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Relaxed);
         // Closing the producer releases a blocked reader even during suspend or
         // server failure. Join before the shared capture queue is drained.
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        self.stop(Duration::from_secs(1));
     }
 }
 

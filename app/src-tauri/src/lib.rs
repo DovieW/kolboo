@@ -636,9 +636,10 @@ pub(crate) fn stop_recording(
                 }
             }
 
+            let log_id = request_id.as_deref().unwrap_or_default();
             // Log transcription start for this request
             if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                log_store.with_current(|log| {
+                log_store.with_current_id(log_id, |log| {
                     // Do not include recording time in the request "Total" duration.
                     log.mark_processing_started();
                     log.info("Recording stopped, starting transcription");
@@ -684,7 +685,7 @@ pub(crate) fn stop_recording(
                             "Transcription completed; Quick Replace rewrite pending"
                         };
 
-                        log_store.with_current(|log| {
+                        log_store.with_current_id(log_id, |log| {
                             sessions::recording_finalization::record_transcription_success(
                                 log,
                                 sessions::recording_finalization::TranscriptionSuccessLogUpdate {
@@ -860,22 +861,19 @@ pub(crate) fn stop_recording(
                             );
                         }
 
-                        // Mark history entry as success with empty text (keeps timeline consistent)
+                        // Empty normal results still own a terminal log/history
+                        // transition; do not leave their request InProgress.
                         if !is_quick_ask_session {
-                            if let Some(req_id) = request_id.as_ref() {
-                                let _ = history_request_lifecycle::apply_request_history_update(
-                                    &app_clone,
-                                    history::RequestHistoryUpdate::CompleteSuccess {
-                                        request_id: req_id.clone(),
-                                        text: String::new(),
-                                    },
-                                );
-                            }
-
-                            sessions::recording_finalization::persist_history_llm_metadata(
+                            sessions::normal_dictation_output::finalize_normal_dictation_request(
                                 &app_clone,
-                                request_id.as_deref(),
-                                &result,
+                                sessions::normal_dictation_output::NormalDictationFinalizationRequest {
+                                    pipeline: &pipeline_clone,
+                                    request_id: request_id.as_deref(),
+                                    result: &result,
+                                    output_value: "",
+                                    quick_replace_failure: None,
+                                    complete_request_log_after_output,
+                                },
                             );
                         }
 
@@ -939,7 +937,7 @@ pub(crate) fn stop_recording(
 
                         // Mark request as cancelled (best-effort)
                         if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                            log_store.with_current(|log| {
+                            log_store.with_current_id(log_id, |log| {
                                 log.warn("Recording cancelled by user");
                                 log.complete_cancelled();
                             });
@@ -1002,7 +1000,7 @@ pub(crate) fn stop_recording(
                     );
 
                     if let Some(log_store) = app_clone.try_state::<RequestLogStore>() {
-                        log_store.with_current(|log| {
+                        log_store.with_current_id(log_id, |log| {
                             log.error_with_details(
                                 format!("Transcription failed: {}", e),
                                 crate::request_log::format_error_chain(&e),

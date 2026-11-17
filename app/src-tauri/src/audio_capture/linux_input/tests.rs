@@ -1,5 +1,28 @@
 use super::super::dispatch::CaptureFence;
 use super::*;
+
+#[test]
+fn a_retired_reader_that_misses_its_deadline_invalidates_its_stream_owner() {
+    let fence = Arc::new(super::super::dispatch::CaptureFence::default());
+    let epoch = fence.begin();
+    let (release, blocked) = std::sync::mpsc::channel();
+    let mut capture = Capture {
+        child: None,
+        worker: Some(std::thread::spawn(move || {
+            let _ = blocked.recv();
+        })),
+        stopping: Arc::new(AtomicBool::new(false)),
+        fence: fence.clone(),
+    };
+    capture.stop(Duration::ZERO);
+    assert!(fence.stream_failed());
+    assert!(fence.failed(epoch));
+    assert!(
+        fence.failed(fence.begin()),
+        "a retired source cannot be reused by a later capture epoch"
+    );
+    release.send(()).unwrap();
+}
 use crossbeam_queue::ArrayQueue;
 use serde_json::json;
 
@@ -120,7 +143,7 @@ pub(crate) fn native_inputs() {
         clock,
     )
     .unwrap();
-    let expected_pid = capture.child.id().to_string();
+    let expected_pid = capture.child.as_ref().unwrap().id().to_string();
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         let mut command = Command::new("/usr/bin/pactl");
@@ -151,24 +174,24 @@ pub(crate) fn native_inputs() {
         assert!(Instant::now() < deadline);
         std::thread::yield_now();
     }
+    capture.stopping.store(true, Ordering::Relaxed);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !capture.worker.as_ref().unwrap().is_finished() {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
     drop(capture);
     let mut audio = AudioCapture::new();
     let missing = format!(
         "{ID_PREFIX}{}",
         URL_SAFE_NO_PAD.encode("kolboo_nonexistent_source")
     );
-    audio.start_with_device_name(2.0, Some(&missing)).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !audio
-        .capture_handle
-        .as_ref()
-        .unwrap()
-        .thread_handle
-        .is_finished()
-    {
-        assert!(Instant::now() < deadline);
-        std::thread::yield_now();
-    }
+    assert!(audio.start_with_device_name(2.0, Some(&missing)).is_err());
+    assert!(!audio.is_recording());
+    assert!(
+        audio.capture_handle.is_none(),
+        "failed readiness must retire its capture owner"
+    );
     audio.ensure_stream_running(Some(&devices[0].id)).unwrap();
     audio.begin_recording_with_pre_roll(2.0);
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -196,12 +219,39 @@ pub(crate) fn native_inputs() {
         audio.stream_device_name.as_deref(),
         Some(devices[1].id.as_str())
     );
+    audio
+        .capture_handle
+        .as_ref()
+        .unwrap()
+        .command_tx
+        .send(super::super::CaptureCommand::Stop)
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !audio
+        .capture_handle
+        .as_ref()
+        .unwrap()
+        .thread_handle
+        .is_finished()
+    {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    audio.ensure_stream_running(Some(&devices[1].id)).unwrap();
+    assert!(audio.capture_handle.is_some());
     audio.stop();
     native_recovery(&devices[0].id);
 }
 
 fn native_recovery(selected: &str) {
-    for outcome in ["rebuild", "rebind", "failed"] {
+    for outcome in [
+        "rebuild",
+        "rebind",
+        "failed",
+        "active",
+        "never-ready",
+        "retired",
+    ] {
         native_recovery_outcome(selected, outcome);
     }
 }
@@ -230,7 +280,17 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
     check.play().unwrap();
     check.check().unwrap();
     drop(check);
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    if outcome == "active" {
+        audio.capture_fence.begin();
+        audio.recording_active.store(true, Ordering::Relaxed);
+    }
+    if outcome == "retired" {
+        audio.capture_fence.fail_stream();
+    }
     let args = CaptureThreadArgs {
+        ready: (outcome == "never-ready")
+            .then_some((ready_tx, Instant::now() + Duration::from_millis(500))),
         capture_fence: audio.capture_fence.clone(),
         device,
         config,
@@ -244,31 +304,62 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
         command_rx,
         event_tx,
         vad_config: VadAutoStopConfig::default(),
-        auto_recover_enabled: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        auto_recover_enabled: Arc::new(std::sync::atomic::AtomicBool::new(outcome != "active")),
         desired_device_name: Arc::new(std::sync::Mutex::new(Some(selected.into()))),
     };
     let mut calls = 0;
-    run_capture_thread_with_builder(args, Instant::now() - Duration::from_secs(3), |device, config, format, start, clock, dispatch| {
-        calls += 1;
-        match calls {
-            1 => {
-                clock.store(1, Ordering::Relaxed);
-                Capture::start_command(shell("exec sleep 600"), dispatch.clone(), start, clock).map(InputStream::Pulse)
+    let result = run_capture_thread_with_builder(
+        args,
+        Instant::now() - Duration::from_secs(3),
+        |device, config, format, start, clock, dispatch| {
+            calls += 1;
+            match calls {
+                1 => {
+                    if outcome != "never-ready" {
+                        clock.store(1, Ordering::Relaxed);
+                    }
+                    Capture::start_command(shell("exec sleep 600"), dispatch.clone(), start, clock)
+                        .map(InputStream::Pulse)
+                }
+                2 if outcome == "rebuild" => {
+                    command_tx.send(CaptureCommand::Stop).unwrap();
+                    build_stream(device, config, format, start, clock, dispatch)
+                }
+                2 => Err(AudioCaptureError::StreamBuild(
+                    "synthetic device rebuild failure".into(),
+                )),
+                3 => {
+                    assert!(
+                        matches!(device, InputDevice::Pulse(source) if source == &source_name(selected).unwrap())
+                    );
+                    command_tx.send(CaptureCommand::Stop).unwrap();
+                    if outcome == "failed" {
+                        return Err(AudioCaptureError::StreamBuild(
+                            "synthetic rebind failure".into(),
+                        ));
+                    }
+                    build_stream(device, config, format, start, clock, dispatch)
+                }
+                _ => panic!("recovery must stop after the selected source is rebound"),
             }
-            2 if outcome == "rebuild" => {
-                command_tx.send(CaptureCommand::Stop).unwrap();
-                build_stream(device, config, format, start, clock, dispatch)
-            }
-            2 => Err(AudioCaptureError::StreamBuild("synthetic device rebuild failure".into())),
-            3 => {
-                assert!(matches!(device, InputDevice::Pulse(source) if source == &source_name(selected).unwrap()));
-                command_tx.send(CaptureCommand::Stop).unwrap();
-                if outcome == "failed" { return Err(AudioCaptureError::StreamBuild("synthetic rebind failure".into())); }
-                build_stream(device, config, format, start, clock, dispatch)
-            }
-            _ => panic!("recovery must stop after the selected source is rebound"),
+        },
+    );
+    if outcome == "active" || outcome == "never-ready" || outcome == "retired" {
+        assert!(result.is_err());
+        assert_eq!(
+            calls, 1,
+            "recording failure must not rebuild or switch inputs"
+        );
+        if outcome == "active" {
+            assert!(audio.capture_fence.latest_failed());
+        } else if outcome == "retired" {
+            assert!(audio.capture_fence.stream_failed());
+        } else {
+            assert!(ready_rx.try_recv().is_err());
         }
-    }).unwrap();
+        return;
+    }
+    result.unwrap();
     assert_eq!(calls, if outcome == "rebuild" { 2 } else { 3 });
 }
 
@@ -341,7 +432,7 @@ fn helper_cancellation_owns_child_and_does_not_fail_later_recordings() {
         Arc::new(AtomicU64::new(0)),
     )
     .unwrap();
-    let pid = capture.child.id();
+    let pid = capture.child.as_ref().unwrap().id();
     assert!(!capture.is_finished());
     let stream = super::super::InputStream::Pulse(capture);
     assert!(stream.check().is_ok());

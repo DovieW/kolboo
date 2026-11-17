@@ -25,6 +25,7 @@ use std::time::Instant;
 pub mod computer_audio;
 mod device_selection;
 mod dispatch;
+mod helper_process;
 #[cfg(target_os = "linux")]
 mod linux_input;
 use dispatch::{
@@ -84,6 +85,11 @@ const MAX_PRE_ROLL_SAMPLES: usize = 10_000_000;
 const STOP_JOIN_TIMEOUT_MS: u64 = 2500;
 const WATCHDOG_CHECK_EVERY_MS: u64 = 100;
 const WATCHDOG_STALL_MS: u64 = 2000;
+const STARTUP_TIMEOUT_MS: u64 = 8000;
+
+fn callbacks_stalled(now_ms: u64, last_ms: u64) -> bool {
+    now_ms.saturating_sub(last_ms) >= WATCHDOG_STALL_MS
+}
 
 fn capture_join_succeeded(
     result: Result<thread::Result<Result<(), AudioCaptureError>>, mpsc::RecvTimeoutError>,
@@ -896,6 +902,8 @@ pub struct AudioCapture {
     stream_device_name: Option<String>,
     // An unclean recovery-worker shutdown must not reuse its buffer for a new session.
     recovery_shutdown_failed: bool,
+    recovery_path: Option<std::path::PathBuf>,
+    last_progress: AtomicU64,
     sample_rate: u32,
     channels: u16,
     vad_config: VadAutoStopConfig,
@@ -926,6 +934,8 @@ impl AudioCapture {
             capture_handle: None,
             stream_device_name: None,
             recovery_shutdown_failed: false,
+            recovery_path: None,
+            last_progress: AtomicU64::new(0),
             computer_audio_enabled: false,
             computer_capture: None,
             sample_rate: 44100,
@@ -951,6 +961,8 @@ impl AudioCapture {
             capture_handle: None,
             stream_device_name: None,
             recovery_shutdown_failed: false,
+            recovery_path: None,
+            last_progress: AtomicU64::new(0),
             computer_audio_enabled: false,
             computer_capture: None,
             sample_rate: 44100,
@@ -1042,8 +1054,10 @@ impl AudioCapture {
         input_device_name: Option<&str>,
     ) -> Result<(), AudioCaptureError> {
         self.ensure_recovery_worker_stopped()?;
+        self.last_progress.store(0, Ordering::Relaxed);
         if self.computer_audio_enabled {
             self.stop();
+            self.ensure_recovery_worker_stopped()?;
             self.sample_rate = 16000;
             self.channels = 1;
             if let Ok(mut buffer) = self.buffer.lock() {
@@ -1099,16 +1113,16 @@ impl AudioCapture {
     }
 
     fn stop_recording_with_drain_timeout(&mut self, drain_timeout: std::time::Duration) {
-        self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
         self.capture_fence.stop();
+        self.stop_computer_capture();
         // Closing the recording boundary is not enough for Hot Mic: callbacks
         // that already owned this epoch must finish before encoding its WAV.
         if !self.capture_fence.drain(drain_timeout) {
-            if let Ok(buffer) = self.buffer.lock() {
-                self.capture_fence.fail(buffer.recording_epoch);
-                buffer.fail_live_input();
-            }
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioStopTimedOut,
+            ));
+            self.quarantine_capture();
         }
         // NOTE: We intentionally do NOT clear live_audio_tx here.
         // The worker thread must be allowed to flush any remaining queued chunks
@@ -1123,7 +1137,7 @@ impl AudioCapture {
         if journal_backed {
             // Home closes Hot Mic's stream. Its pre-roll is no longer recent and
             // must not be prepended to the next session after a long idle period.
-            if let Ok(mut pre_roll) = self.pre_roll.lock() {
+            if let Ok(mut pre_roll) = self.pre_roll.try_lock() {
                 pre_roll.clear();
             }
         }
@@ -1135,6 +1149,12 @@ impl AudioCapture {
     /// new mono chunks without waiting for provider capacity. Clear after the
     /// worker has drained on stop so finalization can close input.
     pub fn set_live_audio_tx(&mut self, tx: Option<StreamingAudioSender>) {
+        if self.recovery_shutdown_failed {
+            if let Some(sender) = tx {
+                sender.fail_input();
+            }
+            return;
+        }
         match self.buffer.lock() {
             Ok(mut buffer) => buffer.set_live_audio_tx(tx),
             Err(_) => {
@@ -1254,6 +1274,9 @@ impl AudioCapture {
         let auto_recover = self.mic_auto_recover_enabled.clone();
         let desired_device_name = self.desired_device_name.clone();
         let capture_fence = self.capture_fence.clone();
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let startup_deadline =
+            Instant::now() + std::time::Duration::from_millis(STARTUP_TIMEOUT_MS);
 
         // Spawn capture thread
         let thread_handle = thread::spawn(move || {
@@ -1273,6 +1296,7 @@ impl AudioCapture {
                 auto_recover_enabled: auto_recover,
                 desired_device_name,
                 capture_fence,
+                ready: Some((ready_tx, startup_deadline)),
             })
         });
 
@@ -1282,7 +1306,28 @@ impl AudioCapture {
             thread_handle,
         });
 
-        Ok(())
+        self.finish_capture_startup(
+            ready_rx,
+            std::time::Duration::from_millis(STARTUP_TIMEOUT_MS + 250),
+        )
+    }
+
+    fn finish_capture_startup(
+        &mut self,
+        ready: mpsc::Receiver<Result<(), String>>,
+        timeout: std::time::Duration,
+    ) -> Result<(), AudioCaptureError> {
+        let result = ready.recv_timeout(timeout);
+        match result {
+            Ok(Ok(())) => Ok(()),
+            failure => {
+                self.stop();
+                Err(AudioCaptureError::StreamStart(match failure {
+                    Ok(Err(message)) => message,
+                    _ => "Microphone did not deliver audio before its startup deadline".into(),
+                }))
+            }
+        }
     }
 
     /// Get the current VAD configuration
@@ -1434,10 +1479,13 @@ impl AudioCapture {
 
     /// Stop recording without returning audio data
     pub fn stop(&mut self) {
+        self.stop_with_join_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS));
+    }
+    fn stop_with_join_timeout(&mut self, timeout: std::time::Duration) {
         self.stream_device_name = None;
         self.capture_fence.stop();
-        self.computer_capture = None;
         self.recording_active.store(false, Ordering::Relaxed);
+        self.stop_computer_capture();
         if let Some(handle) = self.capture_handle.take() {
             log::info!("Stopping audio capture");
 
@@ -1452,17 +1500,37 @@ impl AudioCapture {
                 let _ = join_tx.send(res);
             });
 
-            let stopped_cleanly = capture_join_succeeded(
-                join_rx.recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS)),
-            );
-            if !stopped_cleanly && self.recovery_path().is_some() {
-                self.recovery_shutdown_failed = true;
-                // Freeze this journal before it can be offered for recovery. A
-                // detached worker may still drain old chunks after a timeout.
-                if let Ok(mut buffer) = self.buffer.lock() {
-                    buffer.journal_failed = true;
+            let joined = join_rx.recv_timeout(timeout);
+            let owner_lost = joined.is_err();
+            let stopped_cleanly = capture_join_succeeded(joined);
+            if !stopped_cleanly {
+                self.capture_fence.fail_latest();
+                if owner_lost || self.recovery_path.is_some() {
+                    self.quarantine_capture();
                 }
             }
+        }
+        if self.capture_fence.stream_failed() {
+            self.quarantine_capture();
+        }
+    }
+
+    fn stop_computer_capture(&mut self) {
+        if let Some(mut capture) = self.computer_capture.take() {
+            if !capture.stop() {
+                self.quarantine_capture();
+            }
+        }
+    }
+
+    fn quarantine_capture(&mut self) {
+        // Never wait on a lock held by the worker that just missed its deadline.
+        // Its buffer/journal cannot be reused or exposed as completed recovery.
+        self.recovery_shutdown_failed = true;
+        self.capture_fence.fail_latest();
+        if let Ok(mut buffer) = self.buffer.try_lock() {
+            buffer.journal_failed = true;
+            buffer.fail_live_input();
         }
     }
 
@@ -1526,17 +1594,42 @@ impl AudioCapture {
 
 impl AudioCaptureBackend for AudioCapture {
     fn recording_progress(&self) -> (f64, bool) {
+        if self
+            .computer_capture
+            .as_ref()
+            .is_some_and(computer_audio::Capture::is_stalled)
+        {
+            return (
+                f64::from_bits(self.last_progress.load(Ordering::Relaxed)),
+                true,
+            );
+        }
+        if self.recovery_shutdown_failed {
+            return (
+                f64::from_bits(self.last_progress.load(Ordering::Relaxed)),
+                true,
+            );
+        }
         self.buffer
-            .lock()
+            .try_lock()
             .map(|buffer| {
+                let seconds = buffer.captured_samples as f64
+                    / buffer.sample_rate.max(1) as f64
+                    / buffer.channels.max(1) as f64;
+                self.last_progress
+                    .store(seconds.to_bits(), Ordering::Relaxed);
                 (
-                    buffer.captured_samples as f64
-                        / buffer.sample_rate.max(1) as f64
-                        / buffer.channels.max(1) as f64,
+                    seconds,
                     buffer.journal_failed || self.capture_fence.failed(buffer.recording_epoch),
                 )
             })
-            .unwrap_or((0.0, true))
+            .unwrap_or_else(|error| {
+                (
+                    f64::from_bits(self.last_progress.load(Ordering::Relaxed)),
+                    matches!(error, std::sync::TryLockError::Poisoned(_))
+                        || self.capture_fence.latest_failed(),
+                )
+            })
     }
     fn set_computer_audio(&mut self, enabled: bool) -> Result<(), AudioCaptureError> {
         if enabled && !computer_audio::available() {
@@ -1548,10 +1641,7 @@ impl AudioCaptureBackend for AudioCapture {
         Ok(())
     }
     fn recovery_path(&self) -> Option<std::path::PathBuf> {
-        self.buffer
-            .lock()
-            .ok()
-            .and_then(|buffer| buffer.recovery_path.clone())
+        self.recovery_path.clone()
     }
     fn discard_recovery(&mut self) -> Result<(), AudioCaptureError> {
         self.ensure_recovery_worker_stopped()?;
@@ -1568,6 +1658,7 @@ impl AudioCaptureBackend for AudioCapture {
                 ));
             }
         }
+        self.recovery_path = None;
         Ok(())
     }
     fn finish_recovery(&mut self) -> Result<(), AudioCaptureError> {
@@ -1601,6 +1692,7 @@ impl AudioCaptureBackend for AudioCapture {
                     AudioCaptureError::ThreadError("Could not clean up empty recording".into())
                 })?;
                 buffer.recovery_path = None;
+                self.recovery_path = None;
             }
         }
         Ok(())
@@ -1616,7 +1708,8 @@ impl AudioCaptureBackend for AudioCapture {
             .map_err(|_| AudioCaptureError::ThreadError("Recovery buffer unavailable".into()))?;
         buffer.journal = None;
         buffer.journal_failed = false;
-        buffer.recovery_path = path;
+        buffer.recovery_path = path.clone();
+        self.recovery_path = path;
         Ok(())
     }
     fn set_paused(&mut self, paused: bool) -> Result<(), AudioCaptureError> {
@@ -1722,6 +1815,7 @@ impl Drop for AudioCapture {
 }
 
 struct CaptureThreadArgs {
+    ready: Option<(mpsc::SyncSender<Result<(), String>>, Instant)>,
     capture_fence: Arc<CaptureFence>,
     device: InputDevice,
     config: cpal::StreamConfig,
@@ -1950,7 +2044,16 @@ fn build_stream(
 
 /// Run the audio capture in a dedicated thread
 fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> {
-    run_capture_thread_with_builder(args, std::time::Instant::now(), build_stream)
+    let ready = args.ready.as_ref().map(|(sender, _)| sender.clone());
+    let fence = args.capture_fence.clone();
+    let result = run_capture_thread_with_builder(args, std::time::Instant::now(), build_stream);
+    if let Err(error) = &result {
+        fence.fail_latest();
+        if let Some(ready) = ready {
+            let _ = ready.try_send(Err(error.to_string()));
+        }
+    }
+    result
 }
 
 // Keep native stream creation at one boundary; recovery owns its state machine.
@@ -1972,6 +2075,7 @@ where
     use std::time::Duration;
 
     let CaptureThreadArgs {
+        mut ready,
         capture_fence,
         mut device,
         config,
@@ -2201,6 +2305,38 @@ where
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 stream.check()?;
+                if capture_fence.stream_failed() {
+                    return Err(AudioCaptureError::ThreadError(
+                        "A retired microphone helper did not stop; restart before recording again"
+                            .into(),
+                    ));
+                }
+                let now_ms = start.elapsed().as_millis() as u64;
+                let last_ms = last_callback_ms.load(Ordering::Relaxed);
+                if let Some((_, deadline)) = &ready {
+                    if last_ms != 0 {
+                        if let Some((ready, _)) = ready.take() {
+                            let _ = ready.try_send(Ok(()));
+                        }
+                    } else if Instant::now() >= *deadline {
+                        return Err(AudioCaptureError::StreamStart(
+                            "Microphone opened but delivered no audio".into(),
+                        ));
+                    } else {
+                        continue;
+                    }
+                }
+                // Detect loss during a recording regardless of the idle recovery
+                // preference. Never silently replace a recording's input device.
+                if recording_active.load(Ordering::Relaxed) && callbacks_stalled(now_ms, last_ms) {
+                    capture_fence.fail_latest();
+                    crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                        crate::runtime_diagnostics::Failure::AudioCallbackStalled,
+                    ));
+                    return Err(AudioCaptureError::StreamStart(
+                        "Microphone stopped delivering audio; the recording is retained".into(),
+                    ));
+                }
                 // Watchdog: if we're idle and callbacks have stalled, attempt to restart.
                 if !auto_recover_enabled.load(Ordering::Relaxed) {
                     continue;
@@ -2209,14 +2345,12 @@ where
                     continue;
                 }
 
-                let now_ms = start.elapsed().as_millis() as u64;
-                let last_ms = last_callback_ms.load(Ordering::Relaxed);
                 if last_ms == 0 {
                     // Stream may not have delivered a callback yet.
                     continue;
                 }
 
-                if now_ms.saturating_sub(last_ms) < WATCHDOG_STALL_MS {
+                if !callbacks_stalled(now_ms, last_ms) {
                     continue;
                 }
 
@@ -2383,6 +2517,7 @@ pub(crate) fn native_null_pcm_callbacks() {
             event_rx,
             thread_handle: thread::spawn(move || {
                 run_capture_thread(CaptureThreadArgs {
+                    ready: None,
                     device: InputDevice::Cpal(
                         cpal::default_host()
                             .default_input_device()
@@ -2461,6 +2596,104 @@ pub(crate) fn native_null_pcm_callbacks() {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn stop_timeout_never_reacquires_the_stuck_workers_buffer() {
+        use super::*;
+        let temp = tempfile::tempdir().unwrap();
+        let mut capture = AudioCapture::new();
+        capture
+            .set_recovery_path(Some(temp.path().join("retained.pcm")))
+            .unwrap();
+        capture.begin_recording_with_pre_roll(1.0);
+        let buffer = capture.buffer.clone();
+        let (locked_tx, locked_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (command_tx, _command_rx) = mpsc::channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        capture.capture_handle = Some(CaptureHandle {
+            command_tx,
+            event_rx,
+            thread_handle: thread::spawn(move || {
+                let _held = buffer.lock().unwrap();
+                locked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(())
+            }),
+        });
+        locked_rx.recv().unwrap();
+        capture.stop_with_join_timeout(std::time::Duration::ZERO);
+        assert!(capture.recovery_shutdown_failed);
+        assert!(capture.recovery_path().is_some());
+        assert!(AudioCaptureBackend::recording_progress(&capture).1);
+        assert!(capture.finish_recovery().is_err());
+        assert!(capture.set_recovery_path(None).is_err());
+        assert!(capture.discard_recovery().is_err());
+        assert!(capture.start_recording_session(1.0, None).is_err());
+        // Pipeline error/reset cleanup clears this sender after stop. It too
+        // must not re-enter the mutex owned by the quarantined capture worker.
+        capture.set_live_audio_tx(None);
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn readiness_requires_a_real_success_and_cleans_up_every_failed_start() {
+        use super::*;
+        for outcome in [
+            Some(Ok(())),
+            Some(Err("synthetic stream failure".into())),
+            None,
+        ] {
+            let mut capture = AudioCapture::new();
+            let (tx, rx) = mpsc::sync_channel(1);
+            let expected = matches!(&outcome, Some(Ok(())));
+            if let Some(outcome) = outcome {
+                tx.send(outcome).unwrap();
+            }
+            drop(tx);
+            assert_eq!(
+                capture
+                    .finish_capture_startup(rx, std::time::Duration::ZERO)
+                    .is_ok(),
+                expected
+            );
+            assert!(!capture.is_recording());
+        }
+        let mut capture = AudioCapture::new();
+        let (_tx, rx) = mpsc::sync_channel(1);
+        assert!(capture
+            .finish_capture_startup(rx, std::time::Duration::ZERO)
+            .is_err());
+        assert!(callbacks_stalled(WATCHDOG_STALL_MS, 0));
+        assert!(callbacks_stalled(4000, 2000));
+        assert!(!callbacks_stalled(4000, 2001));
+        assert!(!callbacks_stalled(1000, 2000));
+        let held = capture.buffer.lock().unwrap();
+        assert_eq!(
+            AudioCaptureBackend::recording_progress(&capture),
+            (0.0, false)
+        );
+        drop(held);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stalled_computer_capture_is_detected_and_failed_cleanup_is_quarantined() {
+        use super::*;
+        let mut capture = AudioCapture::new();
+        let (computer, release) = computer_audio::tests::stalled_capture();
+        capture.computer_capture = Some(computer);
+        assert!(AudioCaptureBackend::recording_progress(&capture).1);
+        capture.computer_audio_enabled = true;
+        assert!(capture.start_recording_session(1.0, None).is_err());
+        assert!(capture.computer_capture.is_none());
+        assert!(capture.recovery_shutdown_failed);
+        assert!(capture.start_recording_session(1.0, None).is_err());
+        release.send(()).unwrap();
+        let mut capture = AudioCapture::new();
+        capture.capture_fence.fail_stream();
+        capture.stop();
+        assert!(capture.recovery_shutdown_failed);
+    }
+    #[test]
     fn capture_join_outcomes_never_label_lost_or_panicked_workers_clean() {
         use super::*;
         use std::time::Duration;
@@ -2494,9 +2727,10 @@ mod tests {
         assert!(AudioCaptureBackend::recording_progress(&capture).1);
         assert!(!capture.is_recording());
         assert!(queue.pop().is_some());
-        // Available audio remains encodable for explicit recovery. The pipeline
-        // checks the independent incomplete flag after encoding, before upload.
-        assert!(capture.stop_and_get_wav().is_ok());
+        // A timed-out owner is quarantined, not automatically encoded while
+        // callbacks may still mutate its buffer. Reuse requires process recovery.
+        assert!(capture.stop_and_get_wav().is_err());
+        assert!(capture.start_recording_session(1.0, None).is_err());
         assert!(AudioCaptureBackend::recording_progress(&capture).1);
         assert!(matches!(
             AudioCaptureBackend::set_paused(&mut capture, true),

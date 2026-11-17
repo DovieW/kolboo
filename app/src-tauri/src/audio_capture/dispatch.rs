@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicUsize;
 
 #[derive(Debug, Default)]
 pub(super) struct CaptureFence {
+    stream_failed: AtomicBool,
     generation: AtomicU64,
     state: AtomicU64,
     pending: AtomicUsize,
@@ -14,6 +15,19 @@ pub(super) struct CaptureFence {
 }
 
 impl CaptureFence {
+    pub(super) fn fail_stream(&self) {
+        self.stream_failed.store(true, Ordering::SeqCst);
+        self.fail_latest();
+    }
+    pub(super) fn stream_failed(&self) -> bool {
+        self.stream_failed.load(Ordering::SeqCst)
+    }
+    pub(super) fn fail_latest(&self) {
+        self.fail(self.generation.load(Ordering::SeqCst).saturating_sub(1));
+    }
+    pub(super) fn latest_failed(&self) -> bool {
+        self.failed(self.generation.load(Ordering::SeqCst).saturating_sub(1))
+    }
     pub(super) fn begin(&self) -> u64 {
         let epoch = self.generation.fetch_add(2, Ordering::SeqCst) + 1;
         self.state.store(epoch, Ordering::SeqCst);
@@ -38,7 +52,7 @@ impl CaptureFence {
         }
     }
     pub(super) fn failed(&self, epoch: u64) -> bool {
-        epoch != 0 && self.failed.load(Ordering::SeqCst) == epoch
+        epoch != 0 && (self.stream_failed() || self.failed.load(Ordering::SeqCst) == epoch)
     }
     pub(super) fn drain(&self, timeout: std::time::Duration) -> bool {
         let start = std::time::Instant::now();
