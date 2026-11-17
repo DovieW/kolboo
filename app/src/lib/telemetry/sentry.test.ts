@@ -375,6 +375,32 @@ describe("sentry telemetry", () => {
 		expect(sentryMock.reactErrorHandler).toHaveBeenCalledTimes(3);
 	});
 
+	it.each([true, false])(
+		"handles early overlay render failures after diagnostics availability is known (%s)",
+		async (enabled) => {
+			const { getSentryReactRootOptions } = await loadSentryModule();
+			const setup = Promise.withResolvers<boolean>();
+			const log = vi.spyOn(console, "error").mockImplementation(() => {});
+			try {
+				const hooks = getSentryReactRootOptions("overlay", setup.promise);
+				const handler = sentryMock.reactErrorHandler.mock.results.at(-1)?.value;
+				if (!hooks || !handler)
+					throw new Error("Missing early React error handlers");
+				const error = new Error("synthetic render failure");
+				const info = { componentStack: "Synthetic" };
+				for (const hook of Object.values(hooks)) hook(error, info);
+				expect(handler).not.toHaveBeenCalled();
+				setup.resolve(enabled);
+				await setup.promise;
+				expect(handler).toHaveBeenCalledTimes(enabled ? 3 : 0);
+				if (enabled) expect(handler).toHaveBeenCalledWith(error, info);
+				expect(log).toHaveBeenCalledTimes(enabled ? 0 : 3);
+			} finally {
+				log.mockRestore();
+			}
+		},
+	);
+
 	it("captures a non-production desktop smoke event when requested", async () => {
 		const { initSentry, maybeCaptureSentrySmokeTest } =
 			await loadSentryModule();

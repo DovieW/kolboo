@@ -98,6 +98,7 @@ pub(super) struct CapturedChunk {
 
 #[derive(Clone)]
 pub(super) struct CaptureDispatch {
+    pub(super) consumer: std::thread::Thread,
     pub(super) queue: Arc<ArrayQueue<CapturedChunk>>,
     pub(super) pool: Arc<ArrayQueue<Vec<f32>>>,
     pub(super) fence: Arc<CaptureFence>,
@@ -138,6 +139,8 @@ impl CaptureDispatch {
             ));
             chunk.samples.clear();
             let _ = self.pool.push(std::mem::take(&mut chunk.samples));
+        } else {
+            self.consumer.unpark();
         }
     }
 }
@@ -173,11 +176,33 @@ mod tests {
             pool.push(Vec::with_capacity(8)).unwrap();
         }
         CaptureDispatch {
+            consumer: std::thread::current(),
             pool,
             queue: Arc::new(ArrayQueue::new(1)),
             fence: Arc::new(CaptureFence::default()),
         }
     }
+    #[test]
+    fn enqueue_before_consumer_parks_retains_the_wake_and_the_first_chunk() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            // Force the missed-wakeup window deterministically: the enqueue
+            // completes before park, with no intervening library calls that
+            // could consume the thread's token. Native tests use real producers.
+            let d = dispatch(1);
+            let epoch = d.fence.begin();
+            d.enqueue(&[0.25, -0.5], std::convert::identity);
+            std::thread::park();
+            let chunk = d.queue.pop().unwrap();
+            assert_eq!(chunk.epoch, epoch);
+            tx.send(chunk.samples).unwrap();
+        });
+        let received = rx.recv_timeout(std::time::Duration::from_secs(3));
+        worker.thread().unpark();
+        worker.join().unwrap();
+        assert_eq!(received.unwrap(), [0.25, -0.5]);
+    }
+
     #[test]
     fn full_queues_and_empty_pools_fail_only_the_owned_recording_without_reordering() {
         for empty_pool in [false, true] {

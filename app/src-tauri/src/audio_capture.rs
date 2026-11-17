@@ -1887,8 +1887,9 @@ struct CaptureWorkers {
 
 impl Drop for CaptureWorkers {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
+            worker.thread().unpark();
             let _ = worker.join();
         }
         self.vad_sender.take();
@@ -2196,12 +2197,6 @@ where
         // Preallocate buffers; actual length is set by the callback.
         let _ = chunk_pool.push(Vec::with_capacity(callback_capacity));
     }
-    let dispatch = CaptureDispatch {
-        queue: chunk_queue.clone(),
-        pool: chunk_pool.clone(),
-        fence: capture_fence.clone(),
-    };
-
     let worker_stop = Arc::new(AtomicBool::new(false));
     let worker_handle = {
         let buffer = buffer.clone();
@@ -2278,12 +2273,13 @@ where
                     continue;
                 }
 
-                if stop.load(Ordering::Relaxed) {
+                if stop.load(Ordering::Acquire) {
                     break;
                 }
 
-                // Idle: avoid a tight spin.
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                // An enqueue or shutdown between the checks and park leaves a
+                // wake token. Always recheck both predicates after waking.
+                std::thread::park();
             }
 
             // Best-effort flush on stop.
@@ -2311,26 +2307,20 @@ where
                 sample_rate
             );
 
-            loop {
-                match vad_samples_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                    Ok((epoch, mut samples)) => {
-                        let events = process_owned_vad_chunk(
-                            &mut processor,
-                            &mut processor_epoch,
-                            &fence,
-                            epoch,
-                            &samples,
-                        );
-                        forward_vad_events(&event_tx_clone, epoch, events);
+            while let Ok((epoch, mut samples)) = vad_samples_rx.recv() {
+                let events = process_owned_vad_chunk(
+                    &mut processor,
+                    &mut processor_epoch,
+                    &fence,
+                    epoch,
+                    &samples,
+                );
+                forward_vad_events(&event_tx_clone, epoch, events);
 
-                        // Return the buffer to the pool for reuse.
-                        samples.clear();
-                        if let Some(ref pool) = pool {
-                            let _ = pool.push(samples);
-                        }
-                    }
-                    Err(mpsc::RecvTimeoutError::Timeout) => continue,
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                // Return the buffer to the pool for reuse.
+                samples.clear();
+                if let Some(ref pool) = pool {
+                    let _ = pool.push(samples);
                 }
             }
         }))
@@ -2338,6 +2328,12 @@ where
         None
     };
 
+    let dispatch = CaptureDispatch {
+        consumer: worker_handle.thread().clone(),
+        queue: chunk_queue,
+        pool: chunk_pool,
+        fence: capture_fence.clone(),
+    };
     let workers = CaptureWorkers {
         stop: worker_stop,
         worker: Some(worker_handle),
@@ -2782,6 +2778,7 @@ mod tests {
         let pool = Arc::new(ArrayQueue::new(1));
         pool.push(Vec::with_capacity(4)).unwrap();
         let dispatch = CaptureDispatch {
+            consumer: thread::current(),
             queue: queue.clone(),
             pool,
             fence: capture.capture_fence.clone(),

@@ -369,6 +369,7 @@ fn dispatch() -> CaptureDispatch {
         pool.push(Vec::with_capacity(1024)).unwrap();
     }
     CaptureDispatch {
+        consumer: std::thread::current(),
         queue: Arc::new(ArrayQueue::new(32)),
         pool,
         fence: Arc::new(CaptureFence::default()),

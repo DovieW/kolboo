@@ -11,12 +11,13 @@ export function renderRoot(
 	options?: {
 		elementId?: string;
 		sentrySurface?: SentrySurface;
+		sentryReady?: Promise<boolean>;
 		strictMode?: boolean;
 	},
 ): void {
 	const rootElement = getRootElementOrThrow(options?.elementId);
 	const rootOptions = options?.sentrySurface
-		? getSentryReactRootOptions(options.sentrySurface)
+		? getSentryReactRootOptions(options.sentrySurface, options.sentryReady)
 		: undefined;
 
 	createRoot(rootElement, rootOptions).render(

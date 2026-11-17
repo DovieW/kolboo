@@ -1,4 +1,3 @@
-import { Loader } from "@mantine/core";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
@@ -39,7 +38,11 @@ export default function OverlayApp() {
 					borderRadius: 16,
 				}}
 			>
-				<Loader size="xs" color="orange" />
+				<span
+					role="status"
+					aria-label="Starting overlay"
+					className="size-4 rounded-full border-2 border-white/30 border-t-white motion-safe:animate-spin"
+				/>
 			</div>
 		);
 	}

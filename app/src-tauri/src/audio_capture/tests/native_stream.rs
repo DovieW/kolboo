@@ -2,6 +2,7 @@ use super::*;
 
 fn dispatch() -> CaptureDispatch {
     CaptureDispatch {
+        consumer: std::thread::current(),
         queue: Arc::new(ArrayQueue::new(1)),
         pool: Arc::new(ArrayQueue::new(1)),
         fence: Arc::new(CaptureFence::default()),

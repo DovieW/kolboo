@@ -172,6 +172,25 @@ increase memory; the cached Presets page remains after first use. Native null-PC
 tests exercise cue disposal after playback; physical-microphone/paste acceptance
 on this exact laptop build remains a user smoke test.
 
+The follow-up keeps the recording overlay resident but removes the full
+Mantine theme/styles from its entry point. Rendering no longer waits for the
+diagnostics runtime-config retries; early React errors still use the normal
+scrubbed handler if reporting initializes. This changes startup dependencies,
+not microphone ownership or the user's reporting settings.
+
+While capture is open, successful enqueues wake the sample worker directly;
+shutdown wakes it for the final drain. The VAD worker waits for samples or
+channel closure. Neither worker needs an empty-queue timer. The independent
+microphone fault/stall watchdog is still active.
+
+Do not attribute tray-only CPU to those capture workers with Hot Mic off.
+The previous laptop build, run under a debugger in a private offline X11
+fixture, reached the 50 ms sleep in `global-hotkey 0.8.0`'s X11 event loop.
+This matches the observed 20 switches/second on an unnamed laptop thread;
+it is not a live laptop stack trace. Wayland shortcut cards use the portal,
+but temporary Escape-to-cancel still uses the plugin. Disabling it is not
+an equivalent optimization.
+
 ### Laptop development packages
 
 Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
