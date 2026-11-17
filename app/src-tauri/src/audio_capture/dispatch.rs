@@ -94,6 +94,7 @@ impl CaptureDispatch {
         self.fence.fail(self.fence.state.load(Ordering::SeqCst));
     }
     pub(super) fn enqueue<T: Copy>(&self, data: &[T], convert: fn(T) -> f32) {
+        crate::runtime_diagnostics::audio_callback(self.queue.len());
         let _callback = CountPermit::new(&self.fence.callbacks);
         let epoch = self.fence.state.load(Ordering::SeqCst);
         let permit = if epoch & 1 != 0 {
@@ -104,6 +105,9 @@ impl CaptureDispatch {
         };
         let Some(mut samples) = self.pool.pop() else {
             self.fence.fail(epoch);
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioPoolExhausted,
+            ));
             return;
         };
         samples.clear();
@@ -115,6 +119,9 @@ impl CaptureDispatch {
         };
         if let Err(mut chunk) = self.queue.push(chunk) {
             self.fence.fail(epoch);
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioQueueOverflow,
+            ));
             chunk.samples.clear();
             let _ = self.pool.push(std::mem::take(&mut chunk.samples));
         }

@@ -56,6 +56,7 @@ mod recording_request_initialization;
 mod recordings;
 mod request_log;
 mod router_embeddings_cache;
+mod runtime_diagnostics;
 mod secrets;
 mod sentry_init;
 mod sessions;
@@ -1126,6 +1127,9 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(automatic_updates::init())
+        .plugin(tauri::plugin::Builder::<tauri::Wry, ()>::new("runtime-diagnostics")
+            .on_event(|_, event| { if matches!(event, tauri::RunEvent::Exit) { runtime_diagnostics::shutdown(); } })
+            .build())
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
         .manage(sessions::quick_ask::QuickAskSessions::default())
@@ -1385,6 +1389,8 @@ pub fn run() {
                     }
                 }
             }
+
+            runtime_diagnostics::start_best_effort(app_paths::app_data_dir(app.handle()));
 
             // Dev-only: validate settings shape at startup and print issues to the terminal.
             #[cfg(all(desktop, debug_assertions))]

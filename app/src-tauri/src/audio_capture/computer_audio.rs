@@ -123,11 +123,7 @@ impl Capture {
                 }
                 pending.drain(..complete);
             }
-            if !worker_stopping.load(Ordering::Relaxed) {
-                if let Ok(mut buffer) = buffer.lock() {
-                    buffer.journal_failed = true;
-                }
-            }
+            mark_unexpected_end(&worker_stopping, &buffer);
         });
         let capture = Self {
             child,
@@ -147,6 +143,17 @@ impl Capture {
     }
 }
 
+fn mark_unexpected_end(stopping: &AtomicBool, buffer: &Mutex<AudioBuffer>) {
+    if !stopping.load(Ordering::Relaxed) {
+        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+            crate::runtime_diagnostics::Failure::AudioHelperExited,
+        ));
+        if let Ok(mut buffer) = buffer.lock() {
+            buffer.journal_failed = true;
+        }
+    }
+}
+
 impl Drop for Capture {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Relaxed);
@@ -159,8 +166,41 @@ impl Drop for Capture {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn native_helper_exit() {
+        assert_eq!(
+            std::env::var("KOLBOO_NATIVE_WINDOW_TEST").as_deref(),
+            Ok("1")
+        );
+        let buffer = Arc::new(Mutex::new(AudioBuffer::new(16000, 1, 10.0)));
+        let mut capture = Capture::start_sources(
+            buffer.clone(),
+            Arc::new(AtomicBool::new(true)),
+            "kolboo_test_a",
+            "kolboo_test_output.monitor",
+        )
+        .unwrap();
+        assert!(!buffer.lock().unwrap().journal_failed);
+        capture.child.kill().unwrap(); // Actual unexpected helper loss, not a fake callback.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !capture.worker.as_ref().unwrap().is_finished() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        drop(capture);
+        assert!(buffer.lock().unwrap().journal_failed);
+    }
+
+    #[test]
+    fn only_unexpected_helper_exit_invalidates_the_recording() {
+        let buffer = Mutex::new(AudioBuffer::new(16000, 1, 10.0));
+        mark_unexpected_end(&AtomicBool::new(true), &buffer);
+        assert!(!buffer.lock().unwrap().journal_failed);
+        mark_unexpected_end(&AtomicBool::new(false), &buffer);
+        assert!(buffer.lock().unwrap().journal_failed);
+    }
 
     #[test]
     #[ignore = "Manual PulseAudio test: requires an isolated Kolboo null sink, never a real microphone"]

@@ -52,6 +52,12 @@ if (!inside) {
 	const directory = mkdtempSync(path.join(tmpdir(), "kolboo-window-test-"));
 	for (const folder of ["data", "config", "cache", "runtime"])
 		mkdirSync(path.join(directory, folder), { mode: 0o700 });
+	mkdirSync(path.join(directory, "Downloads"), { mode: 0o700 });
+	writeFileSync(
+		path.join(directory, "config", "user-dirs.dirs"),
+		`XDG_DOWNLOAD_DIR="${path.join(directory, "Downloads")}"\n`,
+		{ mode: 0o600 },
+	);
 	// Native callback tests use ALSA's null PCM, never the operator's microphone.
 	writeFileSync(
 		path.join(directory, "asound.conf"),

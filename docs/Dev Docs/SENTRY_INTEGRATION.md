@@ -1,6 +1,6 @@
 # Sentry Integration (Kolboo)
 
-Last updated: 2026-10-15
+Last updated: 2026-11-16
 
 This document covers desktop error reporting and release operations. Historical
 rehearsals below are evidence for their named builds, not a substitute for
@@ -25,6 +25,47 @@ Account shows **Restore your Kolboo session**, not **Offline access**, and expos
 sign-in. Transient network/service failures retain offline grace. Catalog loads
 refresh expiring tokens under the shared session-rotation lock; a server 401
 allows one refresh/retry, never an unbounded loop or a silent BYOK switch.
+
+### Content-free runtime diagnostics
+
+Desktop GUI runs keep a separate local `diagnostics/` journal and atomic
+`state.json` checkpoint under the app-data directory. A per-directory OS lock
+prevents concurrent owners; secondary launches and CLI commands do not open a
+new GUI run. Each run has a random diagnostic UUID, PID, package version and a
+typed 128-bit source-revision prefix. Recording/processing transitions have a
+run-local operation number; these are not account or transcript identifiers.
+
+- Critical phase/failure/shutdown records and checkpoints are synced by the
+  owned background writer. Audio callbacks update only counters and enqueue
+  bounded events; they do not perform filesystem or network I/O. Queue loss is
+  counted, not silently represented as complete evidence.
+- Health samples run every two seconds during recording/processing and every
+  minute when idle. They contain callback age/count, capture queue depth, and
+  Linux RSS/swap/cumulative CPU ticks. Unsupported platform resource values are
+  absent, not zero. This is not an OS-wide recorder or a GUI responsiveness test.
+- Journal retention is at most 62 days and 256 MiB, whichever limit is reached
+  first; oldest daily files are removed first. The separate legacy text log
+  still keeps seven rotated files and is not included in diagnostic exports.
+- The next GUI launch records a previous run that never reached orderly exit
+  as `previous_run_unclean`, retaining its last checkpoint. This does **not**
+  identify SIGKILL's sender or distinguish power loss, a crash and forced exit.
+  The final queued events may still be lost on SIGKILL. Reaching orderly exit
+  explicitly drops the text-log flush guard; static values do not drop at exit.
+  Configured Sentry also gets a bounded two-second flush on orderly exit.
+- When Sentry is already configured, finite runtime/audio failure codes and
+  unexpected-run detection are explicitly reported, grouped by code and limited
+  to one event per code every five minutes. Diagnostic run ID and a closed phase
+  tag permit correlation without audio, text, device names, account identity,
+  arbitrary errors, headers, URLs or credentials. Successful recovery is local
+  evidence, not a Sentry error. No additional PostHog events, replay, metrics or
+  automatic log uploads are enabled.
+- Diagnostic ZIPs stream only validated typed journal records, a small positive
+  allowlist of boolean settings and basic system/version information. Unknown
+  fields, raw text logs, arbitrary settings and user-directory paths are not
+  exported. ZIPs are staged privately and never overwrite an existing archive.
+
+This complements OS-level kill/resource monitoring. It does not install a
+privileged monitor and must not be presented as a fix for an unidentified kill.
 
 ### Laptop development packages
 

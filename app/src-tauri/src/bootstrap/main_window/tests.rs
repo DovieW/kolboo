@@ -46,6 +46,7 @@ fn native_window_manager_integration() {
     );
     crate::text::selection_probe::tests::native_selection_probe_copy_transaction();
     crate::audio_capture::native_inputs();
+    crate::audio_capture::computer_audio::tests::native_helper_exit();
     let history_directory = tempfile::tempdir().unwrap();
     let (native_context, updater_server) = crate::automatic_updates::tests::native_context();
     let mut app = tauri::Builder::<tauri::Wry>::default()
@@ -100,6 +101,7 @@ fn native_window_manager_integration() {
         );
     }
     crate::automatic_updates::tests::native_quit(&mut app, &updater_server);
+    crate::commands::diagnostics::tests::native_private_archive(app.handle());
     crate::sessions::quick_ask::tests::native_cancel(app.handle());
     crate::pipeline::native_model_actions(app.handle());
     crate::bootstrap::tray_controls::tests::native_controls(app.handle());

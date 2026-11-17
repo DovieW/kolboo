@@ -355,6 +355,9 @@ impl PipelineInner {
     fn transition_to(&mut self, next: PipelineState, context: &str) {
         if self.state.can_transition_to(next) {
             self.state = next;
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Phase(
+                next.into(),
+            ));
             return;
         }
 
@@ -624,6 +627,12 @@ impl PipelineInner {
         self.clear_recording_snapshot();
         log::error!("Pipeline error: {}", msg);
         self.state = PipelineState::Error;
+        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Phase(
+            crate::runtime_diagnostics::Phase::Error,
+        ));
+        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+            crate::runtime_diagnostics::Failure::Pipeline,
+        ));
         if let Some(token) = self.cancel_token.take() {
             token.cancel();
         }

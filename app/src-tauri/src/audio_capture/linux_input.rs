@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 use std::process::{Child, Command, Stdio};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 use std::thread::JoinHandle;
@@ -119,6 +119,7 @@ fn discover(helper_available: bool, command: Command) -> Option<Vec<AudioInputDe
 pub(super) struct Capture {
     child: Child,
     worker: Option<JoinHandle<()>>,
+    stopping: Arc<AtomicBool>,
 }
 
 impl Capture {
@@ -167,6 +168,13 @@ impl Capture {
                 )
             })?;
         let mut stdout = child.stdout.take().expect("capture stdout is piped");
+        let stopping = Arc::new(AtomicBool::new(false));
+        let worker_stopping = stopping.clone();
+        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::AudioConfigured {
+            sample_rate: None,
+            channels: None,
+            helper_pid: Some(child.id()),
+        });
         let worker = std::thread::spawn(move || {
             let mut bytes = [0u8; 4096];
             let mut pending = Vec::with_capacity(4100);
@@ -185,17 +193,24 @@ impl Capture {
                 pending.drain(..complete);
             }
             // Unexpected EOF is never a successful recording with missing audio.
-            dispatch.fail_current();
+            if !worker_stopping.load(Ordering::Relaxed) {
+                dispatch.fail_current();
+                crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                    crate::runtime_diagnostics::Failure::AudioHelperExited,
+                ));
+            }
         });
         Ok(Self {
             child,
             worker: Some(worker),
+            stopping,
         })
     }
 }
 
 impl Drop for Capture {
     fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Relaxed);
         // Closing the producer releases a blocked reader even during suspend or
         // server failure. Join before the shared capture queue is drained.
         let _ = self.child.kill();

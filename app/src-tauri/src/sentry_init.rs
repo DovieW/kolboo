@@ -5,6 +5,73 @@ use std::sync::OnceLock;
 static SENTRY_GUARD: OnceLock<sentry::ClientInitGuard> = OnceLock::new();
 static ACCOUNT_REPORTS: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
     std::sync::Mutex::new(Vec::new());
+static RUNTIME_REPORTS: std::sync::Mutex<Vec<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Static guards are not dropped at process exit; allow queued reports a bounded drain.
+pub(crate) fn flush_on_exit() -> bool {
+    sentry::Hub::current()
+        .client()
+        .is_none_or(|client| client.flush(Some(std::time::Duration::from_secs(2))))
+}
+
+fn safe_runtime_code(value: &str) -> bool {
+    matches!(
+        value,
+        "previous_run_unclean"
+            | "runtime_failure"
+            | "diagnostic_storage"
+            | "diagnostic_queue_overflow"
+            | "audio_stream"
+            | "audio_helper_exited"
+            | "audio_queue_overflow"
+            | "audio_pool_exhausted"
+            | "audio_callback_stalled"
+            | "audio_recovery_failed"
+            | "audio_stop_timed_out"
+            | "pipeline"
+            | "log_queue_overflow"
+    )
+}
+
+pub(crate) fn report_runtime_failure(code: &str) {
+    if !safe_runtime_code(code) {
+        return;
+    }
+    let Some(client) = sentry::Hub::current().client() else {
+        return;
+    };
+    let mut reports = RUNTIME_REPORTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = format!("runtime:{code}");
+    let now = std::time::Instant::now();
+    reports.retain(|(_, at)| now.duration_since(*at) < std::time::Duration::from_secs(300));
+    if reports.iter().any(|(existing, _)| existing == &key) {
+        return;
+    }
+    reports.push((key, now));
+    drop(reports);
+    let mut event = sentry::protocol::Event {
+        level: sentry::Level::Error,
+        message: Some("Runtime diagnostic failure".into()),
+        ..Default::default()
+    };
+    event
+        .tags
+        .insert("event_kind".into(), "runtime_failure".into());
+    event.tags.insert("runtime_code".into(), code.into());
+    event.tags.insert(
+        "runtime_phase".into(),
+        crate::runtime_diagnostics::phase_tag().into(),
+    );
+    if let Some(run_id) = crate::runtime_diagnostics::run_id() {
+        event
+            .tags
+            .insert("diagnostic_run_id".into(), run_id.to_string());
+    }
+    client.capture_event(event, None);
+}
 
 fn safe_account_code(code: &str) -> &'static str {
     match code {
@@ -160,8 +227,24 @@ fn scrub_event(
             (
                 "surface",
                 "main" | "overlay" | "overlay_hover" | "quick_ask"
-            ) | ("event_kind", "smoke_test" | "account_failure")
+            ) | (
+                "event_kind",
+                "smoke_test" | "account_failure" | "runtime_failure"
+            )
         ) || safe_account_tag(key, value)
+            || (key == "runtime_code" && safe_runtime_code(value))
+            || (key == "runtime_phase"
+                && matches!(
+                    value.as_str(),
+                    "startup"
+                        | "idle"
+                        | "recording"
+                        | "transcribing"
+                        | "routing"
+                        | "rewriting"
+                        | "error"
+                ))
+            || (key == "diagnostic_run_id" && uuid::Uuid::parse_str(value).is_ok())
     });
     event.tags.insert("service".into(), "desktop".into());
     event.tags.insert("runtime".into(), "tauri-backend".into());
@@ -201,7 +284,19 @@ fn scrub_event(
         .tags
         .get("event_kind")
         .is_some_and(|value| value == "account_failure");
-    let fingerprint = if account_failure {
+    let runtime_failure = event
+        .tags
+        .get("event_kind")
+        .is_some_and(|value| value == "runtime_failure");
+    let fingerprint = if runtime_failure {
+        vec![Cow::Owned(
+            event
+                .tags
+                .get("runtime_code")
+                .cloned()
+                .unwrap_or_else(|| "runtime_failure".into()),
+        )]
+    } else if account_failure {
         ["account_stage", "account_code", "http_status"]
             .into_iter()
             .map(|key| {
@@ -331,4 +426,4 @@ pub fn capture_backend_smoke(surface: &str) -> bool {
 
 #[cfg(test)]
 #[path = "sentry_init/tests.rs"]
-mod tests;
+pub(crate) mod tests;

@@ -1,19 +1,14 @@
-//! Diagnostics export: bundles logs, sanitized settings, and system info
+//! Diagnostics export: bundles typed runtime records, safe settings, and system info
 //! into a zip file saved to the user's Downloads folder.
 
-use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use chrono::Local;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
-
-/// Keys in `settings.json` that may contain credentials or sensitive data.
-/// Their values are replaced with `"[REDACTED]"` before export.
-const REDACTED_SETTINGS_KEYS: &[&str] = &["proxy_username", "proxy_password"];
 
 /// Create a diagnostics zip in the Downloads folder.
 ///
@@ -28,73 +23,59 @@ pub fn export_diagnostics_zip(app: &AppHandle) -> Result<PathBuf, String> {
     let zip_name = format!("kolboo-diagnostics-{timestamp}.zip");
     let zip_path = download_dir.join(&zip_name);
 
-    let file = fs::File::create(&zip_path)
-        .map_err(|e| format!("Failed to create {}: {e}", zip_path.display()))?;
-    let mut zip = ZipWriter::new(file);
+    let temporary = tempfile::NamedTempFile::new_in(&download_dir).map_err(private_io_error)?;
+    let mut temporary = temporary;
+    let mut zip = ZipWriter::new(temporary.as_file_mut());
     let options = SimpleFileOptions::default()
         .compression_method(zip::CompressionMethod::Deflated)
         .compression_level(Some(6));
 
-    // ── 1. Log files ────────────────────────────────────────────────────
-    if let Some(log_dir) = crate::tracing_init::log_dir() {
-        add_directory_to_zip(&mut zip, log_dir, "logs", options)?;
-    }
+    // Legacy text logs may contain arbitrary provider errors. Never export them.
+    let directory = crate::app_paths::app_data_dir(app)?.join("diagnostics");
+    zip.start_file("runtime-events.jsonl", options)
+        .map_err(private_zip_error)?;
+    crate::runtime_diagnostics::export_records_to(&directory, &mut zip)
+        .map_err(private_io_error)?;
 
     // ── 2. Sanitized settings ───────────────────────────────────────────
     let settings_json = read_sanitized_settings(app);
     if let Some(json) = settings_json {
         zip.start_file("settings.json", options)
-            .map_err(|e| format!("zip error: {e}"))?;
-        zip.write_all(json.as_bytes())
-            .map_err(|e| format!("zip write error: {e}"))?;
+            .map_err(private_zip_error)?;
+        zip.write_all(json.as_bytes()).map_err(private_io_error)?;
     }
 
     // ── 3. System info ──────────────────────────────────────────────────
     let info = collect_system_info(app);
     zip.start_file("system-info.txt", options)
-        .map_err(|e| format!("zip error: {e}"))?;
-    zip.write_all(info.as_bytes())
-        .map_err(|e| format!("zip write error: {e}"))?;
+        .map_err(private_zip_error)?;
+    zip.write_all(info.as_bytes()).map_err(private_io_error)?;
 
-    zip.finish().map_err(|e| format!("zip finish error: {e}"))?;
+    zip.finish().map_err(private_zip_error)?;
+    temporary
+        .persist_noclobber(&zip_path)
+        .map_err(private_persist_error)?;
 
-    log::info!("Diagnostics exported to {}", zip_path.display());
+    log::info!("Private diagnostics archive exported");
 
     Ok(zip_path)
+}
+
+// Filesystem/ZIP errors can include private paths or payloads. Never expose
+// their arbitrary Display implementations through IPC or diagnostic logs.
+fn private_io_error(_: std::io::Error) -> String {
+    "Could not write private diagnostics archive".into()
+}
+fn private_zip_error(_: zip::result::ZipError) -> String {
+    "Could not assemble private diagnostics archive".into()
+}
+fn private_persist_error(_: tempfile::PersistError) -> String {
+    "Could not save diagnostics archive; existing files were not overwritten".into()
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Recursively add all files from `dir` into the zip under `prefix/`.
-fn add_directory_to_zip<W: Write + std::io::Seek>(
-    zip: &mut ZipWriter<W>,
-    dir: &Path,
-    prefix: &str,
-    options: SimpleFileOptions,
-) -> Result<(), String> {
-    let entries = fs::read_dir(dir).map_err(|e| format!("Cannot read {}: {e}", dir.display()))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| format!("dir entry error: {e}"))?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let archive_name = format!("{}/{}", prefix, name.to_string_lossy());
-
-        if path.is_file() {
-            let content =
-                fs::read(&path).map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
-            zip.start_file(&archive_name, options)
-                .map_err(|e| format!("zip error: {e}"))?;
-            zip.write_all(&content)
-                .map_err(|e| format!("zip write error: {e}"))?;
-        } else if path.is_dir() {
-            add_directory_to_zip(zip, &path, &archive_name, options)?;
-        }
-    }
-    Ok(())
-}
 
 /// Read settings.json from the Tauri store, then strip sensitive keys.
 fn read_sanitized_settings(app: &AppHandle) -> Option<String> {
@@ -109,35 +90,24 @@ fn read_sanitized_settings(app: &AppHandle) -> Option<String> {
         map.insert(key, value);
     }
 
-    let mut value = serde_json::Value::Object(map);
-    redact_sensitive_keys(&mut value);
+    let value = sanitized_settings(&serde_json::Value::Object(map));
 
     serde_json::to_string_pretty(&value).ok()
 }
 
-/// Recursively walk JSON and redact any key whose name matches the deny-list.
-fn redact_sensitive_keys(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, val) in map.iter_mut() {
-                if REDACTED_SETTINGS_KEYS.contains(&key.as_str()) {
-                    if let serde_json::Value::String(s) = val {
-                        if !s.is_empty() {
-                            *val = serde_json::Value::String("[REDACTED]".to_string());
-                        }
-                    }
-                } else {
-                    redact_sensitive_keys(val);
-                }
-            }
+/// Positive, typed projection: unknown/nested/string settings are excluded.
+fn sanitized_settings(value: &serde_json::Value) -> serde_json::Value {
+    let mut safe = serde_json::Map::new();
+    for key in [
+        "mic_auto_recover_enabled",
+        "hot_mic_enabled",
+        "main_window_show_on_launch",
+    ] {
+        if let Some(value) = value.get(key).and_then(serde_json::Value::as_bool) {
+            safe.insert(key.into(), value.into());
         }
-        serde_json::Value::Array(arr) => {
-            for item in arr.iter_mut() {
-                redact_sensitive_keys(item);
-            }
-        }
-        _ => {}
     }
+    serde_json::Value::Object(safe)
 }
 
 /// Gather basic system information for bug reports.
@@ -158,16 +128,6 @@ fn collect_system_info(app: &AppHandle) -> String {
         if let Some(win_ver) = windows_version_string() {
             lines.push(format!("Windows version: {win_ver}"));
         }
-    }
-
-    // App data directory
-    if let Ok(data_dir) = crate::app_paths::app_data_dir(app) {
-        lines.push(format!("App data dir: {}", data_dir.display()));
-    }
-
-    // Log directory
-    if let Some(log_dir) = crate::tracing_init::log_dir() {
-        lines.push(format!("Log dir: {}", log_dir.display()));
     }
 
     lines.push(format!(
@@ -274,59 +234,79 @@ fn windows_version_string() -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-
     #[test]
-    fn redact_replaces_non_empty_password() {
-        let mut value = serde_json::json!({
-            "proxy_password": "s3cret",
-            "proxy_username": "admin",
-            "some_other_key": "keep-me",
-        });
-        redact_sensitive_keys(&mut value);
-
-        assert_eq!(value["proxy_password"], "[REDACTED]");
-        assert_eq!(value["proxy_username"], "[REDACTED]");
-        assert_eq!(value["some_other_key"], "keep-me");
+    fn archive_errors_never_expose_paths_or_overwrite_existing_evidence() {
+        assert!(!private_io_error(std::io::Error::other("PRIVATE/path/token")).contains("PRIVATE"));
+        assert!(
+            !private_zip_error(zip::result::ZipError::Io(std::io::Error::other("PRIVATE")))
+                .contains("PRIVATE")
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let destination = directory.path().join("existing.zip");
+        std::fs::write(&destination, b"existing evidence").unwrap();
+        let temporary = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        let error = temporary.persist_noclobber(&destination).unwrap_err();
+        assert!(!private_persist_error(error).contains("PRIVATE"));
+        assert_eq!(std::fs::read(destination).unwrap(), b"existing evidence");
     }
-
-    #[test]
-    fn redact_preserves_empty_password() {
-        let mut value = serde_json::json!({
-            "proxy_password": "",
-            "proxy_username": "",
-        });
-        redact_sensitive_keys(&mut value);
-
-        assert_eq!(value["proxy_password"], "");
-        assert_eq!(value["proxy_username"], "");
+    pub(crate) fn native_private_archive(app: &AppHandle) {
+        use std::io::Read;
+        let fixture = PathBuf::from(
+            std::env::var_os("KOLBOO_NATIVE_WINDOW_DIRECTORY").expect("isolated fixture"),
+        );
+        let downloads = app.path().download_dir().unwrap();
+        assert!(
+            downloads.starts_with(&fixture),
+            "never export into the operator's Downloads"
+        );
+        let store = app.store("settings.json").unwrap();
+        store.set("proxy_password", serde_json::json!("PRIVATE"));
+        store.set("arbitrary_prompt", serde_json::json!("PRIVATE"));
+        store.set("mic_auto_recover_enabled", serde_json::json!(true));
+        store.save().unwrap();
+        let path = export_diagnostics_zip(app).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(archive.len(), 3);
+        for name in ["runtime-events.jsonl", "settings.json", "system-info.txt"] {
+            let mut text = String::new();
+            archive
+                .by_name(name)
+                .unwrap()
+                .read_to_string(&mut text)
+                .unwrap();
+            assert!(!text.contains("PRIVATE"));
+            assert!(!text.contains("proxy_password"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
-
     #[test]
-    fn redact_handles_nested_objects() {
-        let mut value = serde_json::json!({
-            "network": {
-                "proxy_password": "oops",
-                "safe_key": 42
-            }
-        });
-        redact_sensitive_keys(&mut value);
-
-        assert_eq!(value["network"]["proxy_password"], "[REDACTED]");
-        assert_eq!(value["network"]["safe_key"], 42);
-    }
-
-    #[test]
-    fn redact_ignores_non_string_values() {
-        let mut value = serde_json::json!({
-            "proxy_password": 12345,
-            "proxy_username": null,
-        });
-        redact_sensitive_keys(&mut value);
-
-        // Non-string values are left as-is (only string secrets get redacted)
-        assert_eq!(value["proxy_password"], 12345);
-        assert!(value["proxy_username"].is_null());
+    fn export_projects_only_known_boolean_preferences() {
+        let raw = serde_json::json!({"mic_auto_recover_enabled":true,"hot_mic_enabled":false,
+            "main_window_show_on_launch":"PRIVATE", "start_at_login":null,
+            "proxy_password":"PRIVATE", "api_key":"PRIVATE", "nested":{"token":"PRIVATE"},
+            "prompt":"PRIVATE", "email":"PRIVATE"});
+        assert_eq!(
+            sanitized_settings(&raw),
+            serde_json::json!({"mic_auto_recover_enabled":true,"hot_mic_enabled":false})
+        );
+        assert_eq!(
+            sanitized_settings(&serde_json::Value::Null),
+            serde_json::json!({})
+        );
+        assert_eq!(
+            sanitized_settings(
+                &serde_json::json!({"main_window_show_on_launch":true,"start_at_login":false})
+            ),
+            serde_json::json!({"main_window_show_on_launch":true})
+        );
     }
 }

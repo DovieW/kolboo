@@ -101,7 +101,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/lib.rs",
-		"reason": "Re-reviewed and explicitly approved 2026-10-01: only real recording/permission callback wiring and its stale-session exits require the live capture/desktop event loop. Pipeline lease tests cover ownership decisions; superseded History and scoped-log success, cancellation, repeat, deletion and disk-failure behavior are tested with mock and real Wry handles. No History/clipboard helper logic is exempted. Removed the old autostart-registration exception because isolated full-app startup now executes that line.",
+		"reason": "Re-reviewed and explicitly approved 2026-10-01: only real recording/permission callback wiring and its stale-session exits require the live capture/desktop event loop. Pipeline lease tests cover ownership decisions; superseded History and scoped-log success, cancellation, repeat, deletion and disk-failure behavior are tested with mock and real Wry handles. No History/clipboard helper logic is exempted. Removed the old autostart-registration exception because isolated full-app startup now executes that line. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/core/output_settings.rs",
@@ -113,12 +113,12 @@
 			"docs/Dev Docs/DESKTOP_QOL_BATCH.md"
 		],
 		"lines": [
-			642, 643, 644, 645, 646, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789,
-			811, 812, 813, 814, 815, 816, 817, 818, 819, 820
+			643, 644, 645, 646, 647, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790,
+			812, 813, 814, 815, 816, 817, 818, 819, 820, 821
 		],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "2178d48e55b2535bbd5ee8967781e98117105df775e8fefb55b5635783cf9cad"
+		"sha256": "04db1d2870d379cbb12227ab7c0e8c72f7aae57337fff1a7aaa2a355c31d8476"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",
@@ -135,16 +135,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/stt/streaming.rs",
 			"app/src-tauri/src/text/tests/output_ownership.rs"
 		],
-		"lines": [1502, 2061],
+		"lines": [1511, 2070],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "7303d2b2ba52144ac7f10e16832afb627c4bae57c7c77c34ce4b5c85aa2e1562"
+		"sha256": "d336a70ab168e43dcd506e8c328da78c71a7afcc71ef4a1848e25059669e2f9e"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",

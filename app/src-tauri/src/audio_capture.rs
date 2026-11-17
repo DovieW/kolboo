@@ -85,6 +85,36 @@ const STOP_JOIN_TIMEOUT_MS: u64 = 2500;
 const WATCHDOG_CHECK_EVERY_MS: u64 = 100;
 const WATCHDOG_STALL_MS: u64 = 2000;
 
+fn capture_join_succeeded(
+    result: Result<thread::Result<Result<(), AudioCaptureError>>, mpsc::RecvTimeoutError>,
+) -> bool {
+    match result {
+        Ok(Ok(Ok(()))) => true,
+        Ok(Ok(Err(e))) => {
+            log::warn!("Audio capture thread stopped with error: {}", e);
+            false
+        }
+        Ok(Err(_panic)) => {
+            log::warn!("Audio capture thread panicked while stopping");
+            false
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioStopTimedOut,
+            ));
+            log::warn!(
+                "AudioCapture::stop() timed out after {}ms; continuing without blocking",
+                STOP_JOIN_TIMEOUT_MS
+            );
+            false
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            log::warn!("AudioCapture::stop(): join waiter disconnected unexpectedly");
+            false
+        }
+    }
+}
+
 fn clamped_pre_roll_ms(pre_roll_ms: u32) -> u32 {
     pre_roll_ms.min(MAX_PRE_ROLL_MS)
 }
@@ -1131,6 +1161,9 @@ impl AudioCapture {
             && self.stream_device_name.as_deref() != selected
             && !self.recording_active.load(Ordering::Relaxed)
         {
+            crate::runtime_diagnostics::record(
+                crate::runtime_diagnostics::Event::DeviceSelectionChanged,
+            );
             self.stop();
         }
         if self
@@ -1419,30 +1452,9 @@ impl AudioCapture {
                 let _ = join_tx.send(res);
             });
 
-            let stopped_cleanly = match join_rx
-                .recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS))
-            {
-                Ok(Ok(Ok(()))) => true,
-                Ok(Ok(Err(e))) => {
-                    log::warn!("Audio capture thread stopped with error: {}", e);
-                    false
-                }
-                Ok(Err(_panic)) => {
-                    log::warn!("Audio capture thread panicked while stopping");
-                    false
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    log::warn!(
-                        "AudioCapture::stop() timed out after {}ms; continuing without blocking",
-                        STOP_JOIN_TIMEOUT_MS
-                    );
-                    false
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    log::warn!("AudioCapture::stop(): join waiter disconnected unexpectedly");
-                    false
-                }
-            };
+            let stopped_cleanly = capture_join_succeeded(
+                join_rx.recv_timeout(std::time::Duration::from_millis(STOP_JOIN_TIMEOUT_MS)),
+            );
             if !stopped_cleanly && self.recovery_path().is_some() {
                 self.recovery_shutdown_failed = true;
                 // Freeze this journal before it can be offered for recovery. A
@@ -1831,6 +1843,9 @@ fn forward_vad_events(
 fn stream_error_handler(dispatch: CaptureDispatch) -> impl FnMut(cpal::StreamError) {
     move |err| {
         dispatch.fail_current();
+        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+            crate::runtime_diagnostics::Failure::AudioStream,
+        ));
         log::error!("Audio stream error: {}", err);
     }
 }
@@ -1848,6 +1863,11 @@ fn build_stream(
     last_callback_ms: Arc<AtomicU64>,
     dispatch: &CaptureDispatch,
 ) -> Result<InputStream, AudioCaptureError> {
+    crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::AudioConfigured {
+        sample_rate: Some(config.sample_rate),
+        channels: Some(config.channels),
+        helper_pid: None,
+    });
     let device = match device {
         InputDevice::Cpal(device) => device,
         #[cfg(target_os = "linux")]
@@ -2204,6 +2224,12 @@ where
                     "Audio capture watchdog: no callback for {}ms; attempting stream restart",
                     now_ms.saturating_sub(last_ms)
                 );
+                crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                    crate::runtime_diagnostics::Failure::AudioCallbackStalled,
+                ));
+                crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                    crate::runtime_diagnostics::Failure::AudioRecoveryStarted,
+                ));
 
                 // Clear pre-roll to avoid carrying stale audio across a restart.
                 if let Ok(mut pr) = pre_roll.lock() {
@@ -2225,12 +2251,22 @@ where
                         .map(|_| s)
                 }) {
                     Ok(new_stream) => {
+                        crate::runtime_diagnostics::record(
+                            crate::runtime_diagnostics::Event::Failure(
+                                crate::runtime_diagnostics::Failure::AudioRecoverySucceeded,
+                            ),
+                        );
                         let _previous_stream = std::mem::replace(&mut stream, new_stream);
                         consecutive_restart_failures = 0;
                         last_callback_ms.store(now_ms, Ordering::Relaxed);
                         continue;
                     }
                     Err(e) => {
+                        crate::runtime_diagnostics::record(
+                            crate::runtime_diagnostics::Event::Failure(
+                                crate::runtime_diagnostics::Failure::AudioRecoveryFailed,
+                            ),
+                        );
                         consecutive_restart_failures =
                             consecutive_restart_failures.saturating_add(1);
                         log::warn!("Audio capture watchdog: restart failed: {}", e);
@@ -2270,12 +2306,22 @@ where
                             .map(|_| s)
                     }) {
                         Ok(new_stream) => {
+                            crate::runtime_diagnostics::record(
+                                crate::runtime_diagnostics::Event::Failure(
+                                    crate::runtime_diagnostics::Failure::AudioRecoverySucceeded,
+                                ),
+                            );
                             let _previous_stream = std::mem::replace(&mut stream, new_stream);
                             consecutive_restart_failures = 0;
                             last_callback_ms.store(now_ms, Ordering::Relaxed);
                             continue;
                         }
                         Err(e) => {
+                            crate::runtime_diagnostics::record(
+                                crate::runtime_diagnostics::Event::Failure(
+                                    crate::runtime_diagnostics::Failure::AudioRecoveryFailed,
+                                ),
+                            );
                             consecutive_restart_failures =
                                 consecutive_restart_failures.saturating_add(1);
                             log::warn!("Audio capture watchdog: rebind restart failed: {}", e);
@@ -2414,6 +2460,22 @@ pub(crate) fn native_null_pcm_callbacks() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capture_join_outcomes_never_label_lost_or_panicked_workers_clean() {
+        use super::*;
+        use std::time::Duration;
+        assert!(capture_join_succeeded(Ok(Ok(Ok(())))));
+        assert!(!capture_join_succeeded(Ok(Ok(Err(
+            AudioCaptureError::ThreadError("synthetic".into())
+        )))));
+        assert!(!capture_join_succeeded(Ok(Err(Box::new(
+            "synthetic panic"
+        )))));
+        let (tx, rx) = mpsc::channel();
+        assert!(!capture_join_succeeded(rx.recv_timeout(Duration::ZERO)));
+        drop(tx);
+        assert!(!capture_join_succeeded(rx.recv_timeout(Duration::ZERO)));
+    }
     #[test]
     fn undrained_callbacks_fail_capture_instead_of_accepting_incomplete_audio() {
         use super::*;

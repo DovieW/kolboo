@@ -201,6 +201,12 @@ pub(crate) fn native_inputs() {
 }
 
 fn native_recovery(selected: &str) {
+    for outcome in ["rebuild", "rebind", "failed"] {
+        native_recovery_outcome(selected, outcome);
+    }
+}
+
+fn native_recovery_outcome(selected: &str, outcome: &str) {
     use super::super::*;
     use cpal::traits::HostTrait;
     let audio = AudioCapture::new();
@@ -249,16 +255,21 @@ fn native_recovery(selected: &str) {
                 clock.store(1, Ordering::Relaxed);
                 Capture::start_command(shell("exec sleep 600"), dispatch.clone(), start, clock).map(InputStream::Pulse)
             }
+            2 if outcome == "rebuild" => {
+                command_tx.send(CaptureCommand::Stop).unwrap();
+                build_stream(device, config, format, start, clock, dispatch)
+            }
             2 => Err(AudioCaptureError::StreamBuild("synthetic device rebuild failure".into())),
             3 => {
                 assert!(matches!(device, InputDevice::Pulse(source) if source == &source_name(selected).unwrap()));
                 command_tx.send(CaptureCommand::Stop).unwrap();
+                if outcome == "failed" { return Err(AudioCaptureError::StreamBuild("synthetic rebind failure".into())); }
                 build_stream(device, config, format, start, clock, dispatch)
             }
             _ => panic!("recovery must stop after the selected source is rebound"),
         }
     }).unwrap();
-    assert_eq!(calls, 3);
+    assert_eq!(calls, if outcome == "rebuild" { 2 } else { 3 });
 }
 
 fn dispatch() -> CaptureDispatch {
