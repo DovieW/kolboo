@@ -16,7 +16,7 @@ use hound::{WavSpec, WavWriter};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread::{self, JoinHandle};
@@ -35,6 +35,9 @@ use dispatch::{
 pub(crate) use linux_input::tests::native_inputs;
 pub mod journal;
 mod meters;
+#[cfg(test)]
+#[path = "audio_capture/tests/native_stream.rs"]
+mod native_stream_tests;
 mod preprocessing;
 #[cfg(test)]
 #[path = "audio_capture/tests/streaming.rs"]
@@ -193,6 +196,9 @@ pub enum AudioCaptureError {
 
     #[error("Failed to start audio stream: {0}")]
     StreamStart(String),
+
+    #[error("Microphone stream failed; the recording is retained. Try recording again.")]
+    StreamInterrupted,
 
     #[error("Failed to encode audio: {0}")]
     Encoding(String),
@@ -1502,10 +1508,12 @@ impl AudioCapture {
 
             let joined = join_rx.recv_timeout(timeout);
             let owner_lost = joined.is_err();
+            let native_interrupted =
+                matches!(&joined, Ok(Ok(Err(AudioCaptureError::StreamInterrupted))));
             let stopped_cleanly = capture_join_succeeded(joined);
             if !stopped_cleanly {
                 self.capture_fence.fail_latest();
-                if owner_lost || self.recovery_path.is_some() {
+                if owner_lost || (self.recovery_path.is_some() && !native_interrupted) {
                     self.quarantine_capture();
                 }
             }
@@ -1834,7 +1842,10 @@ struct CaptureThreadArgs {
 }
 
 enum InputStream {
-    Cpal(cpal::Stream),
+    Cpal {
+        stream: cpal::Stream,
+        fault: Arc<NativeStreamFault>,
+    },
     #[cfg(target_os = "linux")]
     Pulse(linux_input::Capture),
 }
@@ -1842,22 +1853,25 @@ enum InputStream {
 impl InputStream {
     fn play(&self) -> Result<(), cpal::PlayStreamError> {
         match self {
-            Self::Cpal(stream) => stream.play(),
+            Self::Cpal { stream, .. } => stream.play(),
             #[cfg(target_os = "linux")]
             Self::Pulse(_) => Ok(()), // The owned helper starts recording on spawn.
         }
     }
 
     fn check(&self) -> Result<(), AudioCaptureError> {
-        #[cfg(target_os = "linux")]
-        if let Self::Pulse(capture) = self {
-            if capture.is_finished() {
-                return Err(AudioCaptureError::StreamStart(
-                    "Linux microphone disconnected or its sound server stopped".into(),
-                ));
+        match self {
+            Self::Cpal { fault, .. } => fault.check(),
+            #[cfg(target_os = "linux")]
+            Self::Pulse(capture) => {
+                if capture.is_finished() {
+                    return Err(AudioCaptureError::StreamStart(
+                        "Linux microphone disconnected or its sound server stopped".into(),
+                    ));
+                }
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 
@@ -1934,13 +1948,48 @@ fn forward_vad_events(
     }
 }
 
-fn stream_error_handler(dispatch: CaptureDispatch) -> impl FnMut(cpal::StreamError) {
-    move |err| {
-        dispatch.fail_current();
-        crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
-            crate::runtime_diagnostics::Failure::AudioStream,
-        ));
-        log::error!("Audio stream error: {}", err);
+// This latch belongs to one native stream, not to the reusable capture fence.
+// A broken backend can invoke its error callback millions of times per second.
+// Keep that callback bounded and content-free; the owner reports and drops the
+// failed stream even when idle watchdog recovery is disabled.
+#[derive(Default)]
+// 0 = healthy, 1 = failed awaiting owner report, 2 = failure reported.
+struct NativeStreamFault(AtomicU8);
+
+impl NativeStreamFault {
+    fn is_failed(&self) -> bool {
+        self.0.load(Ordering::SeqCst) != 0
+    }
+
+    fn check(&self) -> Result<(), AudioCaptureError> {
+        if !self.is_failed() {
+            return Ok(());
+        }
+        if self
+            .0
+            .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioStream,
+            ));
+        }
+        Err(AudioCaptureError::StreamInterrupted)
+    }
+}
+
+fn stream_error_handler(
+    dispatch: CaptureDispatch,
+    fault: Arc<NativeStreamFault>,
+) -> impl FnMut(cpal::StreamError) {
+    move |_err| {
+        if fault
+            .0
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            dispatch.fail_current();
+        }
     }
 }
 
@@ -1976,16 +2025,21 @@ fn build_stream(
             .map(InputStream::Pulse)
         }
     };
+    let fault = Arc::new(NativeStreamFault::default());
     match sample_format {
         SampleFormat::F32 => {
             let last_callback_ms = last_callback_ms.clone();
-            let error_handler = stream_error_handler(dispatch.clone());
+            let error_handler = stream_error_handler(dispatch.clone(), fault.clone());
+            let fault = fault.clone();
             let dispatch = dispatch.clone();
 
             device
                 .build_input_stream(
                     config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if fault.is_failed() {
+                            return;
+                        }
                         last_callback_ms
                             .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
@@ -1998,13 +2052,17 @@ fn build_stream(
         }
         SampleFormat::I16 => {
             let last_callback_ms = last_callback_ms.clone();
-            let error_handler = stream_error_handler(dispatch.clone());
+            let error_handler = stream_error_handler(dispatch.clone(), fault.clone());
+            let fault = fault.clone();
             let dispatch = dispatch.clone();
 
             device
                 .build_input_stream(
                     config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        if fault.is_failed() {
+                            return;
+                        }
                         last_callback_ms
                             .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
@@ -2017,13 +2075,17 @@ fn build_stream(
         }
         SampleFormat::U16 => {
             let last_callback_ms = last_callback_ms.clone();
-            let error_handler = stream_error_handler(dispatch.clone());
+            let error_handler = stream_error_handler(dispatch.clone(), fault.clone());
+            let fault = fault.clone();
             let dispatch = dispatch.clone();
 
             device
                 .build_input_stream(
                     config,
                     move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        if fault.is_failed() {
+                            return;
+                        }
                         last_callback_ms
                             .store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
 
@@ -2039,7 +2101,7 @@ fn build_stream(
             sample_format
         ))),
     }
-    .map(InputStream::Cpal)
+    .map(|stream| InputStream::Cpal { stream, fault })
 }
 
 /// Run the audio capture in a dedicated thread
@@ -2488,6 +2550,8 @@ pub(crate) fn native_null_pcm_callbacks() {
         std::env::var("ALSA_CONFIG_PATH").unwrap(),
         format!("{directory}/asound.conf")
     );
+    native_stream_tests::native_stream_errors();
+    crate::audio::cue_output_native_test();
     let wait_for_audio = |capture: &AudioCapture| {
         let start = std::time::Instant::now();
         while capture.buffer.lock().unwrap().captured_samples == 0 {

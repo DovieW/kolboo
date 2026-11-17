@@ -92,6 +92,10 @@ impl From<crate::pipeline::PipelineState> for Phase {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Failure {
     AudioStream,
+    AudioOutput,
+    MainWindow,
+    PresetWindow,
+    QuickAskWindow,
     AudioHelperExited,
     AudioQueueOverflow,
     AudioPoolExhausted,
@@ -108,6 +112,10 @@ impl Failure {
     fn report_code(self) -> Option<&'static str> {
         Some(match self {
             Self::AudioStream => "audio_stream",
+            Self::AudioOutput => "audio_output",
+            Self::MainWindow => "main_window",
+            Self::PresetWindow => "preset_window",
+            Self::QuickAskWindow => "quick_ask_window",
             Self::AudioHelperExited => "audio_helper_exited",
             Self::AudioQueueOverflow => "audio_queue_overflow",
             Self::AudioPoolExhausted => "audio_pool_exhausted",
@@ -840,6 +848,10 @@ mod tests {
         }
         for reason in [
             Failure::AudioStream,
+            Failure::AudioOutput,
+            Failure::MainWindow,
+            Failure::PresetWindow,
+            Failure::QuickAskWindow,
             Failure::AudioHelperExited,
             Failure::AudioQueueOverflow,
             Failure::AudioPoolExhausted,
@@ -879,6 +891,26 @@ mod tests {
             assert!(recorder.state.cpu_ticks.is_some());
         }
         assert!(now_ms() > 0);
+    }
+
+    #[test]
+    fn output_and_window_failures_have_distinct_content_free_wire_codes() {
+        for (failure, code) in [
+            (Failure::AudioOutput, "audio_output"),
+            (Failure::MainWindow, "main_window"),
+            (Failure::PresetWindow, "preset_window"),
+            (Failure::QuickAskWindow, "quick_ask_window"),
+        ] {
+            assert_eq!(failure.report_code(), Some(code));
+            let wire = serde_json::to_string(&failure).unwrap();
+            assert_eq!(wire, format!("\"{code}\""));
+            assert_eq!(serde_json::from_str::<Failure>(&wire).unwrap(), failure);
+        }
+        assert_ne!(
+            Failure::AudioStream.report_code(),
+            Failure::AudioOutput.report_code()
+        );
+        assert!(serde_json::from_str::<Failure>("\"arbitrary private error\"").is_err());
     }
 
     #[test]

@@ -11,6 +11,9 @@ static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// Must be held for the app's lifetime so the non-blocking writer flushes on exit.
 static FILE_LOG_GUARD: Mutex<Option<WorkerGuard>> = Mutex::new(None);
 static FILE_LOG_ERRORS: OnceLock<tracing_appender::non_blocking::ErrorCounter> = OnceLock::new();
+// The dependency default is 128,000 queued records. A stalled disk must not
+// retain a large backlog of formatted diagnostic strings in the GUI process.
+const FILE_LOG_QUEUE_CAPACITY: usize = 1024;
 
 pub(crate) fn dropped_lines() -> u64 {
     FILE_LOG_ERRORS
@@ -40,15 +43,17 @@ pub(crate) fn overflowing_test_writer() -> (std::sync::mpsc::Sender<()>, WorkerG
     let (entered_tx, entered_rx) = std::sync::mpsc::channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel();
     let (mut writer, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
-        .buffered_lines_limit(1)
+        .buffered_lines_limit(FILE_LOG_QUEUE_CAPACITY)
         .finish(PausedSink(entered_tx, release_rx));
     writer.write_all(b"first").unwrap();
     entered_rx
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
-    writer.write_all(b"queued").unwrap();
+    for _ in 0..FILE_LOG_QUEUE_CAPACITY {
+        writer.write_all(b"queued").unwrap();
+    }
     writer.write_all(b"dropped").unwrap();
-    assert!(writer.error_counter().dropped_lines() > 0);
+    assert_eq!(writer.error_counter().dropped_lines(), 1);
     assert!(FILE_LOG_ERRORS.set(writer.error_counter()).is_ok());
     (release_tx, guard)
 }
@@ -179,7 +184,10 @@ pub fn init() {
                 .build(&log_dir)
                 .ok()?;
 
-            let (non_blocking, guard) = tracing_appender::non_blocking(appender);
+            let (non_blocking, guard) =
+                tracing_appender::non_blocking::NonBlockingBuilder::default()
+                    .buffered_lines_limit(FILE_LOG_QUEUE_CAPACITY)
+                    .finish(appender);
             let _ = FILE_LOG_ERRORS.set(non_blocking.error_counter());
             *FILE_LOG_GUARD.lock().unwrap() = Some(guard);
             let _ = LOG_DIR.set(log_dir);

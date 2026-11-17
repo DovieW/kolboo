@@ -211,6 +211,40 @@ fn runtime_failures_are_closed_content_free_and_rate_limited() {
 }
 
 #[test]
+fn output_and_window_failures_survive_scrubbing_and_are_deduplicated() {
+    let codes = [
+        "audio_output",
+        "main_window",
+        "preset_window",
+        "quick_ask_window",
+    ];
+    let events = captured_runtime_events(|| {
+        for code in codes {
+            report_runtime_failure(code);
+            report_runtime_failure(code);
+        }
+        report_runtime_failure("private device or window error");
+    });
+    assert_eq!(events.len(), codes.len());
+    for (event, code) in events.iter().zip(codes) {
+        assert_eq!(event.tags["runtime_code"], code);
+        assert_eq!(event.tags["event_kind"], "runtime_failure");
+        assert_eq!(event.fingerprint.len(), 1);
+        assert!(!serde_json::to_string(event)
+            .unwrap()
+            .contains("private device"));
+    }
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| &event.fingerprint)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        codes.len()
+    );
+}
+
+#[test]
 fn account_failures_are_explicit_scrubbed_and_rate_limited() {
     sentry::Hub::run(Arc::new(sentry::Hub::new(None, Arc::default())), || {
         report_account_failure("session_refresh", "network", None);

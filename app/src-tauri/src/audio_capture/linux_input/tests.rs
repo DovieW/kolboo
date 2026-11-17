@@ -376,24 +376,6 @@ fn dispatch() -> CaptureDispatch {
 }
 
 #[test]
-fn native_stream_errors_fail_the_recording_and_preserve_startup_error_details() {
-    use super::super::{stream_build_error, stream_error_handler};
-    let dispatch = dispatch();
-    let epoch = dispatch.fence.begin();
-    let mut on_error = stream_error_handler(dispatch.clone());
-    on_error(cpal::StreamError::DeviceNotAvailable);
-    assert!(dispatch.fence.failed(epoch));
-    dispatch.fence.stop();
-    on_error(cpal::StreamError::StreamInvalidated);
-    let next = dispatch.fence.begin();
-    assert!(!dispatch.fence.failed(next));
-    let native = cpal::BuildStreamError::StreamConfigNotSupported;
-    assert!(
-        matches!(stream_build_error(native.clone()), AudioCaptureError::StreamBuild(message) if message == native.to_string())
-    );
-}
-
-#[test]
 fn helper_stream_delivers_float_samples_marks_abrupt_eof_and_joins() {
     let dispatch = dispatch();
     let epoch = dispatch.fence.begin();
