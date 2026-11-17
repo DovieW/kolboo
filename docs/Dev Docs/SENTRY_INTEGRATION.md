@@ -191,6 +191,15 @@ it is not a live laptop stack trace. Wayland shortcut cards use the portal,
 but temporary Escape-to-cancel still uses the plugin. Disabling it is not
 an equivalent optimization.
 
+Compared the extracted Linux development packages `7849004` and `13a703c`
+with Hot Mic enabled on a private PulseAudio null source (generated silence,
+offline X11 sessions, no user data). Summing voluntary and involuntary context
+switches across the main process's threads over eight seconds gave **1,027 vs
+136 switches/s**; reversing the run order gave **1,031 vs 135 switches/s**.
+These are scheduling counts during open capture, not tray-idle CPU or a battery
+benchmark. The overlay HTML's directly referenced stylesheets shrank from
+252,467 to 22,900 bytes before compression; this is not a RAM measurement.
+
 ### Laptop development packages
 
 Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
