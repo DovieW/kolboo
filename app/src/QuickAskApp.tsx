@@ -13,15 +13,17 @@ import remarkGfm from "remark-gfm";
 import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { applyAccentColor } from "./lib/accentColor";
 import { readBootAccentColor } from "./lib/bootStorage";
+import { QuickAskStream } from "./lib/quickAskStream";
 import type {
 	AppSettings,
 	QuickAskAnswerPayload,
 	QuickAskDismissMode,
+	QuickAskPartialPayload,
 	QuickAskStartedPayload,
+	QuickAskStatePayload,
 } from "./lib/tauri";
 import { tauriAPI } from "./lib/tauri";
-import { useBackendEvent } from "./lib/tauri/useBackendEvent";
-import { QuickAskStream } from "./lib/quickAskStream";
+import { listenTyped } from "./lib/tauri/events";
 import "./app.css";
 
 function sanitizeExternalHref(href: string | undefined | null): string | null {
@@ -277,20 +279,26 @@ export default function QuickAskApp() {
 	const cancelAnswer = useCallback(() => {
 		const requestId = stream.current.cancel();
 		if (requestId) void tauriAPI.cancelQuickAsk(requestId).catch(() => {});
+		return requestId;
 	}, []);
-	useEffect(() => () => cancelAnswer(), [cancelAnswer]);
+	useEffect(
+		() => () => {
+			cancelAnswer();
+		},
+		[cancelAnswer],
+	);
 
-	useBackendEvent("quick-ask-partial", (payload) => {
+	const handlePartial = (payload: QuickAskPartialPayload) => {
 		const text = stream.current.partial(payload);
 		if (text !== null) setAnswer(text);
-	});
+	};
 
 	const hideNow = useCallback(() => {
 		if (dismissTimerRef.current) {
 			window.clearTimeout(dismissTimerRef.current);
 			dismissTimerRef.current = null;
 		}
-		cancelAnswer();
+		const requestId = cancelAnswer();
 		const version = stream.current.version;
 		win
 			.hide()
@@ -299,6 +307,8 @@ export default function QuickAskApp() {
 			})
 			.finally(() => {
 				if (stream.current.version !== version) return;
+				if (requestId)
+					void tauriAPI.cancelQuickAsk(requestId, true).catch(() => {});
 				setClickThrough(true);
 				tauriAPI.setQuickAskEscapeEnabled(false).catch(() => {
 					// ignore
@@ -369,7 +379,7 @@ export default function QuickAskApp() {
 	const dismiss = useCallback(() => {
 		// Let CSS animate before hiding the window.
 		if (dismissTimerRef.current) return;
-		cancelAnswer();
+		const requestId = cancelAnswer();
 		const version = stream.current.version;
 		setClosing(true);
 		window.requestAnimationFrame(() => {
@@ -383,6 +393,8 @@ export default function QuickAskApp() {
 					})
 					.finally(() => {
 						if (stream.current.version !== version) return;
+						if (requestId)
+							void tauriAPI.cancelQuickAsk(requestId, true).catch(() => {});
 						setClickThrough(true);
 						tauriAPI.setQuickAskEscapeEnabled(false).catch(() => {
 							// ignore
@@ -394,7 +406,7 @@ export default function QuickAskApp() {
 		});
 	}, [cancelAnswer, clearState, setClickThrough, win]);
 
-	useBackendEvent("quick-ask-started", (payload) => {
+	const handleStarted = (payload: QuickAskStartedPayload) => {
 		if (dismissTimerRef.current) {
 			window.clearTimeout(dismissTimerRef.current);
 			dismissTimerRef.current = null;
@@ -426,9 +438,9 @@ export default function QuickAskApp() {
 		});
 		resizeWindowToPanel();
 		void resolveActiveProfileId();
-	});
+	};
 
-	useBackendEvent("quick-ask-answer", (payload) => {
+	const handleAnswer = (payload: QuickAskAnswerPayload) => {
 		// If we aren't actively waiting for an answer, ignore late/stale events.
 		const safePayload = payload as QuickAskAnswerPayload;
 		if (!stream.current.finish(safePayload)) return;
@@ -450,19 +462,81 @@ export default function QuickAskApp() {
 		setPhase("error");
 		setError(safePayload.error);
 		setAnswerScrollable(false);
-	});
+	};
 
-	useBackendEvent("quick-ask-dismiss-requested", () => {
-		dismiss();
+	const handlers = useRef({
+		handleStarted,
+		handlePartial,
+		handleAnswer,
+		dismiss,
+		hideNow,
 	});
-
-	useBackendEvent("recording-start", () => {
-		hideNow();
-	});
-
-	useBackendEvent("pipeline-transcription-started", () => {
-		hideNow();
-	});
+	handlers.current = {
+		handleStarted,
+		handlePartial,
+		handleAnswer,
+		dismiss,
+		hideNow,
+	};
+	useEffect(() => {
+		let disposed = false;
+		let revision = 0;
+		let requestId: string | null | undefined;
+		const stops: Array<() => void> = [];
+		const applySnapshot = (snapshot: QuickAskStatePayload | null) => {
+			if (disposed || !snapshot || snapshot.revision <= revision) return;
+			revision = snapshot.revision;
+			if (!snapshot.started) {
+				// A locally dismissed request already owns its closing animation.
+				// Its cancellation tombstone must not cancel that teardown timer.
+				if (!stream.current.isDismissed) handlers.current.hideNow();
+				return;
+			}
+			if (requestId !== snapshot.started.request_id) {
+				requestId = snapshot.started.request_id;
+				handlers.current.handleStarted(snapshot.started);
+			}
+			if (snapshot.partial) handlers.current.handlePartial(snapshot.partial);
+			if (snapshot.answer) handlers.current.handleAnswer(snapshot.answer);
+		};
+		const registered = async (subscription: Promise<() => void>) => {
+			const stop = await subscription;
+			if (disposed) stop();
+			else stops.push(stop);
+		};
+		void Promise.all([
+			registered(listenTyped("quick-ask-state", applySnapshot)),
+			registered(
+				listenTyped("quick-ask-dismiss-requested", () => {
+					if (!disposed) handlers.current.dismiss();
+				}),
+			),
+			registered(
+				listenTyped("recording-start", () => {
+					if (!disposed) handlers.current.hideNow();
+				}),
+			),
+			registered(
+				listenTyped("pipeline-transcription-started", () => {
+					if (!disposed) handlers.current.hideNow();
+				}),
+			),
+		])
+			.then(async () => {
+				if (disposed) return;
+				applySnapshot(
+					await invoke<QuickAskStatePayload | null>("quick_ask_frontend_ready"),
+				);
+			})
+			.catch(() => {
+				// No content or native error details belong in logs. A new window load
+				// retries listener setup without a periodic idle heartbeat.
+			});
+		return () => {
+			disposed = true;
+			for (const stop of stops) stop();
+		};
+	}, []);
 	const effectiveDismissMode: QuickAskDismissMode = useMemo(() => {
 		if (!settings) return "manual";
 		const profiles = settings.rewrite_program_prompt_profiles ?? [];

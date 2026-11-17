@@ -238,6 +238,16 @@ fn overlay_audio_level_payload_schema_matches_checked_in_file() {
 }
 
 #[test]
+fn quick_ask_state_payload_schema_matches_checked_in_file() {
+    let generated = serde_json::to_value(schema_for!(crate::QuickAskStatePayload)).unwrap();
+    assert_schema_matches_file(
+        generated,
+        "quick-ask-state-payload.schema.json",
+        "QuickAskStatePayload",
+    );
+}
+
+#[test]
 fn quick_ask_started_payload_schema_matches_checked_in_file() {
     let schema = schema_for!(crate::QuickAskStartedPayload);
     let generated: Value = serde_json::to_value(schema)

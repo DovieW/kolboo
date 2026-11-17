@@ -18,6 +18,7 @@
 			{
 				"title": "Kolboo",
 				"label": "main",
+				"create": false,
 				"visible": false,
 				"width": 1280,
 				"height": 800,

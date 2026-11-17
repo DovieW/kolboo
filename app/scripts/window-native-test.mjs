@@ -220,6 +220,66 @@ try {
 				main_window_close_behavior: "exit_program",
 			}),
 		);
+		const nativeRunEnv = {
+			...env,
+			CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:
+				env.KOLBOO_NATIVE_WINDOW_RUNNER ??
+				"unshare --user --map-current-user --net --",
+		};
+		// CLI initialization must not require a main window or an account. Both
+		// cases execute the actual binary in the same private offline fixture.
+		for (const [cliArgs, expectedCode] of [
+			[["settings", "get", "--key", "main_window_show_on_launch"], 0],
+			[["--"], 2],
+		]) {
+			const cli = spawnSync(
+				"cargo",
+				[
+					"llvm-cov",
+					"run",
+					"--no-report",
+					"--bin",
+					"kolboo",
+					"--manifest-path",
+					path.resolve("src-tauri/Cargo.toml"),
+					"--",
+					...cliArgs,
+				],
+				{
+					env: nativeRunEnv,
+					cwd: directory,
+					encoding: "utf8",
+					timeout: 120000,
+				},
+			);
+			if (cli.status !== expectedCode)
+				throw new Error(`Offline CLI ${cliArgs[0]} returned ${cli.status}`);
+			const start = cli.stdout.search(/\{\s*"success"\s*:/u);
+			if (start < 0)
+				throw new Error("Offline CLI omitted its structured result");
+			const response = JSON.parse(cli.stdout.slice(start));
+			if (
+				response.success !== (expectedCode === 0) ||
+				response.code !== expectedCode
+			)
+				throw new Error("Offline CLI result did not match its exit status");
+			if (expectedCode === 0 && response.data?.value !== true)
+				throw new Error("Offline CLI did not read the persisted setting");
+			if (expectedCode === 2 && !response.message?.includes("no subcommand"))
+				throw new Error(
+					"Empty CLI invocation did not explain the missing subcommand",
+				);
+		}
+		// A malformed non-secret setting must produce doctor diagnostics without
+		// preventing ordinary GUI startup and clean shutdown.
+		const startupSettings = JSON.parse(
+			readFileSync(path.join(data, "settings.json"), "utf8"),
+		);
+		startupSettings.quick_ask_hold_hotkey = 7;
+		writeFileSync(
+			path.join(data, "settings.json"),
+			JSON.stringify(startupSettings),
+		);
 		const log = openSync(path.join(directory, "startup.log"), "w");
 		const startup = spawn(
 			"cargo",
@@ -233,12 +293,7 @@ try {
 				path.resolve("src-tauri/Cargo.toml"),
 			],
 			{
-				env: {
-					...env,
-					CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:
-						env.KOLBOO_NATIVE_WINDOW_RUNNER ??
-						"unshare --user --map-current-user --net --",
-				},
+				env: nativeRunEnv,
 				cwd: directory,
 				stdio: ["ignore", log, log],
 			},
@@ -300,7 +355,15 @@ try {
 				checkpoint.event.kind !== "shutdown" ||
 				checkpoint.clean_shutdown !== true
 			)
-				throw new Error("Orderly startup/exit must persist an idle, clean checkpoint");
+				throw new Error(
+					"Orderly startup/exit must persist an idle, clean checkpoint",
+				);
+			if (
+				!readFileSync(path.join(directory, "startup.log"), "utf8").includes(
+					"Settings doctor: found",
+				)
+			)
+				throw new Error("Malformed private-fixture setting was not diagnosed");
 		} finally {
 			clearTimeout(exitTimer);
 			if (smoke && smoke.exitCode === null) smoke.kill("SIGTERM");

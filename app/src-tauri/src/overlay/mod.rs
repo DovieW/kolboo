@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use tauri::{App, AppHandle, Emitter, Listener, Manager};
@@ -164,7 +165,7 @@ fn apply_linux_overlay_window_type(surface: &gdk::Window, preset: OverlayWindowP
 fn configure_linux_overlay_stacking(
     window: &tauri::WebviewWindow,
     preset: OverlayWindowPreset,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> tauri::Result<()> {
     use gtk::prelude::{GtkWindowExt, WidgetExt};
 
     let gtk_window = window.gtk_window()?;
@@ -315,25 +316,116 @@ pub(crate) fn spawn_overlay_waveform_publisher(app: &AppHandle) {
     });
 }
 
-/// Create overlay, hover, and quick-ask windows, and apply startup positioning/visibility.
+/// Construct a utility page only when requested. Call from a worker/async
+/// command: synchronous event-handler construction can deadlock on Windows.
+fn ensure_utility_window(
+    app: &AppHandle,
+    preset: OverlayWindowPreset,
+    creating: &std::sync::atomic::AtomicBool,
+    ready: &std::sync::atomic::AtomicU64,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error + Send + Sync>> {
+    if creating.swap(true, Ordering::SeqCst) {
+        return Err("Utility window creation already in progress".into());
+    }
+    if let Some(window) = app.get_webview_window(preset.label()) {
+        if preset == OverlayWindowPreset::Hover {
+            report_hover_creation_result(app, true);
+        }
+        creating.store(false, Ordering::SeqCst);
+        return Ok(window);
+    }
+    ready.store(0, Ordering::SeqCst);
+    let result = build_utility_window(app, preset);
+    if preset == OverlayWindowPreset::Hover {
+        report_hover_creation_result(app, result.is_ok());
+    }
+    creating.store(false, Ordering::SeqCst);
+    result
+}
+
+fn report_hover_creation_result(app: &AppHandle, succeeded: bool) -> bool {
+    let state = app.state::<crate::state::AppState>();
+    let reported = &state.overlay_hover_failure_reported;
+    if succeeded {
+        reported.store(false, Ordering::SeqCst);
+        return false;
+    }
+    if reported.swap(true, Ordering::SeqCst) {
+        return false;
+    }
+    crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+        crate::runtime_diagnostics::Failure::PresetWindow,
+    ));
+    log::warn!("Preset window unavailable; hovering again can retry");
+    true
+}
+
+fn build_utility_window(
+    app: &AppHandle,
+    preset: OverlayWindowPreset,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error + Send + Sync>> {
+    let window = overlay_window_builder_preset(app, preset).build()?;
+    configure_utility_window(window, preset)
+}
+
+fn configure_utility_window(
+    window: tauri::WebviewWindow,
+    preset: OverlayWindowPreset,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(all(test, target_os = "linux"))]
+    tests::quick_ask_configuration_barrier(preset);
+    #[cfg(target_os = "linux")]
+    {
+        // Build on the caller's worker, but GTK/GDK objects may only be used
+        // on the initialized GUI thread. No GUI callback waits for this worker.
+        let (sent, received) = std::sync::mpsc::sync_channel(1);
+        let native = window.clone();
+        window.run_on_main_thread(move || {
+            let result = configure_linux_overlay_stacking(&native, preset);
+            if result.is_err() {
+                let _ = native.destroy();
+            }
+            let _ = sent.send(result);
+        })?;
+        received.recv()??;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = preset;
+    Ok(window)
+}
+
+pub(crate) fn ensure_hover_window(
+    app: &AppHandle,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error + Send + Sync>> {
+    let state = app.state::<crate::state::AppState>();
+    ensure_utility_window(
+        app,
+        OverlayWindowPreset::Hover,
+        &state.overlay_hover_creating,
+        &state.overlay_hover_frontend_ready_at_ms,
+    )
+}
+
+pub(crate) fn ensure_quick_ask_window(
+    app: &AppHandle,
+) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error + Send + Sync>> {
+    let state = app.state::<crate::state::AppState>();
+    ensure_utility_window(
+        app,
+        OverlayWindowPreset::QuickAsk,
+        &state.quick_ask_window_creating,
+        &state.quick_ask_frontend_ready_at_ms,
+    )
+}
+
+/// Keep only the latency-sensitive recording page resident at startup.
 pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     // Create overlay window
     let overlay = overlay_window_builder_preset(app, OverlayWindowPreset::Overlay).build()?;
 
-    // Create hover panel window (hidden by default).
-    // This avoids resizing the main overlay window on hover, which can cause
-    // cursor flicker and position drift on Windows.
-    let overlay_hover = overlay_window_builder_preset(app, OverlayWindowPreset::Hover).build()?;
-
-    // Create Quick Ask answer window (hidden by default).
-    // This is a separate transparent webview that renders an answer + copy button.
-    let quick_ask = overlay_window_builder_preset(app, OverlayWindowPreset::QuickAsk).build()?;
-
     #[cfg(target_os = "linux")]
     {
         configure_linux_overlay_stacking(&overlay, OverlayWindowPreset::Overlay)?;
-        configure_linux_overlay_stacking(&overlay_hover, OverlayWindowPreset::Hover)?;
-        configure_linux_overlay_stacking(&quick_ask, OverlayWindowPreset::QuickAsk)?;
     }
 
     #[cfg(target_os = "linux")]
@@ -378,12 +470,6 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
         }
     }
 
-    // Position hidden windows before their first show. The layout controller
-    // owns both size and position, including monitor targeting and DPI.
-    if let Err(e) = commands::overlay::position_quick_ask_to_target_monitor(app.handle()) {
-        log::warn!("Failed to position Quick Ask at startup: {}", e);
-    }
-
     // Set initial overlay visibility based on saved settings
     let overlay_mode: String =
         get_setting_from_store(app.handle(), "overlay_mode", "recording_only".to_string());
@@ -409,70 +495,4 @@ pub(crate) fn create_overlay_windows(app: &App) -> Result<(), Box<dyn std::error
 }
 
 #[cfg(test)]
-mod tests {
-    use super::OverlayWindowPreset;
-
-    #[test]
-    fn waveform_uses_fast_capture_and_slow_idle_cadence() {
-        use crate::pipeline::PipelineState::*;
-        use std::time::Duration;
-        assert_eq!(super::waveform_interval(None), Duration::from_millis(33));
-        assert_eq!(
-            super::waveform_interval(Some(Recording)),
-            Duration::from_millis(33)
-        );
-        for state in [Idle, Transcribing, Routing, Rewriting, Error] {
-            assert_eq!(
-                super::waveform_interval(Some(state)),
-                Duration::from_secs(5)
-            );
-        }
-    }
-
-    #[test]
-    fn stale_hide_cannot_conceal_an_active_or_unknown_pipeline() {
-        use crate::pipeline::PipelineState::*;
-        for state in [
-            None,
-            Some(Recording),
-            Some(Transcribing),
-            Some(Routing),
-            Some(Rewriting),
-            Some(Error),
-        ] {
-            assert!(!super::may_hide("recording_only", state));
-            assert!(!super::may_hide("always", state));
-            assert!(super::may_hide("never", state));
-        }
-        assert!(super::may_hide("recording_only", Some(Idle)));
-        assert!(!super::may_hide("always", Some(Idle)));
-        assert!(!super::may_hide("invalid", Some(Idle)));
-    }
-
-    #[test]
-    fn overlay_window_presets_are_stable() {
-        let overlay = OverlayWindowPreset::Overlay;
-        assert_eq!(overlay.label(), "overlay");
-        assert_eq!(overlay.html_path(), "overlay.html");
-        assert_eq!(overlay.title(), "Kolboo Overlay");
-        assert_eq!(overlay.size(), (48.0, 48.0));
-        assert!(!overlay.visible());
-        assert!(!overlay.focusable());
-
-        let hover = OverlayWindowPreset::Hover;
-        assert_eq!(hover.label(), "overlay_hover");
-        assert_eq!(hover.html_path(), "overlay-hover.html");
-        assert_eq!(hover.title(), "Kolboo Presets");
-        assert_eq!(hover.size(), (320.0, 220.0));
-        assert!(!hover.visible());
-        assert!(!hover.focusable());
-
-        let quick_ask = OverlayWindowPreset::QuickAsk;
-        assert_eq!(quick_ask.label(), "quick_ask");
-        assert_eq!(quick_ask.html_path(), "quick-ask.html");
-        assert_eq!(quick_ask.title(), "Kolboo Quick Ask");
-        assert_eq!(quick_ask.size(), (520.0, 340.0));
-        assert!(!quick_ask.visible());
-        assert!(quick_ask.focusable());
-    }
-}
+pub(crate) mod tests;

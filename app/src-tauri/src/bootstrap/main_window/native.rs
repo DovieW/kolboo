@@ -7,6 +7,30 @@ use crate::overlay::layout::effective_layout_scale;
 use crate::state::AppState;
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
 
+/// Called on a worker, including the first show. Keep creation and recreation
+/// on the same configured path; synchronous Windows event handlers cannot
+/// safely construct WebView2 windows.
+pub(crate) fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let result = (|| {
+        let config = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|config| config.label == "main")
+            .ok_or(tauri::Error::WindowNotFound)?;
+        let window = tauri::WebviewWindowBuilder::from_config(app, config)?
+            .visible(false)
+            .build()?;
+        configure(&window);
+        Ok(window)
+    })();
+    if result.is_err() {
+        crate::bootstrap::report_main_window_result(app, false);
+    }
+    result
+}
+
 pub(crate) fn setup(app: &AppHandle) {
     #[cfg(target_os = "linux")]
     {
@@ -72,6 +96,28 @@ fn restore(window: &WebviewWindow, state: SavedWindow) -> tauri::Result<()> {
 }
 
 pub(crate) fn configure(window: &WebviewWindow) {
+    let app = window.app_handle().clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            // Closing has always destroyed the page, including the legacy
+            // "minimize_to_tray" value. Do not keep debug logging alive after it.
+            #[cfg(target_os = "windows")]
+            crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(false);
+            if let Ok(settings) = app.store("settings.json") {
+                settings.set("hotkey_debug_enabled", serde_json::json!(false));
+                let _ = settings.save();
+            }
+            let behavior: String = crate::get_setting_from_store(
+                &app,
+                "main_window_close_behavior",
+                "minimize_to_tray".into(),
+            );
+            if behavior == "exit_program" {
+                api.prevent_close();
+                app.exit(0);
+            }
+        }
+    });
     let store = match open_store(window.app_handle(), STORE_FILE) {
         Ok(store) => store,
         Err(_) => {

@@ -37,7 +37,7 @@ fn missing_work_area_falls_back_to_monitor_without_discarding_valid_panels() {
 fn native_window_manager_integration() {
     use crate::state::AppState;
     use std::time::{Duration, Instant};
-    use tauri::{Manager, WebviewWindowBuilder, WindowEvent};
+    use tauri::{Listener, Manager, WebviewWindowBuilder, WindowEvent};
 
     assert_eq!(
         std::env::var("KOLBOO_NATIVE_WINDOW_TEST").as_deref(),
@@ -48,7 +48,12 @@ fn native_window_manager_integration() {
     crate::audio_capture::native_inputs();
     crate::audio_capture::computer_audio::tests::native_helper_exit();
     let history_directory = tempfile::tempdir().unwrap();
-    let (native_context, updater_server) = crate::automatic_updates::tests::native_context();
+    let (mut native_context, updater_server) = crate::automatic_updates::tests::native_context();
+    native_context.config_mut().app.windows =
+        serde_json::from_str::<tauri::Config>(include_str!("../../../tauri.conf.json"))
+            .unwrap()
+            .app
+            .windows;
     let mut app = tauri::Builder::<tauri::Wry>::default()
         .any_thread()
         .manage(AppState::default())
@@ -83,6 +88,10 @@ fn native_window_manager_integration() {
         ])
         .build(native_context)
         .unwrap();
+    assert!(
+        app.get_webview_window("main").is_none(),
+        "tray-only launch creates no main page"
+    );
     {
         use tauri_plugin_autostart::ManagerExt;
         // All OS registration writes target this fixture's private XDG config.
@@ -189,7 +198,21 @@ fn native_window_manager_integration() {
         .build()
         .unwrap();
     super::native::setup(app.handle());
+    assert!(!window.is_visible().unwrap());
+    assert!(crate::bootstrap::main_window_operations_succeeded(&window, &[]), "a live hidden page must not be reported as a native presentation failure before asynchronous mapping");
     window.show().unwrap();
+    assert!(
+        super::native::create(app.handle()).is_err(),
+        "a real duplicate-label build reports a recoverable creation failure"
+    );
+    assert!(app
+        .state::<AppState>()
+        .main_window_failure_reported
+        .load(std::sync::atomic::Ordering::SeqCst));
+    assert!(
+        !crate::bootstrap::report_main_window_result(app.handle(), false),
+        "the same failure episode is not reported twice"
+    );
     let store = open_store(app.handle(), STORE_FILE).unwrap();
     let pump = |operation: &str,
                 app: &mut tauri::App<tauri::Wry>,
@@ -271,6 +294,8 @@ fn native_window_manager_integration() {
         settings.delete("hotkey_shortcuts");
     }
     native_overlay_startup_overlap(&mut app);
+    crate::commands::overlay::tests::native_hover_lifecycle(&mut app);
+    crate::sessions::quick_ask::tests::native_lazy_lifecycle(&mut app);
     window
         .set_size(tauri::Size::Physical(PhysicalSize::new(1925, 1225)))
         .unwrap();
@@ -291,12 +316,69 @@ fn native_window_manager_integration() {
     pump("close original window", &mut app, &|app| {
         app.get_webview_window("main").is_none()
     });
-    crate::bootstrap::show_main_window(app.handle(), "native-window-test", None);
+    assert_eq!(
+        app.store("settings.json")
+            .unwrap()
+            .get("hotkey_debug_enabled"),
+        Some(serde_json::json!(false))
+    );
+    // Multiple GUI-thread requests must not launch duplicate builders, or show
+    // a registered page before geometry and close behavior are configured.
+    app.state::<AppState>()
+        .main_window_creating
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::bootstrap::show_main_window(
+        app.handle(),
+        "native-in-progress",
+        Some(crate::events::EVENT_SINGLE_INSTANCE_ACTIVATED),
+    );
+    assert!(app.get_webview_window("main").is_none());
+    app.state::<AppState>()
+        .main_window_creating
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    fn exhausted_thread_resources(
+        _task: crate::bootstrap::MainWindowTask,
+    ) -> std::io::Result<std::thread::JoinHandle<()>> {
+        Err(std::io::ErrorKind::WouldBlock.into())
+    }
+    crate::bootstrap::show_main_window_with_spawner(
+        app.handle(),
+        "native-thread-exhaustion",
+        None,
+        exhausted_thread_resources,
+    );
+    assert!(app.get_webview_window("main").is_none());
+    assert!(
+        !app.state::<AppState>()
+            .main_window_creating
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "failed OS thread creation releases the gate so reopening can retry"
+    );
+    let (activated, activation) = std::sync::mpsc::channel();
+    let activation_app = app.handle().clone();
+    let activation_listener = app.listen("native-main-created", move |_| {
+        activated
+            .send(activation_app.get_webview_window("main").is_some())
+            .unwrap();
+    });
+    crate::bootstrap::show_main_window(
+        app.handle(),
+        "native-window-test",
+        Some("native-main-created"),
+    );
+    crate::bootstrap::show_main_window(app.handle(), "native-window-test-repeat", None);
     pump("recreate maximized window", &mut app, &|app| {
         app.get_webview_window("main")
             .is_some_and(|window| window.is_maximized().ok() == Some(true))
     });
     let recreated = app.get_webview_window("main").unwrap();
+    pump("notify after cold main creation", &mut app, &|_| {
+        activation.try_recv().is_ok_and(|exists| exists)
+    });
+    app.unlisten(activation_listener);
+    app.store("settings.json")
+        .unwrap()
+        .set("hotkey_debug_enabled", serde_json::json!(true));
     recreated.unmaximize().unwrap();
     pump("restore normal dimensions", &mut app, &|_| {
         !read_state(&store).maximized
@@ -351,11 +433,86 @@ fn native_window_manager_integration() {
     pump("close recreated window", &mut app, &|app| {
         app.get_webview_window("main").is_none()
     });
+    assert!(
+        recreated.is_visible().is_err(),
+        "the destroyed native window cannot be queried"
+    );
+    let queued_show = recreated.show();
+    let shown = crate::bootstrap::main_window_operations_succeeded(&recreated, &[queued_show]);
+    assert!(
+        !shown,
+        "a queued setter acknowledgment cannot establish successful presentation"
+    );
+    assert!(crate::bootstrap::report_main_window_result(
+        app.handle(),
+        shown
+    ));
+    assert!(!crate::bootstrap::report_main_window_result(
+        app.handle(),
+        false
+    ));
+    assert_eq!(
+        app.store("settings.json")
+            .unwrap()
+            .get("hotkey_debug_enabled"),
+        Some(serde_json::json!(false))
+    );
     // Destroyed handles return an OS error. Capture must keep the last valid
     // preference and failed restore must not panic while attaching cleanup.
     super::native::handle_event(&recreated, &repaired, &WindowEvent::Destroyed);
     super::native::configure(&recreated);
     assert_eq!(read_state(&repaired).width, 1280.0);
+
+    // Recreated windows retain Exit behavior as well as ordinary close-to-tray.
+    // The isolated event loop prevents the requested process exit.
+    crate::bootstrap::show_main_window(app.handle(), "native-exit-policy", None);
+    pump("open for exit policy", &mut app, &|app| {
+        app.get_webview_window("main").is_some()
+            && !app
+                .state::<AppState>()
+                .main_window_creating
+                .load(std::sync::atomic::Ordering::SeqCst)
+    });
+    assert!(
+        !app.state::<AppState>()
+            .main_window_failure_reported
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "a successful show starts a new failure-reporting episode"
+    );
+    let settings = app.store("settings.json").unwrap();
+    settings.set(
+        "main_window_close_behavior",
+        serde_json::json!("exit_program"),
+    );
+    let exit_window = app.get_webview_window("main").unwrap();
+    exit_window.close().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let exit_requested = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    while !exit_requested.load(std::sync::atomic::Ordering::SeqCst) {
+        assert!(
+            Instant::now() < deadline,
+            "recreated window must request exit"
+        );
+        let observed = exit_requested.clone();
+        app.run_iteration(move |_, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                observed.store(true, std::sync::atomic::Ordering::SeqCst);
+                api.prevent_exit();
+            }
+        });
+    }
+    assert!(
+        app.get_webview_window("main").is_some(),
+        "Exit prevents the ordinary close"
+    );
+    settings.set(
+        "main_window_close_behavior",
+        serde_json::json!("minimize_to_tray"),
+    );
+    exit_window.close().unwrap();
+    pump("close after rejected exit", &mut app, &|app| {
+        app.get_webview_window("main").is_none()
+    });
 }
 
 /// Reproduce startup's GUI-thread layout overlapping renderer IPC on a worker.

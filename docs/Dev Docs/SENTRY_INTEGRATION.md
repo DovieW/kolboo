@@ -46,6 +46,8 @@ run-local operation number; these are not account or transcript identifiers.
 - Journal retention is at most 62 days and 256 MiB, whichever limit is reached
   first; oldest daily files are removed first. The separate legacy text log
   still keeps seven rotated files and is not included in diagnostic exports.
+  Its asynchronous backlog is bounded to 1,024 records (rather than the
+  dependency's 128,000-record default); overflow remains counted and reported.
 - The next GUI launch records a previous run that never reached orderly exit
   as `previous_run_unclean`, retaining its last checkpoint. This does **not**
   identify SIGKILL's sender or distinguish power loss, a crash and forced exit.
@@ -90,6 +92,54 @@ is bounded independently of a blocked reader.
 Playback uses eight workers and an eight-connection queue, an absolute
 three-second header deadline, and closes active sockets at shutdown. Native
 thread/descriptor exhaustion fails closed without growing the worker pool.
+
+### Audio error storms and idle output
+
+An older Rodio default output callback prints `audio stream error: ...` directly
+to stderr. Holding the notification output stream indefinitely after a short
+cue could therefore keep an ALSA output loop active while idle and allow a
+broken output device to flood the shared journal. The microphone error callback
+was also capable of repeatedly formatting/logging backend errors. Both callbacks
+now only latch a per-stream fault; the owning non-realtime thread reports a
+closed failure code once and retires that stream. Native error text is not
+forwarded to the diagnostic journal or Sentry. An ordinary joined microphone
+failure keeps available audio recoverable without permanently poisoning future
+recordings; unknown worker ownership still requires quarantine.
+
+Output-device failures use `audio_output`, separately from microphone
+`audio_stream` failures. Native main, Presets and Quick Ask presentation failures
+use `main_window`, `preset_window` and `quick_ask_window`. These are closed codes,
+not raw native error messages. Expected cancellation or coalesced construction
+is not a failure; repeated failing Presets creation reports only once until a
+successful creation, and configured Sentry retains its existing rate limit.
+
+Notification output is opened only when needed, retained through rapid cues and
+a short idle grace, then closed. One worker owns a bounded cue queue and bounded
+in-flight players; an idle owner blocks for work without polling. Playback
+completion includes the existing tail padding, caller waits have a deadline,
+and stale queued cues cannot play late after their caller has timed out. A
+failed output is not automatically replayed on a different device.
+
+`dropped_logs` measures Kolboo's local file-writer backlog losses. It does not
+measure journald suppression, dropped stderr, or OS-recorder outages. Those must
+be reported separately by the OS-wide incident collector. This application work
+does not configure that collector, change journal budgets, or establish the
+sender of the previously observed SIGKILL.
+
+Validation on 2026-11-17: 1,077 frontend tests and 1,236 headless Rust tests
+passed (57 frontend skipped, 14 Rust ignored). The separately opted-in Linux
+Wry/Openbox/null-PCM run passed real lazy-window, cancellation/replacement,
+device-fault and cue-disposal checks. Offline production startup, account-free
+CLI reads, missing-subcommand errors and malformed-setting diagnostics also
+passed. The patch gate reports 100% for 957 executable lines in this series
+and 4,984 against its existing policy baseline. No new coverage exceptions were
+added; existing carried-forward statements were checked byte-for-byte. These
+fixtures do not certify physical microphones, real paste or Windows/macOS.
+
+Optional startup account refresh now belongs to the startup owner: no saved
+secure session means no account task. Its awaitable task uses the unchanged real
+refresh policy, reports only status/static messages, and is rehearsed with
+synthetic secure credentials and loopback failure/recovery responses.
 
 ### Laptop development packages
 

@@ -836,6 +836,14 @@ export interface QuickAskStartedPayload {
   request_id?: string | null;
 }
 
+// From: quick-ask-state-payload.schema.json
+export interface QuickAskStatePayload {
+  answer?: QuickAskAnswerPayload | null;
+  partial?: QuickAskPartialPayload | null;
+  revision: number;
+  started?: QuickAskStartedPayload | null;
+}
+
 // From: recording-preferences.schema.json
 export interface RecordingPreferences {
   /**

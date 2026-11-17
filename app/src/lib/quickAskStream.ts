@@ -5,9 +5,13 @@ export class QuickAskStream {
 	private requestId: string | null = null;
 	private seq = 0;
 	private active = false;
+	private dismissed = true;
 	private generation = 0;
 	get version() {
 		return this.generation;
+	}
+	get isDismissed() {
+		return this.dismissed;
 	}
 
 	begin(requestId: string | null) {
@@ -15,6 +19,7 @@ export class QuickAskStream {
 		this.requestId = requestId;
 		this.seq = 0;
 		this.active = true;
+		this.dismissed = false;
 	}
 
 	partial(payload: QuickAskPartialPayload): string | null {
@@ -50,8 +55,10 @@ export class QuickAskStream {
 
 	cancel(): string | null {
 		this.generation += 1;
-		const requestId = this.active ? this.requestId : null;
+		const requestId = this.requestId;
+		this.requestId = null;
 		this.active = false;
+		this.dismissed = true;
 		return requestId;
 	}
 }

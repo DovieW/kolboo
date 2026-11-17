@@ -6,7 +6,7 @@ use tauri::{PhysicalSize, Runtime};
 use tauri_plugin_store::{Store, StoreExt};
 
 mod native;
-pub(crate) use native::{configure, setup};
+pub(crate) use native::{create, setup};
 
 const STORE_FILE: &str = "main-window.json";
 const STATE_KEY: &str = "main";

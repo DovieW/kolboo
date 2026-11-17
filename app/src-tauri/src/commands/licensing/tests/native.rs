@@ -6,6 +6,70 @@ use tauri::Manager;
 
 struct Environment(Vec<(&'static str, Option<String>)>);
 
+async fn startup_session_refresh(app: &AppHandle, environment: &Environment) {
+    use crate::bootstrap::startup::spawn_startup_session_refresh;
+    assert!(load_session_material(app).is_none());
+    assert!(
+        spawn_startup_session_refresh(app).is_none(),
+        "community/local startup creates no account refresh task"
+    );
+
+    persist_session_material(
+        app,
+        &SessionMaterial {
+            access_token: "synthetic-startup-access".into(),
+            refresh_token: "synthetic-startup-refresh".into(),
+        },
+    )
+    .unwrap();
+    let (base, response) = server(vec![(400, json!({"error_code":"refresh_token_already_used","msg":"PRIVATE synthetic account response"}).to_string())]).await;
+    environment.configure(&base);
+    spawn_startup_session_refresh(app)
+        .expect("secure sessions own optional startup refresh")
+        .await
+        .unwrap();
+    let requests = response.await.unwrap();
+    assert_eq!(
+        requests.len(),
+        1,
+        "startup uses the real non-simulated refresh command"
+    );
+    assert!(requests[0].starts_with("POST /auth/v1/token"));
+    assert!(requests[0].contains("synthetic-startup-refresh"));
+    assert!(load_license_state(app).unwrap().reauth_required);
+    assert_eq!(
+        load_session_material(app).unwrap().access_token,
+        "synthetic-startup-access",
+        "a recoverable startup failure does not erase secure credentials"
+    );
+
+    let community =
+        build_signed_in_fallback_state("synthetic-startup-user".into(), None, Utc::now());
+    let (base, response) = server(vec![
+        (200, json!({"access_token":"synthetic-startup-rotated","refresh_token":"synthetic-startup-rotated-refresh","user":{"id":"synthetic-startup-user"}}).to_string()),
+        (200, serde_json::to_string(&community).unwrap()),
+    ]).await;
+    environment.configure(&base);
+    spawn_startup_session_refresh(app).unwrap().await.unwrap();
+    let requests = response.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests[1].starts_with("POST /v1/license/refresh"));
+    let restored = load_license_state(app).unwrap();
+    assert_eq!(restored.status, LicenseStatus::Active);
+    assert!(!restored.reauth_required);
+    assert_eq!(
+        load_session_material(app).unwrap().access_token,
+        "synthetic-startup-rotated"
+    );
+    assert!(app
+        .store("settings.json")
+        .unwrap()
+        .get(crate::secrets::AUTH_SESSION_ACCESS_TOKEN_KEY)
+        .is_none());
+    license_logout(app.clone()).await.unwrap();
+    assert!(load_session_material(app).is_none());
+}
+
 async fn catalog_session_recovery(app: &AppHandle, environment: &Environment, pro: &LicenseState) {
     use crate::managed_inference::managed_inference_get_models;
     let original = load_session_material(app).unwrap();
@@ -550,6 +614,8 @@ pub(crate) fn email_code_session_lifecycle(
         );
         task.await.unwrap();
         assert!(load_session_material(app).is_none());
+
+        startup_session_refresh(app, &environment).await;
 
         let auth = json!({"access_token":"synthetic-access", "refresh_token":"synthetic-refresh", "user":{"id":"synthetic-user","email":"person@example.test"}}).to_string();
         let (base, task) =

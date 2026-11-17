@@ -1256,6 +1256,7 @@ impl SharedPipeline {
                 let epoch = inner.session_epoch;
                 drop(inner);
                 if let Some(app) = self.app_handle.lock().ok().and_then(|app| app.clone()) {
+                    crate::sessions::quick_ask::recording_started(&app);
                     crate::recording_orchestration::spawn_capture_health_monitor(
                         app,
                         self.clone(),

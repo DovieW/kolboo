@@ -466,6 +466,17 @@ pub(crate) fn complete_quick_ask_empty_transcript_error(
     pipeline: &SharedPipeline,
     request_id: Option<&str>,
 ) {
+    if let (Some(store), Some(id)) = (app.try_state::<RequestLogStore>(), request_id) {
+        if store.with_current_id(id, |_| ()).is_none() {
+            return;
+        }
+    }
+    let session = app.state::<quick_ask::QuickAskSessions>().begin(
+        request_id
+            .map(str::to_string)
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        pipeline.get_cancel_token(),
+    );
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
         log_store.with_current(|log| {
             log.kind = QuickActionKind::QuickAsk.request_kind();
@@ -482,7 +493,7 @@ pub(crate) fn complete_quick_ask_empty_transcript_error(
         app,
         quick_ask::EVENT_QUICK_ASK_STARTED,
         QuickAskStartedPayload {
-            request_id: request_id.map(str::to_string),
+            request_id: Some(session.id.clone()),
             question: Some(String::new()),
             provider: None,
             model: None,
@@ -493,7 +504,7 @@ pub(crate) fn complete_quick_ask_empty_transcript_error(
         app,
         quick_ask::EVENT_QUICK_ASK_ANSWER,
         QuickAskAnswerPayload::Err(QuickAskAnswerErrorPayload {
-            request_id: request_id.map(str::to_string),
+            request_id: Some(session.id.clone()),
             ok: false,
             error: "No transcript to answer (empty)".to_string(),
         }),

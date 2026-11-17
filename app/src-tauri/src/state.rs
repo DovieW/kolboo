@@ -16,6 +16,19 @@ use crate::windows_uia::types::WindowsTextContextSource;
 
 #[derive(Default)]
 pub struct AppState {
+    /// Nonblocking ownership of on-demand native window construction. Never
+    /// wait for a creator: Wry may itself be waiting for the GUI thread.
+    pub main_window_creating: AtomicBool,
+    pub overlay_hover_creating: AtomicBool,
+    pub quick_ask_window_creating: AtomicBool,
+    /// One content-free failure report per window-creation/presentation episode.
+    pub main_window_failure_reported: AtomicBool,
+    pub overlay_hover_failure_reported: AtomicBool,
+    /// Requested hover visibility survives its first asynchronous page load.
+    pub overlay_hover_requested: AtomicBool,
+    /// Worker-only lock. GUI callbacks never take it: Wry native operations
+    /// synchronously dispatch back to that thread.
+    pub overlay_hover_lifecycle_lock: std::sync::Mutex<()>,
     /// Tracks if currently recording (for both toggle and hold modes)
     pub is_recording: AtomicBool,
     /// Monotonic token bumped every time we *show* the overlay window.

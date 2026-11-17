@@ -103,6 +103,11 @@ pub(super) async fn native_answers(app: &tauri::AppHandle) {
         .begin(newer_id.clone(), None);
     run(Some(id.as_str()), &result, &profile).await;
     assert!(newer.current());
+    execution::complete_quick_ask_empty_transcript_error(app, pipeline.inner(), Some(&id));
+    assert!(
+        newer.current(),
+        "a stale empty transcript cannot replace a newer answer"
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
     assert_eq!(logs.with_current(|log| log.id.clone()), Some(newer_id));
     drop(newer);
@@ -161,7 +166,7 @@ pub(super) async fn native_answers(app: &tauri::AppHandle) {
     let handle = app.clone();
     let cancel_id = id.clone();
     let cancel_listener = app.listen(crate::events::EVENT_QUICK_ASK_PARTIAL, move |_| {
-        crate::sessions::quick_ask::cancel_quick_ask(handle.clone(), cancel_id.clone());
+        crate::sessions::quick_ask::cancel_quick_ask(handle.clone(), cancel_id.clone(), None);
     });
     run(Some(id.as_str()), &result, &profile).await;
     app.unlisten(cancel_listener);

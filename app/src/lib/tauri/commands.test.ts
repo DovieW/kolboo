@@ -40,6 +40,11 @@ describe("tauri command wrappers", () => {
 			expect(invokeMock).toHaveBeenCalledWith("cancel_quick_ask", {
 				requestId: "request-one",
 			});
+			await tauriAPI.cancelQuickAsk("request-one", true);
+			expect(invokeMock).toHaveBeenLastCalledWith("cancel_quick_ask", {
+				requestId: "request-one",
+				dismiss: true,
+			});
 		},
 	);
     itWithImportTimeout("preserves action, source and preset context through completion and prompt-tool IPC",async()=>{

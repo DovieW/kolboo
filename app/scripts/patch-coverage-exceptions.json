@@ -13,16 +13,16 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/overlay.rs",
-		"reason": "Native window visibility calls require the real window manager; the may_hide decision and stale frontend callbacks are tested independently.",
+		"reason": "Native window visibility calls require the real window manager; the may_hide decision and stale frontend callbacks are tested independently. Re-reviewed 2026-11-17: only byte-identical previously approved statements carried forward after lazy-window lifecycle changes; replaced statements lose their exceptions and all new behavior requires coverage.",
 		"evidence": [
 			"app/src-tauri/src/overlay/mod.rs",
 			"app/src/overlay/useOverlayHideRequested.ts",
 			"app/src/overlay/eventsLifecycle.test.tsx"
 		],
-		"lines": [522, 523, 524, 872, 873, 874],
+		"lines": [525, 526, 527, 896, 897, 898],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "7b55021bc64c3f2c8bcf55ee2b58af212ad9803f147d2c7ff7abc3728bcb1a07"
+		"sha256": "b4ac9599e18b1d97a3162eae7a26bef57157816af10e707ea6781bb9f329d589"
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/recording.rs",
@@ -101,7 +101,7 @@
 	},
 	{
 		"filePath": "app/src-tauri/src/lib.rs",
-		"reason": "Re-reviewed and explicitly approved 2026-10-01: only real recording/permission callback wiring and its stale-session exits require the live capture/desktop event loop. Pipeline lease tests cover ownership decisions; superseded History and scoped-log success, cancellation, repeat, deletion and disk-failure behavior are tested with mock and real Wry handles. No History/clipboard helper logic is exempted. Removed the old autostart-registration exception because isolated full-app startup now executes that line. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt. Re-reviewed 2026-11-16: byte-identical existing statements reindexed for request-scoped finalization; changed statements removed from exceptions; no new reliability behavior is exempt.",
+		"reason": "Re-reviewed and explicitly approved 2026-10-01: only real recording/permission callback wiring and its stale-session exits require the live capture/desktop event loop. Pipeline lease tests cover ownership decisions; superseded History and scoped-log success, cancellation, repeat, deletion and disk-failure behavior are tested with mock and real Wry handles. No History/clipboard helper logic is exempted. Removed the old autostart-registration exception because isolated full-app startup now executes that line. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt. Re-reviewed 2026-11-16: byte-identical existing statements reindexed for request-scoped finalization; changed statements removed from exceptions; no new reliability behavior is exempt. Re-reviewed 2026-11-17: only byte-identical previously approved statements carried forward after lazy-window lifecycle changes; replaced statements lose their exceptions and all new behavior requires coverage.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/core/output_settings.rs",
@@ -118,33 +118,33 @@
 		],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "0d810775eeafd726cfdd913dd071486a33782ef4fe24b1d54616be2807731a81"
+		"sha256": "b47c7fcdaf6f26cfa7557ad7ce38063c4a37e31aac240f90ae2e29f7e0302160"
 	},
 	{
 		"filePath": "app/src-tauri/src/overlay/mod.rs",
-		"reason": "Window event emission and the long-lived native waveform loop require the desktop event loop; notification ownership, waveform smoothing and listener teardown are independently tested.",
+		"reason": "Window event emission and the long-lived native waveform loop require the desktop event loop; notification ownership, waveform smoothing and listener teardown are independently tested. Re-reviewed 2026-11-17: only byte-identical previously approved statements carried forward after lazy-window lifecycle changes; replaced statements lose their exceptions and all new behavior requires coverage.",
 		"evidence": [
 			"app/src/overlay/BackendAudioWave.test.tsx",
 			"app/src/overlay/eventsLifecycle.test.tsx",
 			"app/src-tauri/src/audio_capture/meters.rs"
 		],
-		"lines": [210, 211, 212, 213, 214, 215, 216, 224, 225, 226, 228, 229, 230],
-		"functions": [216, 226],
+		"lines": [211, 212, 213, 214, 215, 216, 217, 225, 226, 227, 229, 230, 231],
+		"functions": [217, 227],
 		"instantiations": [],
-		"sha256": "1b7fdec85daf00b4f82f70352d7dbe0a38c26b17bfbf1ad4b26171695af9996f"
+		"sha256": "8da0cb5cc3939bbe8cfb6a132119234815d630b8d39352937f69d571a1ae3f84"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline.rs",
-		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt. Re-reviewed 2026-11-16: byte-identical existing exception statements reindexed after capture-health ownership changes; no new reliability behavior is exempt.",
+		"reason": "Explicitly approved 2026-10-12; re-reviewed 2026-10-13 after restricting the native test helper to Linux: only the same two defensive cancellation exits after a native consumer receive and a completed connection await remain exempt, at unchanged locations. Owned-session cancellation, late handoff, preview epochs, target changes, draining and failure cleanup execute in deterministic tests and isolated Linux Wry fixtures. Removed all formerly exempt live-output dispatch lines because they now execute. Windows/macOS and real microphone/watchdog acceptance are not claimed. Carry-forward approved 2026-10-13: unchanged exception statements reindexed after language metadata additions; all new language behavior remains enforced. Re-reviewed 2026-11-16: only byte-identical existing statements were reindexed after runtime-diagnostics wiring; no new diagnostic behavior is exempt. Re-reviewed 2026-11-16: byte-identical existing exception statements reindexed after capture-health ownership changes; no new reliability behavior is exempt. Re-reviewed 2026-11-17: only byte-identical previously approved statements carried forward after lazy-window lifecycle changes; replaced statements lose their exceptions and all new behavior requires coverage.",
 		"evidence": [
 			"app/src-tauri/src/pipeline/tests.rs",
 			"app/src-tauri/src/stt/streaming.rs",
 			"app/src-tauri/src/text/tests/output_ownership.rs"
 		],
-		"lines": [1536, 2095],
+		"lines": [1537, 2096],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "dc2fd71678df90241150f4cdf546db28678c29a793e7810c8ce827e80aebc245"
+		"sha256": "81af5921e7af991f8bc37abaf1d144e545444db61182037b4af232753b13caed"
 	},
 	{
 		"filePath": "app/src-tauri/src/pipeline/batch_stt_orchestration.rs",

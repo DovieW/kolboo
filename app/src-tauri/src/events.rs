@@ -62,6 +62,9 @@ pub const EVENT_OVERLAY_AUDIO_LEVEL: &str = "overlay-audio-level";
 /// Emitted to request that the overlay hide itself.
 pub const EVENT_OVERLAY_HIDE_REQUESTED: &str = "overlay-hide-requested";
 
+/// Native hover visibility; hidden pages stop foreground/profile polling.
+pub const EVENT_OVERLAY_HOVER_VISIBILITY_CHANGED: &str = "overlay-hover-visibility-changed";
+
 /// Emitted when the pipeline attempted to use active-window OCR but OCR context could not be produced.
 ///
 /// The overlay should show a non-blocking message like "OCR context unavailable".
@@ -108,6 +111,7 @@ pub const EVENT_REQUEST_DISCONNECT: &str = "request-disconnect";
 /// Emitted when a Quick Ask session starts.
 pub const EVENT_QUICK_ASK_STARTED: &str = "quick-ask-started";
 pub const EVENT_QUICK_ASK_PARTIAL: &str = "quick-ask-partial";
+pub const EVENT_QUICK_ASK_STATE: &str = "quick-ask-state";
 
 /// Emitted when a Quick Ask response is ready.
 pub const EVENT_QUICK_ASK_ANSWER: &str = "quick-ask-answer";

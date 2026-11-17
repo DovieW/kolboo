@@ -4,6 +4,7 @@ import type { QuickAskAnswerPayload, QuickAskPartialPayload } from "./tauri";
 
 it("accepts monotonic snapshots and ignores old, duplicate and dismissed answers", () => {
 	const stream = new QuickAskStream();
+	expect(stream.isDismissed).toBe(true);
 	const partial = (request_id: string, seq: number, text = "שלום") => ({
 		request_id,
 		seq,
@@ -11,6 +12,7 @@ it("accepts monotonic snapshots and ignores old, duplicate and dismissed answers
 	});
 	expect(stream.partial(partial("one", 1))).toBeNull();
 	stream.begin("one");
+	expect(stream.isDismissed).toBe(false);
 	expect(stream.partial(partial("one", 1))).toBe("שלום");
 	expect(stream.partial(partial("one", 1))).toBeNull();
 	expect(stream.partial(partial("one", 0))).toBeNull();
@@ -28,7 +30,8 @@ it("accepts monotonic snapshots and ignores old, duplicate and dismissed answers
 	expect(stream.finish({ request_id: "two", ok: true, answer: "late" })).toBe(
 		false,
 	);
-	expect(stream.cancel()).toBeNull();
+	expect(stream.cancel()).toBe("two");
+	expect(stream.isDismissed).toBe(true);
 	stream.begin("three");
 	expect(stream.cancel()).toBe("three");
 	expect(stream.cancel()).toBeNull();

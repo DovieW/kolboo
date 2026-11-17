@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_cli::CliExt;
 use tracing::Instrument;
 
@@ -86,7 +86,7 @@ pub use event_payloads::{
     OverlayAudioLevelPayload, OverlayOcrContextUnavailablePayload, PipelineErrorPayload,
     PipelineStateEvent, PipelineTranscriptReadyPayload, QuickAskAnswerErrorPayload,
     QuickAskAnswerOkPayload, QuickAskAnswerPayload, QuickAskPartialPayload, QuickAskStartedPayload,
-    SettingsChangedPayload, SttPartialTranscriptPayload, SystemEvent,
+    QuickAskStatePayload, SettingsChangedPayload, SttPartialTranscriptPayload, SystemEvent,
 };
 
 pub use audio_capture::AudioCaptureDiagnostics;
@@ -1125,9 +1125,15 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(automatic_updates::init())
-        .plugin(tauri::plugin::Builder::<tauri::Wry, ()>::new("runtime-diagnostics")
-            .on_event(|_, event| { if matches!(event, tauri::RunEvent::Exit) { runtime_diagnostics::shutdown(); } })
-            .build())
+        .plugin(
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("runtime-diagnostics")
+                .on_event(|_, event| {
+                    if matches!(event, tauri::RunEvent::Exit) {
+                        runtime_diagnostics::shutdown();
+                    }
+                })
+                .build(),
+        )
         .manage(AppState::default())
         .manage(QuickAskConversationMemory::default())
         .manage(sessions::quick_ask::QuickAskSessions::default())
@@ -1348,7 +1354,8 @@ pub fn run() {
                         #[cfg(desktop)]
                         {
                             bootstrap::initialize_request_log_store(app.handle());
-                            let pipeline = bootstrap::initialize_pipeline_from_settings(app.handle());
+                            let pipeline =
+                                bootstrap::initialize_pipeline_from_settings(app.handle());
                             app.manage(pipeline);
                         }
 
@@ -1369,8 +1376,7 @@ pub fn run() {
                     } else if has_cli_args {
                         let result = cli::CommandResult::<serde_json::Value>::failure(
                             2,
-                            "CLI arguments provided but no subcommand was recognized."
-                                .to_string(),
+                            "CLI arguments provided but no subcommand was recognized.".to_string(),
                         );
                         let _ = cli::write_json(&result);
                         std::process::exit(2);
@@ -1408,10 +1414,7 @@ pub fn run() {
                 if report.issues.is_empty() {
                     log::info!("Settings doctor: no issues found");
                 } else {
-                    log::warn!(
-                        "Settings doctor: found {} issue(s)",
-                        report.issues.len()
-                    );
+                    log::warn!("Settings doctor: found {} issue(s)", report.issues.len());
                     for issue in report.issues {
                         log::warn!("Settings doctor issue: {} -> {}", issue.key, issue.message);
                     }
@@ -1432,32 +1435,10 @@ pub fn run() {
                     "pending".to_string(),
                 );
 
-                let show_on_launch: bool = get_setting_from_store(
-                    app.handle(),
-                    "main_window_show_on_launch",
-                    false,
-                );
-                if let Some(main) = app.get_webview_window("main") {
-                    if bootstrap::startup::should_show_window(&guide_state, show_on_launch) {
-                        log::info!(
-                            "Startup: first-run or show-on-launch preference -> showing main window"
-                        );
-                        let _ = main.show();
-                        let _ = main.unminimize();
-                        let _ = main.set_focus();
-                    } else {
-                        log::info!(
-                            "Startup: settings guide state is '{}' -> keeping main window hidden",
-                            guide_state
-                        );
-                        let _ = main.hide();
-                    }
-                } else {
-                    // If the window isn't present (e.g. it was closed/destroyed or config changed),
-                    // the tray will recreate it on demand.
-                    log::warn!(
-                        "Startup: main window not found; tray will recreate it on demand"
-                    );
+                let show_on_launch: bool =
+                    get_setting_from_store(app.handle(), "main_window_show_on_launch", false);
+                if bootstrap::startup::should_show_window(&guide_state, show_on_launch) {
+                    bootstrap::show_main_window(app.handle(), "Startup", None);
                 }
             }
 
@@ -1468,62 +1449,9 @@ pub fn run() {
                 windows_modifier_hotkeys::init(app.handle().clone());
             }
 
-            // Configure what happens when the user clicks the X on the main/settings window.
-            // Default is to close-to-tray (destroy the window; tray can recreate it).
-            #[cfg(desktop)]
-            {
-                if let Some(main) = app.get_webview_window("main") {
-                    let app_handle = app.handle().clone();
-                    main.on_window_event(move |event| {
-                        if let WindowEvent::CloseRequested { api, .. } = event {
-                            // Hotkey debug is meant to be temporary. If the user closes the
-                            // main window (close-to-tray), disable it so it can't keep
-                            // generating high-volume debug events in the background.
-                            #[cfg(target_os = "windows")]
-                            {
-                                crate::windows_modifier_hotkeys::set_hotkey_debug_enabled(false);
-                            }
-
-                            // Best-effort: persist the flag off so it doesn't remain enabled
-                            // across sessions.
-                            {
-                                use tauri_plugin_store::StoreExt;
-
-                                if let Ok(store) = app_handle.store("settings.json") {
-                                    store.set("hotkey_debug_enabled", serde_json::json!(false));
-                                    let _ = store.save();
-                                }
-                            }
-
-                            let behavior: String = get_setting_from_store(
-                                &app_handle,
-                                "main_window_close_behavior",
-                                "minimize_to_tray".to_string(),
-                            );
-
-                            if behavior == "exit_program" {
-                                log::info!("Main window close requested -> exiting (exit_program)");
-                                api.prevent_close();
-                                app_handle.exit(0);
-                                return;
-                            }
-
-                            // RAM-saving behavior: allow the window to be destroyed.
-                            // The tray's Show action will recreate the window if needed.
-                            // Also covers the legacy value "close_window".
-                            log::info!(
-                                "Main window close requested -> closing window (close-to-tray via {behavior})"
-                            );
-                        }
-                    });
-                } else {
-                    log::warn!("Main window not found during setup; tray will recreate it on demand");
-                }
-            }
-
             // Initialize history storage
-            let app_data_dir = app_paths::app_data_dir(app.handle())
-                .expect("Failed to get app data directory");
+            let app_data_dir =
+                app_paths::app_data_dir(app.handle()).expect("Failed to get app data directory");
 
             // Initialize recording store (saved WAVs for retry)
             let recording_store = RecordingStore::new(app_data_dir.clone());
@@ -1584,7 +1512,8 @@ pub fn run() {
 
                             let payload = match result {
                                 Ok(()) => commands::whisper::LocalWhisperModelLoadEvent {
-                                    status: commands::whisper::LocalWhisperModelLoadStatus::Completed,
+                                    status:
+                                        commands::whisper::LocalWhisperModelLoadStatus::Completed,
                                     message: None,
                                 },
                                 Err(e) => commands::whisper::LocalWhisperModelLoadEvent {
@@ -1593,50 +1522,26 @@ pub fn run() {
                                 },
                             };
 
-                            let _ = app_handle_for_emit_done.emit(
-                                commands::whisper::LOCAL_WHISPER_MODEL_LOAD_EVENT,
-                                payload,
-                            );
+                            let _ = app_handle_for_emit_done
+                                .emit(commands::whisper::LOCAL_WHISPER_MODEL_LOAD_EVENT, payload);
                         });
                     }
                 }
 
                 // Preload persisted router embeddings cache once at startup.
                 // Routing uses the in-memory cache and does not read the store per request.
-                let _ = router_embeddings_cache::migrate_router_embeddings_out_of_settings(app.handle());
-                let persisted = router_embeddings_cache::load_router_embeddings_from_store(app.handle());
+                let _ = router_embeddings_cache::migrate_router_embeddings_out_of_settings(
+                    app.handle(),
+                );
+                let persisted =
+                    router_embeddings_cache::load_router_embeddings_from_store(app.handle());
                 if !persisted.is_empty() {
                     pipeline.preload_embedding_cache(persisted);
                 }
 
                 app.manage(pipeline);
 
-                // Best-effort: silently refresh session material at startup so managed
-                // requests don't fail with stale access tokens after long idle periods.
-                if crate::licensing::load_session_material(app.handle()).is_some() {
-                    let app_handle = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        match commands::licensing::license_refresh_entitlement(
-                            app_handle.clone(),
-                            Some(false),
-                        )
-                        .await
-                        {
-                            Ok(state) => {
-                                log::info!(
-                                    "Startup silent entitlement refresh succeeded (status={:?})",
-                                    state.status
-                                );
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Startup silent entitlement refresh failed: {}",
-                                    e
-                                );
-                            }
-                        }
-                    });
-                }
+                let _ = bootstrap::startup::spawn_startup_session_refresh(app.handle());
             }
 
             // Backend-driven overlay waveform: publish realtime mic levels to the overlay.

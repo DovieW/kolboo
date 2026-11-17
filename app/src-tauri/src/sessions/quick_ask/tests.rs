@@ -1,4 +1,184 @@
 use super::*;
+use serde_json::json;
+
+#[test]
+fn recording_context_without_quick_ask_state_is_safe_and_a_managed_context_preserves_ownership() {
+    use tauri::test::{mock_builder, mock_context, noop_assets};
+    let app = mock_builder().build(mock_context(noop_assets())).unwrap();
+    assert!(recording_request_id(app.try_state::<QuickAskSessions>()).is_none());
+    app.manage(QuickAskSessions::default());
+    let current = app
+        .state::<QuickAskSessions>()
+        .begin("headless-recording".into(), None);
+    assert_eq!(
+        recording_request_id(app.try_state::<QuickAskSessions>()).as_deref(),
+        Some("headless-recording")
+    );
+    assert!(current.current());
+    drop(current);
+}
+
+#[test]
+fn replay_keeps_one_latest_request_snapshot_and_survives_terminal_lease_drop() {
+    let sessions = QuickAskSessions::default();
+    assert!(sessions.snapshot().is_none());
+    let old = sessions.begin("one".into(), None);
+    {
+        let mut surface = sessions.1.lock().unwrap();
+        assert!(surface.update(EVENT_QUICK_ASK_STARTED, json!({})).is_none());
+        assert!(surface
+            .update(EVENT_QUICK_ASK_STARTED, json!({"request_id":"stale"}))
+            .is_none());
+        assert!(surface
+            .update(
+                EVENT_QUICK_ASK_STARTED,
+                json!({"request_id":"one","question":false})
+            )
+            .is_none());
+        assert!(surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":1,"text":"before start"})
+            )
+            .is_none());
+        assert!(surface
+            .update(
+                EVENT_QUICK_ASK_ANSWER,
+                json!({"request_id":"one","ok":true,"answer":"before start"})
+            )
+            .is_none());
+        let started = surface
+            .update(
+                EVENT_QUICK_ASK_STARTED,
+                json!({"request_id":"one","question":"Synthetic question"}),
+            )
+            .unwrap();
+        assert_eq!(started.revision, 2);
+        assert_eq!(
+            started.started.unwrap().question.as_deref(),
+            Some("Synthetic question")
+        );
+        assert!(surface
+            .update("unknown", json!({"request_id":"one"}))
+            .is_none());
+        assert!(surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":"bad","text":"invalid"})
+            )
+            .is_none());
+        assert!(surface
+            .update(
+                EVENT_QUICK_ASK_ANSWER,
+                json!({"request_id":"one","ok":true})
+            )
+            .is_none());
+        let partial = surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":1,"text":"first"}),
+            )
+            .unwrap();
+        assert_eq!(partial.partial.unwrap().text, "first");
+        assert!(surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":1,"text":"duplicate"})
+            )
+            .is_none());
+        let partial = surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":3,"text":"latest"}),
+            )
+            .unwrap();
+        assert_eq!(partial.partial.unwrap().text, "latest");
+        let answer = surface
+            .update(
+                EVENT_QUICK_ASK_ANSWER,
+                json!({"request_id":"one","ok":false,"error":"Synthetic failure"}),
+            )
+            .unwrap();
+        assert_eq!(answer.revision, 5);
+        assert_eq!(answer.partial.unwrap().text, "latest");
+        assert!(surface
+            .update(
+                events::EVENT_QUICK_ASK_PARTIAL,
+                json!({"request_id":"one","seq":4,"text":"late"})
+            )
+            .is_none());
+        assert!(surface
+            .update(
+                EVENT_QUICK_ASK_ANSWER,
+                json!({"request_id":"one","ok":true,"answer":"late"})
+            )
+            .is_none());
+    }
+    drop(old);
+    assert!(
+        sessions.snapshot().unwrap().answer.is_some(),
+        "completed content remains available while displayed"
+    );
+    sessions.cancel("stale");
+    assert!(sessions.snapshot().is_some());
+    sessions.cancel("one");
+    assert!(
+        sessions.snapshot().unwrap().started.is_none(),
+        "dismissal clears sensitive terminal content too"
+    );
+    let new = sessions.begin("two".into(), None);
+    let state = sessions
+        .1
+        .lock()
+        .unwrap()
+        .update(EVENT_QUICK_ASK_STARTED, json!({"request_id":"two"}))
+        .unwrap();
+    assert_eq!(
+        state.revision, 8,
+        "revisions remain monotonic across replacement"
+    );
+    drop(new);
+    assert!(
+        sessions.snapshot().unwrap().started.is_none(),
+        "an abandoned stream cannot replay as active"
+    );
+}
+
+#[test]
+fn replacement_clears_sensitive_snapshots_before_a_new_start_and_stale_drop_is_harmless() {
+    let sessions = QuickAskSessions::default();
+    let old = sessions.begin("old".into(), None);
+    sessions
+        .1
+        .lock()
+        .unwrap()
+        .update(
+            EVENT_QUICK_ASK_STARTED,
+            json!({"request_id":"old","question":"old question"}),
+        )
+        .unwrap();
+    let current = sessions.begin("current".into(), None);
+    assert!(sessions.snapshot().unwrap().started.is_none());
+    drop(old);
+    sessions
+        .1
+        .lock()
+        .unwrap()
+        .update(EVENT_QUICK_ASK_STARTED, json!({"request_id":"current"}))
+        .unwrap();
+    assert!(current.current());
+    assert_eq!(
+        sessions
+            .snapshot()
+            .unwrap()
+            .started
+            .unwrap()
+            .request_id
+            .as_deref(),
+        Some("current")
+    );
+    drop(current);
+}
 
 #[test]
 fn a_poisoned_owner_lock_preserves_cancellation_and_replacement_ownership() {
@@ -84,10 +264,38 @@ fn scope_only_mutates_and_completes_its_own_request() {
 }
 
 pub(crate) fn native_cancel(app: &AppHandle) {
+    struct Unserializable;
+    impl serde::Serialize for Unserializable {
+        fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("synthetic serialization failure"))
+        }
+    }
+    emit_to_quick_ask(app, EVENT_QUICK_ASK_STARTED, Unserializable);
     let session = app.state::<QuickAskSessions>().begin("native".into(), None);
-    cancel_quick_ask(app.clone(), "stale".into());
+    // Exercise recovery through the real emitter, GUI lifecycle and IPC paths,
+    // not only an isolated state instance. No private content is in the panic.
+    for surface in [false, true] {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let sessions = app.state::<QuickAskSessions>();
+            if surface {
+                let _guard = sessions.1.lock().unwrap();
+                panic!("synthetic interrupted surface access");
+            } else {
+                let _guard = sessions.0.lock().unwrap();
+                panic!("synthetic interrupted answer access");
+            }
+        }));
+    }
+    let unsupported_event = "unknown";
+    emit_to_quick_ask(app, unsupported_event, json!({"request_id":"native"}));
+    emit_to_quick_ask(
+        app,
+        EVENT_QUICK_ASK_ANSWER,
+        json!({"request_id":"stale","ok":true,"answer":"stale"}),
+    );
+    cancel_quick_ask(app.clone(), "stale".into(), None);
     assert!(session.current());
-    cancel_quick_ask(app.clone(), "native".into());
+    cancel_quick_ask(app.clone(), "native".into(), None);
     assert!(!session.current());
     drop(session);
     // The minimal fixture intentionally has no log store at this stage. A missing
@@ -145,4 +353,262 @@ pub(crate) fn native_cancel(app: &AppHandle) {
     assert_eq!(answer["ok"], false);
     assert!(answer["error"].as_str().unwrap().contains("API key"));
     app.unlisten(listener);
+    execution::complete_quick_ask_empty_transcript_error(app, pipeline.inner(), None);
+    let replay = app.state::<QuickAskSessions>().snapshot().unwrap();
+    assert!(replay.started.unwrap().request_id.is_some());
+    assert!(
+        matches!(replay.answer, Some(crate::QuickAskAnswerPayload::Err(error)) if error.error == "No transcript to answer (empty)")
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[allow(deprecated)] // Isolated native runner pumps real GUI work; no default-test sleeps.
+pub(crate) fn native_lazy_lifecycle(app: &mut tauri::App) {
+    use std::sync::atomic::Ordering;
+    use std::time::{Duration, Instant};
+
+    fn pump(app: &mut tauri::App, predicate: impl Fn(&tauri::App) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        while !predicate(app) {
+            assert!(
+                Instant::now() < deadline,
+                "Quick Ask native lifecycle stalled"
+            );
+            app.run_iteration(|_, event| {
+                if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                    api.prevent_exit();
+                }
+            });
+        }
+    }
+    fn settled(app: &tauri::App) -> bool {
+        !app.state::<QuickAskSessions>()
+            .1
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .presenting
+    }
+    recording_started(app.handle());
+    pump(app, |app| {
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL).is_none()
+            && settled(app)
+            && !app
+                .state::<crate::state::AppState>()
+                .quick_ask_window_creating
+                .load(Ordering::SeqCst)
+    });
+    let initial_revision = app.state::<QuickAskSessions>().snapshot().unwrap().revision;
+    app.state::<QuickAskSessions>()
+        .1
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .presenting = true;
+    complete_presentation_dispatch(app.handle(), Ok(()));
+    assert!(
+        !settled(app),
+        "successful dispatch leaves completion ownership with its queued GUI callback"
+    );
+    complete_presentation_dispatch(
+        app.handle(),
+        Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()),
+    );
+    assert!(
+        settled(app),
+        "failed GUI dispatch releases the presentation lease"
+    );
+    assert_eq!(
+        app.state::<QuickAskSessions>().snapshot().unwrap().revision,
+        initial_revision
+    );
+    complete_presentation(app.handle(), None, true, None);
+    assert!(
+        settled(app),
+        "failed construction with no registered window can retry"
+    );
+    let (registered, resume) = crate::overlay::tests::pause_next_quick_ask_configuration();
+    let old = app
+        .state::<QuickAskSessions>()
+        .begin("native-cold-old".into(), None);
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_STARTED,
+        json!({"request_id":"native-cold-old","question":"Old synthetic question"}),
+    );
+    pump(app, |_| registered.try_recv().is_ok());
+    assert!(
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL).is_some(),
+        "barrier follows real Wry registration"
+    );
+    assert!(app
+        .state::<crate::state::AppState>()
+        .quick_ask_window_creating
+        .load(Ordering::SeqCst));
+    cancel_quick_ask(app.handle().clone(), "native-cold-old".into(), Some(true));
+    assert!(!old.current());
+    let answer = app
+        .state::<QuickAskSessions>()
+        .begin("native-lazy".into(), None);
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_STARTED,
+        json!({"request_id":"native-lazy","question":"Synthetic question"}),
+    );
+    assert!(
+        !settled(app),
+        "the replacement coalesces into the in-flight creator"
+    );
+    drop(old);
+    emit_to_quick_ask(
+        app.handle(),
+        events::EVENT_QUICK_ASK_PARTIAL,
+        json!({"request_id":"native-lazy","seq":1,"text":"Synthetic partial"}),
+    );
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_ANSWER,
+        json!({"request_id":"native-lazy","ok":true,"answer":"Synthetic answer"}),
+    );
+    drop(answer);
+    resume.send(()).unwrap();
+    pump(app, settled);
+    assert!(
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL)
+            .unwrap()
+            .is_visible()
+            .unwrap(),
+        "the latest owned answer reaches a valid, visible native window"
+    );
+    let replay = tauri::async_runtime::block_on(
+        crate::commands::overlay::quick_ask_frontend_ready(app.handle().clone()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        replay.started.unwrap().question.as_deref(),
+        Some("Synthetic question")
+    );
+    assert!(
+        replay.answer.is_some(),
+        "fast completion survives cold renderer startup"
+    );
+    let handle = app.handle().clone();
+    let (sent, received) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let window = crate::overlay::ensure_quick_ask_window(&handle).unwrap();
+        sent.send(window.label().to_string()).unwrap();
+    });
+    pump(app, |_| worker.is_finished());
+    worker.join().unwrap();
+    assert_eq!(received.try_recv().unwrap(), QUICK_ASK_WINDOW_LABEL);
+
+    // begin() precedes its started payload. An older creator completing in
+    // that gap must not mistake the live successor for a cancellation.
+    let pending = app
+        .state::<QuickAskSessions>()
+        .begin("native-pending".into(), None);
+    complete_presentation(
+        app.handle(),
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL),
+        false,
+        Some("native-lazy"),
+    );
+    assert!(pending.current());
+    assert!(app
+        .get_webview_window(QUICK_ASK_WINDOW_LABEL)
+        .unwrap()
+        .is_visible()
+        .unwrap());
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_STARTED,
+        json!({"request_id":"native-pending"}),
+    );
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_ANSWER,
+        json!({"request_id":"native-pending","ok":true,"answer":"Synthetic successor answer"}),
+    );
+    drop(pending);
+    pump(app, settled);
+
+    // A real destroyed Wry handle fails positioning/show. The fallback/error
+    // completion must release ownership without discarding the displayed answer.
+    let stale = app.get_webview_window(QUICK_ASK_WINDOW_LABEL).unwrap();
+    stale.destroy().unwrap();
+    pump(app, |app| {
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL).is_none()
+    });
+    assert!(position_presentation_window(app.handle(), &stale));
+    app.state::<QuickAskSessions>()
+        .1
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .presenting = true;
+    complete_presentation(app.handle(), Some(stale), false, Some("native-lazy"));
+    assert!(settled(app));
+    assert!(app
+        .state::<QuickAskSessions>()
+        .snapshot()
+        .unwrap()
+        .answer
+        .is_some());
+    // If a prior construction failed while a replacement coalesced into it,
+    // finalization transfers exactly one fresh attempt to that replacement.
+    app.state::<QuickAskSessions>()
+        .1
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .presenting = true;
+    complete_presentation(app.handle(), None, true, Some("failed-predecessor"));
+    assert!(!settled(app));
+    pump(app, settled);
+    assert!(
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL)
+            .unwrap()
+            .is_visible()
+            .unwrap(),
+        "a native presentation failure permits a fresh, visible retry"
+    );
+
+    let current = app
+        .state::<QuickAskSessions>()
+        .begin("native-new".into(), None);
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_STARTED,
+        json!({"request_id":"native-new"}),
+    );
+    cancel_quick_ask(app.handle().clone(), "native-lazy".into(), Some(true));
+    assert!(current.current());
+    assert!(app.get_webview_window(QUICK_ASK_WINDOW_LABEL).is_some());
+    let before = app.state::<QuickAskSessions>().snapshot().unwrap().revision;
+    recording_started(app.handle());
+    assert!(!current.current());
+    let tombstone = app.state::<QuickAskSessions>().snapshot().unwrap();
+    assert!(tombstone.revision > before);
+    assert!(
+        tombstone.started.is_none() && tombstone.partial.is_none() && tombstone.answer.is_none()
+    );
+    emit_to_quick_ask(
+        app.handle(),
+        EVENT_QUICK_ASK_ANSWER,
+        json!({"request_id":"native-new","ok":true,"answer":"must not replay"}),
+    );
+    assert!(app
+        .state::<QuickAskSessions>()
+        .snapshot()
+        .unwrap()
+        .started
+        .is_none());
+    drop(current);
+    pump(app, |app| {
+        app.get_webview_window(QUICK_ASK_WINDOW_LABEL).is_none()
+            && settled(app)
+            && !app
+                .state::<crate::state::AppState>()
+                .quick_ask_window_creating
+                .load(Ordering::SeqCst)
+    });
+    // No owner/no window, repeated recording-start invalidation is harmless.
+    recording_started(app.handle());
 }

@@ -3,14 +3,20 @@ import { MantineProvider } from "@mantine/core";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { QuickAskStatePayload } from "./lib/tauri";
 import QuickAskApp from "./QuickAskApp";
 
 const mocks = vi.hoisted(() => ({
 	events: new Map<string, (payload: unknown) => void>(),
 	stop: vi.fn(),
-	invoke: vi.fn(async () => ({ profile_id: null as string | null })),
+	listen: vi.fn(),
+	invoke: vi.fn(
+		async (_command: string): Promise<unknown> => ({
+			profile_id: null as string | null,
+		}),
+	),
 	api: {
-		cancelQuickAsk: vi.fn(async (_id: string) => {}),
+		cancelQuickAsk: vi.fn(async (_id: string, _dismiss?: boolean) => {}),
 		setQuickAskEscapeEnabled: vi.fn(async (_enabled: boolean) => {}),
 		reloadSettingsFromDisk: vi.fn(async () => {}),
 		getSettings: vi.fn(async () => ({
@@ -40,15 +46,7 @@ vi.mock("./hooks/useModifierKeyForwarder", () => ({
 }));
 vi.mock("./lib/tauri", () => ({ tauriAPI: mocks.api }));
 vi.mock("./lib/tauri/events", () => ({
-	listenTyped: vi.fn(
-		async (name: string, callback: (payload: unknown) => void) => {
-			mocks.events.set(name, callback);
-			return () => {
-				mocks.events.delete(name);
-				mocks.stop(name);
-			};
-		},
-	),
+	listenTyped: mocks.listen,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -72,10 +70,24 @@ vi.mock("@tauri-apps/api/window", () => ({
 
 let host: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
+let snapshot: QuickAskStatePayload;
+let revision: number;
 beforeEach(async () => {
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	vi.clearAllMocks();
-	mocks.invoke.mockResolvedValue({ profile_id: null });
+	mocks.invoke.mockImplementation(async (command: string) =>
+		command === "quick_ask_frontend_ready" ? null : { profile_id: null },
+	);
+	mocks.listen.mockImplementation(
+		async (name: string, callback: (payload: unknown) => void) => {
+			mocks.events.set(name, callback);
+			return () => {
+				mocks.events.delete(name);
+				mocks.stop(name);
+			};
+		},
+	);
+	revision = 0;
 	mocks.api.getSettings.mockResolvedValue({
 		quick_ask_dismiss_mode: "manual",
 		rewrite_program_prompt_profiles: [],
@@ -111,6 +123,33 @@ it("contains native setup failures and accepts legacy or malformed start notific
 	await event("quick-ask-answer", { ok: true, answer: "Legacy answer" });
 	expect(host.textContent).toContain("Legacy answer");
 	warning.mockRestore();
+});
+
+it("contains a malformed started snapshot without retaining an older request's private content", async () => {
+	await event("quick-ask-started", {
+		request_id: "old",
+		question: "Synthetic private question",
+	});
+	await event("quick-ask-partial", {
+		request_id: "old",
+		seq: 1,
+		text: "Synthetic private preview",
+	});
+	await event("quick-ask-state", {
+		revision: ++revision,
+		started: "malformed",
+		partial: null,
+		answer: null,
+	});
+	expect(host.textContent).toContain("Thinking…");
+	expect(host.textContent).not.toContain("Synthetic private");
+	await event("quick-ask-started", { request_id: "replacement" });
+	await event("quick-ask-partial", {
+		request_id: "replacement",
+		seq: 1,
+		text: "Replacement answer",
+	});
+	expect(host.textContent).toContain("Replacement answer");
 });
 
 it("does not let delayed profile lookups or old dismissal animations affect the next answer", async () => {
@@ -221,9 +260,206 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 async function event(name: string, payload: unknown = null) {
+	if (name === "quick-ask-started") {
+		snapshot = {
+			revision: ++revision,
+			started: {
+				request_id: null,
+				...(payload && typeof payload === "object" ? payload : {}),
+			},
+			partial: null,
+			answer: null,
+		};
+		name = "quick-ask-state";
+		payload = snapshot;
+	} else if (name === "quick-ask-partial" || name === "quick-ask-answer") {
+		snapshot = {
+			...snapshot,
+			revision: ++revision,
+			[name === "quick-ask-partial" ? "partial" : "answer"]: payload,
+		};
+		name = "quick-ask-state";
+		payload = snapshot;
+	}
 	expect(mocks.events.has(name)).toBe(true);
 	await act(async () => mocks.events.get(name)?.(payload));
 }
+
+async function remount() {
+	await act(async () => root.render(null));
+	await act(async () =>
+		root.render(
+			<MantineProvider env="test">
+				<QuickAskApp />
+			</MantineProvider>,
+		),
+	);
+}
+
+it("announces readiness only after every listener is installed and unregisters late setup", async () => {
+	let registered!: (stop: () => void) => void;
+	const stop = vi.fn();
+	mocks.listen.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				registered = resolve;
+			}),
+	);
+	mocks.invoke.mockClear();
+	await remount();
+	expect(mocks.invoke).not.toHaveBeenCalledWith("quick_ask_frontend_ready");
+	await act(async () => registered(stop));
+	expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith(
+		"quick_ask_frontend_ready",
+	);
+	mocks.listen.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				registered = resolve;
+			}),
+	);
+	mocks.invoke.mockClear();
+	await remount();
+	await act(async () => root.render(null));
+	const lateStop = vi.fn();
+	await act(async () => registered(lateStop));
+	expect(lateStop).toHaveBeenCalledOnce();
+	expect(mocks.invoke).not.toHaveBeenCalled();
+});
+
+it("replays an answer completed before mount and ignores an older ready response after a live replacement", async () => {
+	const completed: QuickAskStatePayload = {
+		revision: 7,
+		started: { request_id: "cold", question: "Synthetic question" },
+		partial: { request_id: "cold", seq: 1, text: "incomplete" },
+		answer: { request_id: "cold", ok: true, answer: "Cold answer" },
+	};
+	mocks.invoke.mockImplementation(async (command: string) =>
+		command === "quick_ask_frontend_ready" ? completed : { profile_id: null },
+	);
+	await remount();
+	expect(host.textContent).toContain("Cold answer");
+	expect(host.textContent).not.toContain("Thinking…");
+	let ready!: (snapshot: QuickAskStatePayload) => void;
+	mocks.invoke.mockImplementation((command: string) =>
+		command === "quick_ask_frontend_ready"
+			? new Promise((resolve) => {
+					ready = resolve;
+				})
+			: Promise.resolve({ profile_id: null }),
+	);
+	await remount();
+	const current: QuickAskStatePayload = {
+		revision: 9,
+		started: { request_id: "new" },
+		partial: { request_id: "new", seq: 2, text: "Current content" },
+		answer: null,
+	};
+	await event("quick-ask-state", current);
+	await act(async () => ready(completed));
+	await event("quick-ask-state", current);
+	expect(host.textContent).toContain("Current content");
+	expect(host.textContent).not.toContain("Cold answer");
+	expect(mocks.win.setFocus).toHaveBeenCalledTimes(2);
+});
+
+it("contains failed listener setup and closes completed answers through request-scoped native teardown", async () => {
+	mocks.listen.mockRejectedValueOnce(new Error("synthetic unavailable"));
+	mocks.invoke.mockClear();
+	await remount();
+	expect(mocks.invoke).not.toHaveBeenCalledWith("quick_ask_frontend_ready");
+	await remount();
+	await event("quick-ask-started", { request_id: "finished" });
+	await event("quick-ask-answer", {
+		request_id: "finished",
+		ok: true,
+		answer: "Synthetic answer",
+	});
+	vi.useFakeTimers();
+	await event("quick-ask-dismiss-requested");
+	expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("finished");
+	await event("quick-ask-state", {
+		revision: ++revision,
+		started: null,
+		partial: null,
+		answer: null,
+	});
+	expect(mocks.win.hide).not.toHaveBeenCalled();
+	await act(async () => vi.advanceTimersByTimeAsync(500));
+	expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("finished", true);
+});
+
+it("a recording tombstone prevents cold readiness or delayed native events resurrecting private content", async () => {
+	let ready!: (snapshot: QuickAskStatePayload) => void;
+	mocks.invoke.mockImplementation((command: string) =>
+		command === "quick_ask_frontend_ready"
+			? new Promise((resolve) => {
+					ready = resolve;
+				})
+			: Promise.resolve({ profile_id: null }),
+	);
+	await remount();
+	await event("quick-ask-state", {
+		revision: 12,
+		started: null,
+		partial: null,
+		answer: null,
+	});
+	const stale: QuickAskStatePayload = {
+		revision: 11,
+		started: { request_id: "old", question: "Private synthetic question" },
+		partial: null,
+		answer: { request_id: "old", ok: true, answer: "Private synthetic answer" },
+	};
+	await act(async () => ready(stale));
+	await event("quick-ask-state", stale);
+	expect(host.textContent).not.toContain("Private synthetic");
+	expect(mocks.win.show).not.toHaveBeenCalled();
+	expect(mocks.win.hide).not.toHaveBeenCalled();
+});
+
+it("a native recording tombstone clears an already displayed answer immediately", async () => {
+	await event("quick-ask-started", { request_id: "current" });
+	await event("quick-ask-partial", {
+		request_id: "current",
+		seq: 1,
+		text: "Synthetic private preview",
+	});
+	await event("quick-ask-state", {
+		revision: ++revision,
+		started: null,
+		partial: null,
+		answer: null,
+	});
+	expect(host.textContent).not.toContain("Synthetic private preview");
+	expect(mocks.win.hide).toHaveBeenCalledOnce();
+	expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("current", true);
+});
+
+it("ignores already queued listener callbacks and readiness responses after unmount", async () => {
+	let ready!: (snapshot: QuickAskStatePayload) => void;
+	mocks.invoke.mockImplementation(
+		() =>
+			new Promise((resolve) => {
+				ready = resolve;
+			}),
+	);
+	await remount();
+	const callbacks = [...mocks.events.values()];
+	await act(async () => root.render(null));
+	mocks.win.hide.mockClear();
+	await act(async () => {
+		for (const callback of callbacks) callback(null);
+		ready({
+			revision: 1,
+			started: { request_id: "late" },
+			partial: null,
+			answer: null,
+		});
+	});
+	expect(mocks.win.hide).not.toHaveBeenCalled();
+	expect(mocks.win.show).not.toHaveBeenCalled();
+});
 
 it("observes each remounted answer panel and resizes while streamed text grows", async () => {
 	const observers: Array<{
@@ -401,3 +637,91 @@ it("cancels on new recordings, dismissal and unmount, including command failures
 	expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("four");
 	expect(mocks.events.size).toBe(0);
 });
+
+it.each(["recording-start", "quick-ask-dismiss-requested"])(
+	"preserves local cleanup and subsequent answers when scoped teardown rejects after %s",
+	async (trigger) => {
+		await event("quick-ask-started", {
+			request_id: "closing",
+			question: "Synthetic private question",
+		});
+		await event("quick-ask-answer", {
+			request_id: "closing",
+			ok: true,
+			answer: "Synthetic private answer",
+		});
+		mocks.api.cancelQuickAsk
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(new Error("synthetic teardown unavailable"));
+		vi.useFakeTimers();
+		await event(trigger);
+		if (trigger === "quick-ask-dismiss-requested") {
+			expect(host.querySelector(".quick-ask-panel.closing")).not.toBeNull();
+			expect(mocks.win.hide).not.toHaveBeenCalled();
+			await act(async () => vi.advanceTimersByTimeAsync(500));
+		}
+		expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("closing", true);
+		expect(mocks.win.hide).toHaveBeenCalledOnce();
+		expect(mocks.win.setIgnoreCursorEvents).toHaveBeenLastCalledWith(true);
+		expect(mocks.api.setQuickAskEscapeEnabled).toHaveBeenLastCalledWith(false);
+		expect(host.textContent).not.toContain("Synthetic private");
+		expect(host.querySelector(".quick-ask-panel.closing")).toBeNull();
+		await event("quick-ask-answer", {
+			request_id: "closing",
+			ok: true,
+			answer: "Late private result",
+		});
+		expect(host.textContent).not.toContain("Late private result");
+		await event("quick-ask-started", { request_id: "replacement" });
+		await event("quick-ask-partial", {
+			request_id: "replacement",
+			seq: 1,
+			text: "Replacement answer",
+		});
+		expect(host.textContent).toContain("Replacement answer");
+		expect(mocks.win.setIgnoreCursorEvents).toHaveBeenLastCalledWith(false);
+	},
+);
+
+it.each(["recording-start", "quick-ask-dismiss-requested"])(
+	"cleans up duplicate %s notifications without a request id or cancelling the next answer",
+	async (trigger) => {
+		await event("quick-ask-started", { request_id: "finished" });
+		await event("quick-ask-answer", {
+			request_id: "finished",
+			ok: true,
+			answer: "Synthetic completed answer",
+		});
+		vi.useFakeTimers();
+		await event(trigger);
+		if (trigger === "quick-ask-dismiss-requested") {
+			await act(async () => vi.advanceTimersByTimeAsync(500));
+		}
+		expect(mocks.api.cancelQuickAsk).toHaveBeenCalledWith("finished", true);
+		mocks.api.cancelQuickAsk.mockClear();
+		mocks.win.hide.mockClear();
+		// Native lifecycle messages may already be queued when the first close
+		// finishes. The repeated close must not invent a request-scoped command.
+		await event(trigger);
+		if (trigger === "quick-ask-dismiss-requested") {
+			await act(async () => vi.advanceTimersByTimeAsync(500));
+		}
+		expect(mocks.win.hide).toHaveBeenCalledOnce();
+		expect(mocks.api.cancelQuickAsk).not.toHaveBeenCalled();
+		expect(mocks.win.setIgnoreCursorEvents).toHaveBeenLastCalledWith(true);
+		expect(mocks.api.setQuickAskEscapeEnabled).toHaveBeenLastCalledWith(false);
+		expect(host.textContent).not.toContain("Synthetic completed answer");
+		expect(host.querySelector(".quick-ask-panel.closing")).toBeNull();
+		await event("quick-ask-started", { request_id: "successor" });
+		await event("quick-ask-partial", {
+			request_id: "successor",
+			seq: 1,
+			text: "Successor answer",
+		});
+		await act(async () => vi.advanceTimersByTimeAsync(500));
+		expect(host.textContent).toContain("Successor answer");
+		expect(mocks.api.cancelQuickAsk).not.toHaveBeenCalled();
+		expect(mocks.win.hide).toHaveBeenCalledOnce();
+		expect(mocks.win.setIgnoreCursorEvents).toHaveBeenLastCalledWith(false);
+	},
+);
