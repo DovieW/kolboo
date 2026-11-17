@@ -141,6 +141,37 @@ secure session means no account task. Its awaitable task uses the unchanged real
 refresh policy, reports only status/static messages, and is rehearsed with
 synthetic secure credentials and loopback failure/recovery responses.
 
+#### Laptop measurement — 2026-11-17
+
+Installed development revision `78490041bcadd7ffe691be13e2ccefbbb974e46c`.
+The previous process exited cleanly through its verified tray Quit action;
+the per-user launcher was switched atomically and the previous build retained.
+The running executable matched the extracted package's SHA-256
+`f80fc179405c309aff7d16e894d41a7df3c5c1d5b32693fba8503255ba078f58`.
+Overlay frontend readiness, backend Sentry initialization, private diagnostics
+permissions and zero queue losses were verified. Remote Sentry ingestion was
+not tested, and no public release was published.
+
+Tray-only idle samples with hot mic disabled:
+
+| Metric | Earlier build | Updated build |
+| --- | --- | --- |
+| Proportional resident memory, summed PSS | approximately 528 MiB | 259 MiB |
+| Memory charged to app cgroup | approximately 515–535 MiB | 131 MiB |
+| CPU, percentage of one core | approximately 2.3% | 0.35% |
+| WebKit page renderers | 4 | 1 |
+| Persistent `cpal_alsa_out` threads | 1 | 0 |
+
+The updated 20-second interval remained idle with an unchanged operation ID,
+zero swap, no new app journal messages and no dropped logs/events. Earlier CPU
+samples were five seconds; these are short observations, not a matched-duration
+benchmark or a long-running leak/crash soak. PSS apportions shared pages rather
+than double-counting renderer RSS. Cgroup charges use different shared-page
+accounting and must not be presented as total resident RAM. Main/Presets use can
+increase memory; the cached Presets page remains after first use. Native null-PCM
+tests exercise cue disposal after playback; physical-microphone/paste acceptance
+on this exact laptop build remains a user smoke test.
+
 ### Laptop development packages
 
 Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
