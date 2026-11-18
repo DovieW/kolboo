@@ -889,7 +889,7 @@ pub struct VadAutoStopConfig {
 
 /// Handle to a running audio capture session
 struct CaptureHandle {
-    command_tx: mpsc::Sender<CaptureCommand>,
+    command_tx: crossbeam_channel::Sender<CaptureCommand>,
     #[cfg_attr(not(test), allow(dead_code))]
     event_rx: mpsc::Receiver<(u64, AudioCaptureEvent)>,
     thread_handle: JoinHandle<Result<(), AudioCaptureError>>,
@@ -1271,7 +1271,7 @@ impl AudioCapture {
         let meter = self.level_meter.clone();
         let waveform_meter = self.waveform_meter.clone();
 
-        let (command_tx, command_rx) = mpsc::channel();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(1);
         let (event_tx, event_rx) = mpsc::channel();
         let sample_format = config.sample_format();
         let stream_config: cpal::StreamConfig = config.into();
@@ -1496,7 +1496,7 @@ impl AudioCapture {
             log::info!("Stopping audio capture");
 
             // Send stop command (ignore error if thread already stopped).
-            let _ = handle.command_tx.send(CaptureCommand::Stop);
+            let _ = handle.command_tx.try_send(CaptureCommand::Stop);
 
             // Join can block forever if the capture thread is stuck (e.g. callback stalls).
             // We use a helper joiner thread + recv_timeout so stop() itself is bounded.
@@ -1834,7 +1834,7 @@ struct CaptureThreadArgs {
     pre_roll_ms: Arc<AtomicU32>,
     meter: Arc<AudioLevelMeter>,
     waveform_meter: Arc<AudioWaveformMeter>,
-    command_rx: mpsc::Receiver<CaptureCommand>,
+    command_rx: crossbeam_channel::Receiver<CaptureCommand>,
     event_tx: mpsc::Sender<(u64, AudioCaptureEvent)>,
     vad_config: VadAutoStopConfig,
     auto_recover_enabled: Arc<AtomicBool>,
@@ -2138,7 +2138,7 @@ where
     use std::time::Duration;
 
     let CaptureThreadArgs {
-        mut ready,
+        ready,
         capture_fence,
         mut device,
         config,
@@ -2198,6 +2198,8 @@ where
         let _ = chunk_pool.push(Vec::with_capacity(callback_capacity));
     }
     let worker_stop = Arc::new(AtomicBool::new(false));
+    let (first_audio_tx, first_audio_rx) = crossbeam_channel::bounded(1);
+    let mut first_audio = ready.is_some().then_some(first_audio_tx);
     let worker_handle = {
         let buffer = buffer.clone();
         let pre_roll = pre_roll.clone();
@@ -2244,6 +2246,14 @@ where
                 // Always maintain rolling pre-roll.
                 if let Ok(mut pr) = pre_roll.lock() {
                     pr.push(chunk.samples.as_slice());
+                }
+
+                // Once the worker has accepted nonempty audio, wake the
+                // stream owner immediately. The native callback only enqueues.
+                if !chunk.samples.is_empty() {
+                    if let Some(first_audio) = first_audio.take() {
+                        let _ = first_audio.try_send(());
+                    }
                 }
 
                 // Recording buffer + VAD should reflect the state at callback-time,
@@ -2354,36 +2364,25 @@ where
         .play()
         .map_err(|e| AudioCaptureError::StreamStart(e.to_string()))?;
 
+    if let Some((ready, deadline)) = ready {
+        let check_stream = || check_capture_stream(&stream, &capture_fence);
+        if !wait_for_first_audio(&command_rx, &first_audio_rx, deadline, &check_stream)? {
+            return Ok(());
+        }
+        let _ = ready.try_send(Ok(()));
+    }
+
     // Wait for stop command, with optional watchdog restart.
     let mut consecutive_restart_failures: u32 = 0;
 
     loop {
         match command_rx.recv_timeout(Duration::from_millis(WATCHDOG_CHECK_EVERY_MS)) {
             Ok(CaptureCommand::Stop) => break,
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                stream.check()?;
-                if capture_fence.stream_failed() {
-                    return Err(AudioCaptureError::ThreadError(
-                        "A retired microphone helper did not stop; restart before recording again"
-                            .into(),
-                    ));
-                }
+            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+            Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
+                check_capture_stream(&stream, &capture_fence)?;
                 let now_ms = start.elapsed().as_millis() as u64;
                 let last_ms = last_callback_ms.load(Ordering::Relaxed);
-                if let Some((_, deadline)) = &ready {
-                    if last_ms != 0 {
-                        if let Some((ready, _)) = ready.take() {
-                            let _ = ready.try_send(Ok(()));
-                        }
-                    } else if Instant::now() >= *deadline {
-                        return Err(AudioCaptureError::StreamStart(
-                            "Microphone opened but delivered no audio".into(),
-                        ));
-                    } else {
-                        continue;
-                    }
-                }
                 // Detect loss during a recording regardless of the idle recovery
                 // preference. Never silently replace a recording's input device.
                 if recording_active.load(Ordering::Relaxed) && callbacks_stalled(now_ms, last_ms) {
@@ -2538,6 +2537,45 @@ where
     Ok(())
 }
 
+fn check_capture_stream(
+    stream: &InputStream,
+    fence: &CaptureFence,
+) -> Result<(), AudioCaptureError> {
+    stream.check()?;
+    if fence.stream_failed() {
+        return Err(AudioCaptureError::ThreadError(
+            "A retired microphone helper did not stop; restart before recording again".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn wait_for_first_audio(
+    stop: &crossbeam_channel::Receiver<CaptureCommand>,
+    first_audio: &crossbeam_channel::Receiver<()>,
+    deadline: Instant,
+    check_stream: &dyn Fn() -> Result<(), AudioCaptureError>,
+) -> Result<bool, AudioCaptureError> {
+    // The timer only detects a failed stream or deadline expiry; it never
+    // determines when to report a successful start.
+    let faults = crossbeam_channel::tick(std::time::Duration::from_millis(WATCHDOG_CHECK_EVERY_MS));
+    let timeout = crossbeam_channel::after(deadline.saturating_duration_since(Instant::now()));
+    loop {
+        crossbeam_channel::select_biased! {
+            recv(stop) -> _ => return Ok(false),
+            recv(timeout) -> _ => return Err(AudioCaptureError::StreamStart(
+                "Microphone opened but delivered no audio".into(),
+            )),
+            recv(first_audio) -> sample => {
+                sample.map_err(|_| AudioCaptureError::StreamInterrupted)?;
+                check_stream()?;
+                return Ok(true);
+            }
+            recv(faults) -> _ => check_stream()?,
+        }
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) fn native_null_pcm_callbacks() {
     // Only the explicitly isolated native runner installs this null-only PCM.
@@ -2564,7 +2602,7 @@ pub(crate) fn native_null_pcm_callbacks() {
         let mut capture = AudioCapture::new();
         capture.buffer.lock().unwrap().set_format(16000, 1);
         capture.begin_recording_with_pre_roll(1.0);
-        let (command_tx, command_rx) = mpsc::channel();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(1);
         let (event_tx, event_rx) = mpsc::channel();
         let buffer = capture.buffer.clone();
         let pre_roll = capture.pre_roll.clone();
@@ -2667,7 +2705,7 @@ mod tests {
         let buffer = capture.buffer.clone();
         let (locked_tx, locked_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
-        let (command_tx, _command_rx) = mpsc::channel();
+        let (command_tx, _command_rx) = crossbeam_channel::bounded(1);
         let (_event_tx, event_rx) = mpsc::channel();
         capture.capture_handle = Some(CaptureHandle {
             command_tx,
@@ -2831,7 +2869,7 @@ mod tests {
     fn spawn_test_capture_handle(
         on_stop: Option<Arc<AtomicBool>>,
     ) -> (CaptureHandle, mpsc::Sender<(u64, AudioCaptureEvent)>) {
-        let (command_tx, command_rx) = mpsc::channel();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(1);
         let (event_tx, event_rx) = mpsc::channel();
         let thread_handle = thread::spawn(move || {
             let _ = command_rx.recv();
@@ -3096,7 +3134,7 @@ mod tests {
             buffer.set_format(16000, 1);
             buffer.append(&[0.25, -0.25]);
         }
-        let (command_tx, command_rx) = mpsc::channel();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(1);
         let (_event_tx, event_rx) = mpsc::channel();
         let buffer = capture.buffer.clone();
         capture.capture_handle = Some(CaptureHandle {
@@ -3140,7 +3178,7 @@ mod tests {
             buffer.set_format(16000, 1);
             buffer.append(&[0.25]);
         }
-        let (command_tx, command_rx) = mpsc::channel();
+        let (command_tx, command_rx) = crossbeam_channel::bounded(1);
         let (_event_tx, event_rx) = mpsc::channel();
         capture.capture_handle = Some(CaptureHandle {
             command_tx,

@@ -250,6 +250,7 @@ fn native_recovery(selected: &str) {
         "failed",
         "active",
         "never-ready",
+        "cancel-start",
         "retired",
     ] {
         native_recovery_outcome(selected, outcome);
@@ -260,7 +261,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
     use super::super::*;
     use cpal::traits::HostTrait;
     let audio = AudioCapture::new();
-    let (command_tx, command_rx) = std::sync::mpsc::channel();
+    let (command_tx, command_rx) = crossbeam_channel::bounded(1);
     let (event_tx, _) = std::sync::mpsc::channel();
     let config = cpal::StreamConfig {
         channels: 2,
@@ -289,7 +290,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
         audio.capture_fence.fail_stream();
     }
     let args = CaptureThreadArgs {
-        ready: (outcome == "never-ready")
+        ready: matches!(outcome, "never-ready" | "cancel-start")
             .then_some((ready_tx, Instant::now() + Duration::from_millis(500))),
         capture_fence: audio.capture_fence.clone(),
         device,
@@ -315,6 +316,9 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
             calls += 1;
             match calls {
                 1 => {
+                    if outcome == "cancel-start" {
+                        command_tx.send(CaptureCommand::Stop).unwrap();
+                    }
                     if outcome != "never-ready" {
                         clock.store(1, Ordering::Relaxed);
                     }
@@ -344,6 +348,12 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
             }
         },
     );
+    if outcome == "cancel-start" {
+        result.unwrap();
+        assert_eq!(calls, 1);
+        assert!(ready_rx.try_recv().is_err());
+        return;
+    }
     if outcome == "active" || outcome == "never-ready" || outcome == "retired" {
         assert!(result.is_err());
         assert_eq!(

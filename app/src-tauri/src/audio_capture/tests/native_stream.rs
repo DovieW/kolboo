@@ -1,5 +1,49 @@
 use super::*;
 
+#[test]
+fn first_audio_wakes_startup_and_stop_has_priority() {
+    let (stop_tx, stop_rx) = crossbeam_channel::bounded(1);
+    let (audio_tx, audio_rx) = crossbeam_channel::bounded(1);
+    let deadline = Instant::now() + std::time::Duration::from_secs(3);
+    audio_tx.send(()).unwrap();
+    assert!(wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Ok(())).unwrap());
+    audio_tx.send(()).unwrap();
+    assert!(matches!(
+        wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Err(
+            AudioCaptureError::StreamInterrupted
+        )),
+        Err(AudioCaptureError::StreamInterrupted)
+    ));
+    audio_tx.send(()).unwrap();
+    stop_tx.send(CaptureCommand::Stop).unwrap();
+    assert!(!wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Ok(())).unwrap());
+    assert_eq!(audio_rx.try_recv(), Ok(()));
+    drop(stop_tx);
+    assert!(!wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Ok(())).unwrap());
+}
+
+#[test]
+fn startup_still_detects_deadlines_worker_loss_and_native_faults() {
+    let (_stop_tx, stop_rx) = crossbeam_channel::bounded(1);
+    let (audio_tx, audio_rx) = crossbeam_channel::bounded(1);
+    assert!(matches!(
+        wait_for_first_audio(&stop_rx, &audio_rx, Instant::now(), &|| Ok(())),
+        Err(AudioCaptureError::StreamStart(_))
+    ));
+    let deadline = Instant::now() + std::time::Duration::from_secs(3);
+    assert!(matches!(
+        wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Err(
+            AudioCaptureError::StreamInterrupted
+        )),
+        Err(AudioCaptureError::StreamInterrupted)
+    ));
+    drop(audio_tx);
+    assert!(matches!(
+        wait_for_first_audio(&stop_rx, &audio_rx, deadline, &|| Ok(())),
+        Err(AudioCaptureError::StreamInterrupted)
+    ));
+}
+
 fn dispatch() -> CaptureDispatch {
     CaptureDispatch {
         consumer: std::thread::current(),
@@ -64,7 +108,7 @@ fn a_joined_native_disconnect_preserves_journal_recovery_without_quarantining_ca
     capture.buffer.lock().unwrap().append(&[0.25, -0.25]);
     let epoch = capture.buffer.lock().unwrap().recording_epoch;
     capture.capture_fence.fail_latest();
-    let (command_tx, command_rx) = mpsc::channel();
+    let (command_tx, command_rx) = crossbeam_channel::bounded(1);
     let (_event_tx, event_rx) = mpsc::channel();
     capture.capture_handle = Some(CaptureHandle {
         command_tx,
@@ -107,7 +151,7 @@ pub(super) fn native_stream_errors() {
                     capture.begin_recording_with_pre_roll(1.0);
                     capture.buffer.lock().unwrap().append(&[0.25]);
                 }
-                let (command_tx, command_rx) = mpsc::channel();
+                let (command_tx, command_rx) = crossbeam_channel::bounded(1);
                 let (event_tx, event_rx) = mpsc::channel();
                 let args = CaptureThreadArgs {
                     ready: None,

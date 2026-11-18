@@ -183,6 +183,11 @@ shutdown wakes it for the final drain. The VAD worker waits for samples or
 channel closure. Neither worker needs an empty-queue timer. The independent
 microphone fault/stall watchdog is still active.
 
+Cold microphone startup confirms that the capture worker accepted a nonempty
+audio chunk. The worker wakes the stream owner directly, so successful startup
+does not wait for the watchdog tick. A stop request, startup deadline or
+failed stream can still prevent confirmation; an open device alone is not ready.
+
 Do not attribute tray-only CPU to those capture workers with Hot Mic off.
 The previous laptop build, run under a debugger in a private offline X11
 fixture, reached the 50 ms sleep in `global-hotkey 0.8.0`'s X11 event loop.
