@@ -321,8 +321,14 @@ fn gen_export_windows_internet_proxy_settings_schema() -> RootSchema {
 }
 
 pub(crate) const SCHEMAS: &[SchemaSpec] = &[
-    schema_spec!("update-status.schema.json", "UpdateStatus", gen_export_update_status_schema),
-    SchemaSpec::new("license-state.schema.json", "LicenseState", || schemars::schema_for!(kolboo_lib::LicenseState)),
+    schema_spec!(
+        "update-status.schema.json",
+        "UpdateStatus",
+        gen_export_update_status_schema
+    ),
+    SchemaSpec::new("license-state.schema.json", "LicenseState", || {
+        schemars::schema_for!(kolboo_lib::LicenseState)
+    }),
     schema_spec!(
         "audio-capture-diagnostics.schema.json",
         "AudioCaptureDiagnostics",
@@ -343,11 +349,31 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "AvailableProvidersResponse",
         gen_export_available_providers_response_schema
     ),
-    schema_spec!("custom-provider.schema.json", "CustomProvider", gen_export_custom_provider_schema),
-    schema_spec!("model-selection.schema.json", "ModelSelection", gen_export_model_selection_schema),
-    schema_spec!("model-action.schema.json", "ModelAction", gen_export_model_action_schema),
-    schema_spec!("stt-input-mode.schema.json", "SttInputMode", gen_export_stt_input_mode_schema),
-    schema_spec!("model-settings.schema.json", "LoadedModelSettings", gen_export_model_settings_schema),
+    schema_spec!(
+        "custom-provider.schema.json",
+        "CustomProvider",
+        gen_export_custom_provider_schema
+    ),
+    schema_spec!(
+        "model-selection.schema.json",
+        "ModelSelection",
+        gen_export_model_selection_schema
+    ),
+    schema_spec!(
+        "model-action.schema.json",
+        "ModelAction",
+        gen_export_model_action_schema
+    ),
+    schema_spec!(
+        "stt-input-mode.schema.json",
+        "SttInputMode",
+        gen_export_stt_input_mode_schema
+    ),
+    schema_spec!(
+        "model-settings.schema.json",
+        "LoadedModelSettings",
+        gen_export_model_settings_schema
+    ),
     schema_spec!(
         "cache-router-embeddings-response.schema.json",
         "CacheRouterEmbeddingsResponse",
@@ -563,8 +589,16 @@ pub(crate) const SCHEMAS: &[SchemaSpec] = &[
         "QuickAskStartedPayload",
         gen_export_quick_ask_started_payload_schema
     ),
-    schema_spec!("quick-ask-partial-payload.schema.json", "QuickAskPartialPayload", gen_export_quick_ask_partial_payload_schema),
-    schema_spec!("quick-ask-state-payload.schema.json", "QuickAskStatePayload", gen_export_quick_ask_state_payload_schema),
+    schema_spec!(
+        "quick-ask-partial-payload.schema.json",
+        "QuickAskPartialPayload",
+        gen_export_quick_ask_partial_payload_schema
+    ),
+    schema_spec!(
+        "quick-ask-state-payload.schema.json",
+        "QuickAskStatePayload",
+        gen_export_quick_ask_state_payload_schema
+    ),
     schema_spec!(
         "recording-start.schema.json",
         stringify!(kolboo_lib::events::EVENT_RECORDING_START),
