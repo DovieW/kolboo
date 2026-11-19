@@ -49,7 +49,9 @@ if (!inside) {
 			process.exit(1);
 		}
 	}
-	const ffmpeg = spawnSync("/usr/bin/ffmpeg", ["-hide_banner", "-devices"], {
+	// Match the absolute helper path used by production, not a PATH shim.
+	const ffmpegExecutable = path.join("/usr", "bin", "ffmpeg");
+	const ffmpeg = spawnSync(ffmpegExecutable, ["-hide_banner", "-devices"], {
 		env,
 		encoding: "utf8",
 		timeout: 5000,
