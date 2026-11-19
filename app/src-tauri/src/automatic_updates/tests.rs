@@ -3,10 +3,11 @@ use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
 
 // Synthetic fixture key only; never the release key. The private key is not
-// retained. The payload is deliberately not an installer or user content.
-pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1MkM0NDA3NDBCNDNFMjAKUldRZ1ByUkFCMFFzZFNvQkRQSEwwU2RrcklvVm1LL2thT2xFb05RampMQVIyZkw4RGNsdWp0Q0oK";
-const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1ByUkFCMFFzZFFVYm5IYXNQTktDeXk4ZWFuMnFPZWZEbVowWHhTWUFDNWJNR1RHRkFkN2FKQkw1Y20vdHNSa3ZRbTAxajhKdHZpM3ZOcDcvQkVyV1Y0b1ZZVDhUWHdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDIzMDY2CWZpbGU6a29sYm9vLXVwZGF0ZXItZml4dHVyZS50eHQKdERTVzBHMGsyQW5ma21RdXNyUW5zVkFZWU56dzB2SHJ1bURxOVhONDhXM2hIc1dIeE5LdzVzS2t6RWNmRktxRmloLzVON1hsTnRuYVh4cTE0blFKQkE9PQo=";
-pub(super) const PAYLOAD: &[u8] = b"synthetic updater payload, not an executable\n";
+// retained. The ELF magic and length satisfy Tauri's Linux AppImage format
+// check, but the rest is plain text, not a runnable executable.
+pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENCMjY2RjkyMEREMTYxNUIKUldSYllkRU5rbThteTdrbUN5enJzN3hUMElLVitTaGQxSGczckFBQy9rL0JzRlYveWdiNXpRaDgK";
+const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYllkRU5rbThteXlNblh6aHYyOXNLQW5DTXlVMkl2Z1RMNTg4dFdLMDArVkVZVVlWbWtNTEZXRkV5N3J1Y1JBNWFweENqakdWeGxSSG4xdTM3aFVDYXFvQXYzV21Fa3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDUyODQ1CWZpbGU6Zml4dHVyZS5BcHBJbWFnZQpoaHNPMDFsWWVTWFJWUEVtYWRNRkRNMG00NWszT1ZTOGtDQ3pFRlFSR2l5U1JhTUN3N1lsNXZtcGJSa3JmV3UwZnUwNmEzTHQyNG5DeTBlM1FpTjZCUT09Cg==";
+pub(super) const PAYLOAD: &[u8] = b"\x7fELFsynthetic updater payload, not a runnable executable\n";
 
 pub(super) fn test_app(server: &MockServer) -> tauri::App<MockRuntime> {
     let mut context = mock_context(noop_assets());
