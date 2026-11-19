@@ -1,6 +1,6 @@
 # Sentry Integration (Kolboo)
 
-Last updated: 2026-09-24
+Last updated: 2026-11-16
 
 This document covers desktop error reporting and release operations. Historical
 rehearsals below are evidence for their named builds, not a substitute for
@@ -12,6 +12,215 @@ The desktop reports UI exceptions (including React 19 root failures) and Rust
 panics. This is not a native crash handler: segmentation faults, aborts, OOM
 kills, hangs, and every handled provider/device failure are **not** automatically
 captured. Do not claim complete crash coverage or crash-free-session metrics.
+
+Account refresh, entitlement hydration, secure-session persistence and Managed
+catalog failures now explicitly emit handled error events. These use only a
+fixed stage, an allowlisted error code and HTTP status (no account identifiers,
+URLs, response bodies or tokens). The backend groups by those fields and sends
+at most one event per category/status every five minutes. Local warnings retain
+the same safe categories. This is not general request logging.
+
+A rejected refresh token is persisted separately from cached entitlement grace:
+Account shows **Restore your Kolboo session**, not **Offline access**, and exposes email-code
+sign-in. Transient network/service failures retain offline grace. Catalog loads
+refresh expiring tokens under the shared session-rotation lock; a server 401
+allows one refresh/retry, never an unbounded loop or a silent BYOK switch.
+
+### Content-free runtime diagnostics
+
+Desktop GUI runs keep a separate local `diagnostics/` journal and atomic
+`state.json` checkpoint under the app-data directory. A per-directory OS lock
+prevents concurrent owners; secondary launches and CLI commands do not open a
+new GUI run. Each run has a random diagnostic UUID, PID, package version and a
+typed 128-bit source-revision prefix. Recording/processing transitions have a
+run-local operation number; these are not account or transcript identifiers.
+
+- Critical phase/failure/shutdown records and checkpoints are synced by the
+  owned background writer. Audio callbacks update only counters and enqueue
+  bounded events; they do not perform filesystem or network I/O. Queue loss is
+  counted, not silently represented as complete evidence.
+- Health samples run every two seconds during recording/processing and every
+  minute when idle. They contain callback age/count, capture queue depth, and
+  Linux RSS/swap/cumulative CPU ticks. Unsupported platform resource values are
+  absent, not zero. This is not an OS-wide recorder or a GUI responsiveness test.
+- Journal retention is at most 62 days and 256 MiB, whichever limit is reached
+  first; oldest daily files are removed first. The separate legacy text log
+  still keeps seven rotated files and is not included in diagnostic exports.
+  Its asynchronous backlog is bounded to 1,024 records (rather than the
+  dependency's 128,000-record default); overflow remains counted and reported.
+- The next GUI launch records a previous run that never reached orderly exit
+  as `previous_run_unclean`, retaining its last checkpoint. This does **not**
+  identify SIGKILL's sender or distinguish power loss, a crash and forced exit.
+  The final queued events may still be lost on SIGKILL. Reaching orderly exit
+  explicitly drops the text-log flush guard; static values do not drop at exit.
+  Configured Sentry also gets a bounded two-second flush on orderly exit.
+- When Sentry is already configured, finite runtime/audio failure codes and
+  unexpected-run detection are explicitly reported, grouped by code and limited
+  to one event per code every five minutes. Diagnostic run ID and a closed phase
+  tag permit correlation without audio, text, device names, account identity,
+  arbitrary errors, headers, URLs or credentials. Successful recovery is local
+  evidence, not a Sentry error. No additional PostHog events, replay, metrics or
+  automatic log uploads are enabled.
+- Diagnostic ZIPs stream only validated typed journal records, a small positive
+  allowlist of boolean settings and basic system/version information. Unknown
+  fields, raw text logs, arbitrary settings and user-directory paths are not
+  exported. ZIPs are staged privately and never overwrite an existing archive.
+
+This complements OS-level kill/resource monitoring. It does not install a
+privileged monitor and must not be presented as a fix for an unidentified kill.
+
+### Capture lifecycle hardening
+
+Native stream creation and its first delivered audio must acknowledge startup
+within eight seconds before the pipeline announces Recording. During recording,
+two seconds without input fails capture even when idle microphone recovery is
+disabled. A failed recording does not switch microphones silently. Epoch-scoped
+health watchers use the existing stop/error finalization path; stale watchers
+cannot stop a newer session or upload an incomplete capture.
+Terminal success/error/cancellation logging and local cost reporting are scoped to
+the originating request; late finalizers cannot finish the next recording's log.
+Empty normal transcripts also finalize their request rather than staying InProgress.
+
+Stop never reacquires the buffer lock of a worker that exceeded its join/drain
+deadline. Such a buffer is quarantined, its recovery path remains available
+without locking it, and mutating/reusing its audio is refused until process
+recovery. Existing saved recovery audio is retained; this is not a guarantee
+that an unjournaled in-memory recording survives forced process termination.
+PulseAudio/FFmpeg discovery has time/output budgets and owned helper cleanup
+is bounded independently of a blocked reader.
+
+Playback uses eight workers and an eight-connection queue, an absolute
+three-second header deadline, and closes active sockets at shutdown. Native
+thread/descriptor exhaustion fails closed without growing the worker pool.
+
+### Audio error storms and idle output
+
+An older Rodio default output callback prints `audio stream error: ...` directly
+to stderr. Holding the notification output stream indefinitely after a short
+cue could therefore keep an ALSA output loop active while idle and allow a
+broken output device to flood the shared journal. The microphone error callback
+was also capable of repeatedly formatting/logging backend errors. Both callbacks
+now only latch a per-stream fault; the owning non-realtime thread reports a
+closed failure code once and retires that stream. Native error text is not
+forwarded to the diagnostic journal or Sentry. An ordinary joined microphone
+failure keeps available audio recoverable without permanently poisoning future
+recordings; unknown worker ownership still requires quarantine.
+
+Output-device failures use `audio_output`, separately from microphone
+`audio_stream` failures. Native main, Presets and Quick Ask presentation failures
+use `main_window`, `preset_window` and `quick_ask_window`. These are closed codes,
+not raw native error messages. Expected cancellation or coalesced construction
+is not a failure; repeated failing Presets creation reports only once until a
+successful creation, and configured Sentry retains its existing rate limit.
+
+Notification output is opened only when needed, retained through rapid cues and
+a short idle grace, then closed. One worker owns a bounded cue queue and bounded
+in-flight players; an idle owner blocks for work without polling. Playback
+completion includes the existing tail padding, caller waits have a deadline,
+and stale queued cues cannot play late after their caller has timed out. A
+failed output is not automatically replayed on a different device.
+
+`dropped_logs` measures Kolboo's local file-writer backlog losses. It does not
+measure journald suppression, dropped stderr, or OS-recorder outages. Those must
+be reported separately by the OS-wide incident collector. This application work
+does not configure that collector, change journal budgets, or establish the
+sender of the previously observed SIGKILL.
+
+Validation on 2026-11-17: 1,077 frontend tests and 1,236 headless Rust tests
+passed (57 frontend skipped, 14 Rust ignored). The separately opted-in Linux
+Wry/Openbox/null-PCM run passed real lazy-window, cancellation/replacement,
+device-fault and cue-disposal checks. Offline production startup, account-free
+CLI reads, missing-subcommand errors and malformed-setting diagnostics also
+passed. The patch gate reports 100% for 957 executable lines in this series
+and 4,984 against its existing policy baseline. No new coverage exceptions were
+added; existing carried-forward statements were checked byte-for-byte. These
+fixtures do not certify physical microphones, real paste or Windows/macOS.
+
+Optional startup account refresh now belongs to the startup owner: no saved
+secure session means no account task. Its awaitable task uses the unchanged real
+refresh policy, reports only status/static messages, and is rehearsed with
+synthetic secure credentials and loopback failure/recovery responses.
+
+#### Laptop measurement — 2026-11-17
+
+Installed development revision `78490041bcadd7ffe691be13e2ccefbbb974e46c`.
+The previous process exited cleanly through its verified tray Quit action;
+the per-user launcher was switched atomically and the previous build retained.
+The running executable matched the extracted package's SHA-256
+`f80fc179405c309aff7d16e894d41a7df3c5c1d5b32693fba8503255ba078f58`.
+Overlay frontend readiness, backend Sentry initialization, private diagnostics
+permissions and zero queue losses were verified. Remote Sentry ingestion was
+not tested, and no public release was published.
+
+Tray-only idle samples with hot mic disabled:
+
+| Metric | Earlier build | Updated build |
+| --- | --- | --- |
+| Proportional resident memory, summed PSS | approximately 528 MiB | 259 MiB |
+| Memory charged to app cgroup | approximately 515–535 MiB | 131 MiB |
+| CPU, percentage of one core | approximately 2.3% | 0.35% |
+| WebKit page renderers | 4 | 1 |
+| Persistent `cpal_alsa_out` threads | 1 | 0 |
+
+The updated 20-second interval remained idle with an unchanged operation ID,
+zero swap, no new app journal messages and no dropped logs/events. Earlier CPU
+samples were five seconds; these are short observations, not a matched-duration
+benchmark or a long-running leak/crash soak. PSS apportions shared pages rather
+than double-counting renderer RSS. Cgroup charges use different shared-page
+accounting and must not be presented as total resident RAM. Main/Presets use can
+increase memory; the cached Presets page remains after first use. Native null-PCM
+tests exercise cue disposal after playback; physical-microphone/paste acceptance
+on this exact laptop build remains a user smoke test.
+
+The follow-up keeps the recording overlay resident but removes the full
+Mantine theme/styles from its entry point. Rendering no longer waits for the
+diagnostics runtime-config retries; early React errors still use the normal
+scrubbed handler if reporting initializes. This changes startup dependencies,
+not microphone ownership or the user's reporting settings.
+
+While capture is open, successful enqueues wake the sample worker directly;
+shutdown wakes it for the final drain. The VAD worker waits for samples or
+channel closure. Neither worker needs an empty-queue timer. The independent
+microphone fault/stall watchdog is still active.
+
+Cold microphone startup confirms that the capture worker accepted a nonempty
+audio chunk. The worker wakes the stream owner directly, so successful startup
+does not wait for the watchdog tick. A stop request, startup deadline or
+failed stream can still prevent confirmation; an open device alone is not ready.
+
+Do not attribute tray-only CPU to those capture workers with Hot Mic off.
+The previous laptop build, run under a debugger in a private offline X11
+fixture, reached the 50 ms sleep in `global-hotkey 0.8.0`'s X11 event loop.
+This matches the observed 20 switches/second on an unnamed laptop thread;
+it is not a live laptop stack trace. Wayland shortcut cards use the portal,
+but temporary Escape-to-cancel still uses the plugin. Disabling it is not
+an equivalent optimization.
+
+Compared the extracted Linux development packages `7849004` and `13a703c`
+with Hot Mic enabled on a private PulseAudio null source (generated silence,
+offline X11 sessions, no user data). Summing voluntary and involuntary context
+switches across the main process's threads over eight seconds gave **1,027 vs
+136 switches/s**; reversing the run order gave **1,031 vs 135 switches/s**.
+These are scheduling counts during open capture, not tray-idle CPU or a battery
+benchmark. The overlay HTML's directly referenced stylesheets shrank from
+252,467 to 22,900 bytes before compression; this is not a RAM measurement.
+
+### Laptop development packages
+
+Ad-hoc builds do not inherit GitHub Actions configuration automatically. Before
+packaging a reporting-enabled laptop build, supply the existing repository
+variable `SENTRY_PUBLIC_DEV_DSN` through `desktopSentryConfig` in
+`.github/scripts/configure-desktop-sentry.mjs`, with `SENTRY_BUILD_KIND=development`
+and the build commit as `GITHUB_SHA`. Pass its returned environment to the
+package script along with the verified Cloud API/auth public configuration.
+Do not embed a Sentry administration/upload token. A normal unconfigured local
+build intentionally remains cloud-free.
+
+After installation verify the startup **Backend Sentry initialized** diagnostic;
+**no TAURI_SENTRY_DSN** means reporting is disabled, not that no failures occurred.
+The existing beta-only email alert does not cover the `development` environment.
+Development events can be inspected in `kolboo-public-dev`; ingestion and email
+notification are separate checks. Do not claim either without verifying it.
 
 CI uses `.github/scripts/configure-desktop-sentry.mjs` for all three platforms:
 
@@ -198,6 +407,27 @@ Current protections:
   never enabled in production.
 
 ## Testing and validation notes
+
+Verification on 2026-10-15:
+
+- Desktop fix `97565b8` passed `check:ci`, 1,051 frontend tests, 1,191
+  ordinary Rust tests and isolated Linux native/startup checks. Patch coverage
+  against `acb61a2` is 100% of 371 changed executable lines, without new exceptions.
+- The reporting-enabled development DEB was installed on the laptop; package
+  and extracted-executable SHA-256 checks matched. Its running executable was
+  verified as `dev-97565b8-auth/usr/bin/kolboo`. No public release was published.
+- Startup confirmed backend Sentry initialization. A real session refresh
+  rejection (`refresh_token_not_found`, HTTP 400) produced event
+  `dd27e29d0dbf491ebfc98b3efac443cf` in
+  [KOLBOO-PUBLIC-DEV-V](https://dov-weinstock.sentry.io/issues/7794132446/),
+  tagged `development` / `kolboo@0.3.3-dev.97565b8`. The local cache correctly
+  marked reauthentication required; a fresh user login remains necessary.
+- This verifies handled-error ingestion, not development email notification,
+  fresh user login, or native Windows/macOS behavior.
+- Ingested user ID, email, username and IP fields were empty. Sentry nevertheless
+  attached approximate country/city/region metadata server-side. Client-side
+  scrubbing alone is therefore not proof of anonymous ingestion. Project-level
+  location scrubbing was not changed by this desktop fix.
 
 Verification on 2026-09-24:
 

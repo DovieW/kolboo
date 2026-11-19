@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_STT_LANGUAGE,
+	fixedSttLanguage,
 	normalizeSttLanguage,
 	normalizeSttLanguageOverride,
 	STT_LANGUAGE_OPTIONS,
@@ -9,6 +10,16 @@ import {
 } from "./sttLanguages";
 
 describe("language hints", () => {
+	it("lets only the exact Hebrew-only model own its language", () => {
+		expect(fixedSttLanguage("ivritai", "ivrit-ai/whisper-large-v3-turbo")).toBe(
+			"he",
+		);
+		expect(fixedSttLanguage("ivritai", "future-model")).toBeNull();
+		expect(
+			fixedSttLanguage("groq", "ivrit-ai/whisper-large-v3-turbo"),
+		).toBeNull();
+		expect(fixedSttLanguage()).toBeNull();
+	});
 	it("explains Speechmatics Auto limitations without changing an inherited or saved hint", () => {
 		for (const saved of [undefined, "auto", "lk"]) {
 			expect(sttLanguageOptionsForModel("speechmatics", "enhanced", saved))

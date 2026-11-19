@@ -108,7 +108,7 @@ export function useRefreshLicenseEntitlement() {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: createRefreshLicenseEntitlementMutationFn(),
-		onSuccess: () => {
+		onSettled: () => {
 			void invalidateLicenseRelatedQueries(queryClient);
 		},
 	});

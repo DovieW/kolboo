@@ -1,7 +1,7 @@
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Listener, Manager,
 };
 
 use crate::commands;
@@ -26,6 +26,7 @@ const TRAY_HISTORY_ITEM_ID_PREFIX: &str = "tray-history-copy::";
 
 pub(crate) mod main_window;
 pub(crate) mod startup;
+mod tray_controls;
 
 fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64]) {
     let event = event.to_string();
@@ -41,67 +42,93 @@ fn schedule_single_instance_emit(app: AppHandle, event: &str, delays_ms: &[u64])
 }
 
 pub(crate) fn show_main_window(app: &AppHandle, source: &str, notify_event: Option<&str>) {
-    let Some(window) = app.get_webview_window("main") else {
-        log::error!("{source}: main window not found (was it closed?) - recreating");
+    show_main_window_with_spawner(app, source, notify_event, spawn_main_window_worker);
+}
 
+type MainWindowTask = Box<dyn FnOnce() + Send + 'static>;
+type MainWindowSpawner = fn(MainWindowTask) -> std::io::Result<std::thread::JoinHandle<()>>;
+
+fn spawn_main_window_worker(task: MainWindowTask) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new()
+        .name("kolboo-main-window".into())
+        .spawn(task)
+}
+
+fn show_main_window_with_spawner(
+    app: &AppHandle,
+    source: &str,
+    notify_event: Option<&str>,
+    spawn: MainWindowSpawner,
+) {
+    // Claim before inspecting the registry: a builder registers its window
+    // before geometry/close configuration has finished.
+    if app
+        .state::<crate::state::AppState>()
+        .main_window_creating
+        .swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        if let Some(event) = notify_event {
+            schedule_single_instance_emit(app.clone(), event, &[300, 800, 1400]);
+        }
+        return;
+    }
+    let Some(window) = app.get_webview_window("main") else {
         // Recreate main window if it was previously closed/destroyed.
         // NOTE: Creating windows from synchronous event handlers can deadlock on Windows,
         // so we do it on a separate thread.
         let app_handle = app.clone();
         let source = source.to_string();
         let notify_event = notify_event.map(|event| event.to_string());
-        std::thread::spawn(move || {
+        if spawn(Box::new(move || {
             log::info!("{source}: creating main window");
-            match tauri::WebviewWindowBuilder::new(
-                &app_handle,
-                "main",
-                tauri::WebviewUrl::App("index.html".into()),
-            )
-            .title("Kolboo")
-            .inner_size(1280.0, 800.0)
-            .visible(false)
-            .resizable(true)
-            .center()
-            .build()
-            {
-                Ok(w) => {
-                    main_window::configure(&w);
-                    let _ = w.unminimize();
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                    if let Some(event) = notify_event.as_deref() {
-                        schedule_single_instance_emit(app_handle.clone(), event, &[300, 800, 1400]);
-                    }
-                    log::info!("{source}: main window created and shown");
+            if let Ok(w) = main_window::create(&app_handle) {
+                let shown = main_window_operations_succeeded(
+                    &w,
+                    &[w.unminimize(), w.show(), w.set_focus()],
+                );
+                report_main_window_result(&app_handle, shown);
+                if let Some(event) = notify_event.as_deref() {
+                    schedule_single_instance_emit(app_handle.clone(), event, &[300, 800, 1400]);
                 }
-                Err(e) => {
-                    log::error!("{source}: failed to create main window: {e}");
-                }
+                log::debug!(
+                    "{source}: main window created (presentation_requests_accepted={shown})"
+                );
             }
-        });
+            app_handle
+                .state::<crate::state::AppState>()
+                .main_window_creating
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        }))
+        .is_err()
+        {
+            // Resource exhaustion must not panic or permanently strand the
+            // single-flight gate. No OS error payload or user content is logged.
+            app.state::<crate::state::AppState>()
+                .main_window_creating
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            report_main_window_result(app, false);
+        }
         return;
     };
 
     let visible_before = window.is_visible().ok();
     log::info!("{source}: attempting to show main window (visible_before={visible_before:?})");
 
-    if let Err(e) = window.unminimize() {
-        log::warn!("{source}: window.unminimize() failed: {e}");
-    }
-    if let Err(e) = window.show() {
-        log::warn!("{source}: window.show() failed: {e}");
-    }
     // If the window was previously on a disconnected monitor, showing/focusing may succeed
     // but the window can still be effectively invisible. Centering is a good recovery.
-    if let Err(e) = window.center() {
-        log::warn!("{source}: window.center() failed: {e}");
-    }
     // A brief always-on-top toggle can help bring the window above other windows on Windows.
-    let _ = window.set_always_on_top(true);
-    if let Err(e) = window.set_focus() {
-        log::warn!("{source}: window.set_focus() failed: {e}");
-    }
-    let _ = window.set_always_on_top(false);
+    let shown = main_window_operations_succeeded(
+        &window,
+        &[
+            window.unminimize(),
+            window.show(),
+            window.center(),
+            window.set_always_on_top(true),
+            window.set_focus(),
+            window.set_always_on_top(false),
+        ],
+    );
+    report_main_window_result(app, shown);
 
     if let Some(event) = notify_event {
         schedule_single_instance_emit(app.clone(), event, &[150]);
@@ -109,6 +136,36 @@ pub(crate) fn show_main_window(app: &AppHandle, source: &str, notify_event: Opti
 
     let visible_after = window.is_visible().ok();
     log::info!("{source}: done (visible_after={visible_after:?})");
+    app.state::<crate::state::AppState>()
+        .main_window_creating
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn main_window_operations_succeeded(
+    window: &tauri::WebviewWindow,
+    operations: &[tauri::Result<()>],
+) -> bool {
+    // Setters acknowledge queued work, even for a recently destroyed handle.
+    // Verify the native control channel is still live. Mapping is asynchronous,
+    // so a valid currently-hidden page is not itself a presentation failure.
+    operations.iter().all(Result::is_ok) && window.is_visible().is_ok()
+}
+
+fn report_main_window_result(app: &AppHandle, succeeded: bool) -> bool {
+    let state = app.state::<crate::state::AppState>();
+    let reported = &state.main_window_failure_reported;
+    if succeeded {
+        reported.store(false, std::sync::atomic::Ordering::SeqCst);
+        return false;
+    }
+    if reported.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
+    crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+        crate::runtime_diagnostics::Failure::MainWindow,
+    ));
+    log::warn!("Main window unavailable; reopening can retry");
+    true
 }
 
 fn history_menu_preview(text: &str, max_chars: usize) -> Option<String> {
@@ -174,6 +231,8 @@ fn build_history_submenu(app: &AppHandle) -> tauri::Result<Submenu<tauri::Wry>> 
 
 fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let show_item = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
+    let microphones = tray_controls::build(app, &crate::audio_capture::list_input_devices_v2())?;
+    let [profile, preset] = tray_controls::context_items(app)?;
     let history_submenu = build_history_submenu(app)?;
     let diagnostics_item = MenuItem::with_id(
         app,
@@ -185,7 +244,15 @@ fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     Menu::with_items(
         app,
-        &[&show_item, &history_submenu, &diagnostics_item, &quit_item],
+        &[
+            &show_item,
+            &microphones,
+            &profile,
+            &preset,
+            &history_submenu,
+            &diagnostics_item,
+            &quit_item,
+        ],
     )
 }
 
@@ -308,7 +375,48 @@ pub(crate) fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         keepalive.set(tray);
     }
 
+    app.on_menu_event(tray_controls::on_menu_event);
+
+    for event in [
+        events::EVENT_SETTINGS_CHANGED,
+        events::EVENT_PIPELINE_STATE_CHANGED,
+        events::EVENT_HISTORY_CHANGED,
+    ] {
+        let handle = app.clone();
+        app.listen(event, move |_| refresh_tray_menu(&handle, build_tray_menu));
+    }
+
     Ok(())
+}
+
+fn refresh_tray_menu(
+    app: &AppHandle,
+    build_menu: fn(&AppHandle) -> tauri::Result<Menu<tauri::Wry>>,
+) {
+    if !app.state::<TrayKeepAlive>().refresh.request() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        loop {
+            app.state::<TrayKeepAlive>().refresh.begin();
+            if let Ok(menu) = build_menu(&app) {
+                // Release the state mutex before native menu dispatch (Windows GUI thread).
+                let tray = app
+                    .state::<TrayKeepAlive>()
+                    .tray
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone());
+                if let Some(tray) = tray {
+                    let _ = tray.set_menu(Some(menu));
+                }
+            }
+            if !app.state::<TrayKeepAlive>().refresh.finish() {
+                break;
+            }
+        }
+    });
 }
 
 /// Initialize the recording pipeline from settings in the store

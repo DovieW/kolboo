@@ -106,6 +106,8 @@ flowchart LR
 
 - **`LicenseState`** (persisted in `settings.json`)
   - tier, status, email/user/org snapshot, usage+limits, timestamps
+  - `reauth_required` (default false for legacy caches): a definitive server
+    rejection of the saved session, independent of cached allowance/grace
 - **`SessionMaterial`** (secure storage only)
   - access token, refresh token
 - **`LicenseAuthContext`** (computed command response)
@@ -148,6 +150,21 @@ sequenceDiagram
 ## Startup refresh flow
 
 On app startup, backend does a best-effort silent refresh if secure session material exists.
+
+Managed catalog reads share the refresh mutex and re-read secure storage after
+acquiring it. JWT `exp` is only a freshness hint (60-second margin), never an
+authorization decision. Expiring tokens refresh before the request; a catalog
+401 permits one forced refresh and retry. Concurrent callers use the rotated
+token rather than rotating the same rejected token again. First-install catalog
+discovery remains a lower-level request to avoid re-entering the refresh lock.
+
+Known Supabase refresh/session rejection codes set `reauth_required`, deny the
+computed auth context and expose the email-code form. The cached plan and token
+pair are not destructively cleared. Unknown errors, rate limits and network
+failures do not masquerade as revocation; ordinary grace behavior remains.
+Successful authentication/rotation clears the rejection marker. Query refresh
+invalidates license/auth/catalog state on failure as well as success, because a
+failed refresh can persist a meaningful state change. BYOK remains independent.
 
 ```mermaid
 sequenceDiagram

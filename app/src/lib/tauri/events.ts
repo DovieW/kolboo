@@ -12,7 +12,9 @@ import type {
 	PipelineTranscriptReadyPayload,
 	PolicyState,
 	QuickAskAnswerPayload,
+	QuickAskPartialPayload,
 	QuickAskStartedPayload,
+	QuickAskStatePayload,
 	SettingsChangedPayload,
 	SttPartialTranscriptPayload,
 	SystemEvent,
@@ -27,6 +29,7 @@ export type EventMap = {
 	"overlay-audio-level": OverlayAudioLevelPayload;
 	"overlay-ocr-context-unavailable": OverlayOcrContextUnavailablePayload;
 	"overlay-hide-requested": EmptyEventPayload;
+	"overlay-hover-visibility-changed": boolean;
 	"pipeline-cancelled": EmptyEventPayload;
 	"pipeline-error": PipelineErrorPayload;
 	"pipeline-recording-started": EmptyEventPayload;
@@ -40,6 +43,8 @@ export type EventMap = {
 	"quick-ask-answer": QuickAskAnswerPayload;
 	"quick-ask-dismiss-requested": EmptyEventPayload;
 	"quick-ask-started": QuickAskStartedPayload;
+	"quick-ask-partial": QuickAskPartialPayload;
+	"quick-ask-state": QuickAskStatePayload;
 	"recording-start": EmptyEventPayload;
 	"recording-stop": EmptyEventPayload;
 	"request-disconnect": EmptyEventPayload;

@@ -115,6 +115,15 @@ Kolboo detects the Linux session using `XDG_SESSION_TYPE`, then falls back to `W
 - Older portals and desktops without keyboard control keep the final transcript on the clipboard and show the existing fallback notification. No XWayland synthetic-input fallback is attempted. This is capability-based, not a KDE/GNOME or distro-name assumption. Optional media play/pause shares an already-approved session and never opens a permission dialog during capture; it is skipped if there is no usable approval or input is busy.
 - The clipboard is populated after approval, immediately before paste; Wayland retains the transcript instead of restoring previous clipboard contents on a timer. Failed key delivery releases keys/modifiers best-effort and is never automatically replayed, since the compositor may have delivered part of the chord.
 - Linux packages include a hidden `com.kolboo.app.desktop` identity matching the portal registration, alongside Tauri's menu launcher. Portable/development installations must make that identity available to the host desktop as well; an internal AppImage entry alone is not proof of host desktop integration. This is metadata, not a permission grant.
+- The microphone picker uses PipeWire/PulseAudio input sources with their desktop
+  descriptions and stable source names when `pactl` and `parec` are installed
+  (`pulseaudio-utils` on Ubuntu). Output monitors are not microphone choices.
+  Explicit choices capture through the sound server without changing the system
+  default or opening a competing direct hardware route. Without those helpers or
+  a reachable server, the ALSA fallback hides dummy/default/plugin aliases and
+  keeps distinct converting hardware inputs and user-defined PCM routes. Old
+  microphone IDs remain readable; unavailable saved choices are not silently
+  rewritten to a different microphone.
 - Streaming live output remains disabled on Wayland; partial chunks never attempt global injection. The final completed transcript uses the portal or clipboard fallback.
 - Native Wayland sessions register shortcuts through the compositor-owned XDG Global Shortcuts portal. This prevents a shortcut such as F3 from also reaching the focused Wayland application. The desktop may show a confirmation dialog the first time a binding is requested or after the binding changes, and the desktop remains authoritative over the final assigned trigger.
 - X11 sessions use the Tauri global-shortcut backend. Portal or X11 registration failures remain visible in diagnostics rather than preventing app startup.

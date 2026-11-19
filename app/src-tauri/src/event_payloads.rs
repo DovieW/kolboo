@@ -41,15 +41,17 @@ pub struct OverlayOcrContextUnavailablePayload {
     pub request_id: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct QuickAskStartedPayload {
+    pub request_id: Option<String>,
     pub question: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct QuickAskAnswerOkPayload {
+    pub request_id: Option<String>,
     pub ok: bool,
     pub answer: String,
     pub provider_used: Option<String>,
@@ -57,17 +59,35 @@ pub struct QuickAskAnswerOkPayload {
     pub duration_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 pub struct QuickAskAnswerErrorPayload {
+    pub request_id: Option<String>,
     pub ok: bool,
     pub error: String,
 }
 
-#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum QuickAskAnswerPayload {
     Ok(QuickAskAnswerOkPayload),
     Err(QuickAskAnswerErrorPayload),
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, JsonSchema)]
+pub struct QuickAskPartialPayload {
+    pub request_id: String,
+    pub seq: u64,
+    pub text: String,
+}
+
+/// A bounded, request-scoped snapshot. Revision orders live events against the
+/// listener-ready command response without retaining an event queue.
+#[derive(Debug, Clone, serde::Serialize, JsonSchema)]
+pub struct QuickAskStatePayload {
+    pub revision: u64,
+    pub started: Option<QuickAskStartedPayload>,
+    pub partial: Option<QuickAskPartialPayload>,
+    pub answer: Option<QuickAskAnswerPayload>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, JsonSchema)]

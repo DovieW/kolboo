@@ -1,6 +1,4 @@
-import { AppMantineProvider } from "./lib/bootstrap/AppMantineProvider";
 import { renderRoot } from "./lib/bootstrap/renderRoot";
-import "@mantine/core/styles.css";
 import "@fontsource/sora/index.css";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -81,18 +79,18 @@ class OverlayErrorBoundary extends Component<
 	}
 }
 
-void initSentry("overlay").finally(() => {
-	renderRoot(
-		<QueryClientProvider client={queryClient}>
-			<AppMantineProvider>
-				<OverlayErrorBoundary>
-					<OverlayApp />
-				</OverlayErrorBoundary>
-			</AppMantineProvider>
-		</QueryClientProvider>,
-		{ sentrySurface: "overlay" },
-	);
+const sentryReady = initSentry("overlay").catch(() => {
+	console.error("Overlay diagnostics could not initialize");
+	return false;
 });
+renderRoot(
+	<QueryClientProvider client={queryClient}>
+		<OverlayErrorBoundary>
+			<OverlayApp />
+		</OverlayErrorBoundary>
+	</QueryClientProvider>,
+	{ sentrySurface: "overlay", sentryReady },
+);
 
 invoke("overlay_frontend_ready").catch((error) => {
 	console.error("[Overlay] Failed to notify frontend ready:", error);

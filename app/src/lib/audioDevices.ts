@@ -68,6 +68,9 @@ function decodeBase64UrlBytes(value: string): Uint8Array | null {
 export function decodeMicDeviceIdName(
 	id: string | null | undefined,
 ): string | null {
+	if (id?.startsWith("mic:pulse:v1:") || id?.startsWith("mic:alsa:v1:")) {
+		return "Previously selected Linux microphone";
+	}
 	if (typeof id !== "string" || !id.startsWith(MIC_DEVICE_ID_PREFIX)) {
 		return null;
 	}

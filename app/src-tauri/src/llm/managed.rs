@@ -105,6 +105,79 @@ impl ManagedLlmProvider {
 
 #[async_trait]
 impl LlmProvider for ManagedLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        if self.access_token.trim().is_empty() {
+            return Err(LlmError::NoApiKey("managed session".into()));
+        }
+        let Some(base) = self.api_url.strip_suffix("/chat/completions") else {
+            return self.complete(system_prompt, user_message).await;
+        };
+        // Discovery is unmetered. Only a legacy 404 permits batch compatibility;
+        // never retry as batch after a paid stream has been dispatched.
+        let url = format!("{base}/quick-ask/stream");
+        let mut probe = crate::http::with_cloudflare_access_headers_from_request_url(
+            self.client.get(&url).bearer_auth(&self.access_token),
+        )
+        .timeout(self.timeout.unwrap_or(DEFAULT_LLM_TIMEOUT))
+        .send()
+        .await
+        .map_err(|_| {
+            LlmError::Api(
+                "Managed streaming availability could not be checked; no inference was sent".into(),
+            )
+        })?;
+        if probe.status() == reqwest::StatusCode::NOT_FOUND {
+            return self.complete(system_prompt, user_message).await;
+        }
+        if !probe.status().is_success() {
+            return Err(LlmError::Api(
+                "Managed streaming is unavailable; no inference was sent".into(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = probe.chunk().await.map_err(|_| {
+            super::streaming::invalid("Managed streaming capability was interrupted")
+        })? {
+            if bytes.len() + chunk.len() > 4096 {
+                return Err(super::streaming::invalid(
+                    "Managed streaming capability exceeds the supported size",
+                ));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let capability: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| super::streaming::invalid("Invalid managed streaming capability"))?;
+        if capability
+            .get("protocol")
+            .and_then(serde_json::Value::as_str)
+            != Some("kolboo-quick-ask-stream-v1")
+        {
+            return Err(super::streaming::invalid(
+                "Unsupported managed streaming capability",
+            ));
+        }
+        let request = serde_json::json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true});
+        let mut req = self
+            .client
+            .post(url)
+            .bearer_auth(&self.access_token)
+            .header(
+                "x-idempotency-key",
+                format!("desktop-llm-{}", uuid::Uuid::new_v4()),
+            )
+            .json(&request);
+        if let Some(provider) = &self.selected_provider {
+            req = req.header("x-kolboo-model-provider", provider);
+        }
+        super::openai_compat::stream(req, self.timeout, self.request_log_store.as_ref(), notify)
+            .await
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.access_token.trim().is_empty() {
             return Err(LlmError::NoApiKey("managed session".to_string()));

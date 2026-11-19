@@ -410,7 +410,24 @@ export async function maybeCaptureSentrySmokeTest(
 
 export function getSentryReactRootOptions(
 	surface: SentrySurface,
+	initializing?: Promise<boolean>,
 ): SentryReactRootOptions | undefined {
+	// The warm overlay must render even while the runtime-config bridge is
+	// retrying. Wait on the exceptional path only, using the same scrubbed SDK.
+	if (initializing) {
+		const report = Sentry.reactErrorHandler();
+		const handle: typeof report = (...args) => {
+			void initializing.then((enabled) => {
+				if (enabled) report(...args);
+				else console.error("Overlay render error (Sentry unavailable)");
+			});
+		};
+		return {
+			onCaughtError: handle,
+			onUncaughtError: handle,
+			onRecoverableError: handle,
+		};
+	}
 	if (!initialized || !isSentryConfigured()) return undefined;
 
 	// We intentionally keep our custom fallback UIs, but React 19's root hooks let

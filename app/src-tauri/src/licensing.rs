@@ -84,6 +84,9 @@ pub struct UsagePeriod {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct LicenseState {
+    /// Session rejection is distinct from a transient entitlement/network outage.
+    #[serde(default)]
+    pub reauth_required: bool,
     #[serde(default)]
     pub beta_access: Option<BetaAccess>,
     #[serde(default)]
@@ -170,6 +173,7 @@ pub struct SessionExchangeResponse {
 impl LicenseState {
     pub fn signed_out(now: DateTime<Utc>) -> Self {
         Self {
+            reauth_required: false,
             beta_access: None,
             usage_period: None,
             tier: LicenseTier::Community,
@@ -478,6 +482,10 @@ pub fn normalize_license_state(raw: Option<Value>, now: DateTime<Utc>) -> Licens
 
     let tier = parse_tier(map.get("tier"));
     let mut state = LicenseState {
+        reauth_required: map
+            .get("reauth_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         beta_access: map
             .get("beta_access")
             .and_then(|value| serde_json::from_value(value.clone()).ok()),
@@ -548,6 +556,7 @@ pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> Lic
     // Real access must come back from api-edge so the desktop does not fabricate
     // enterprise/personal state before the durable backend confirms it.
     LicenseState {
+        reauth_required: false,
         beta_access: None,
         usage_period: None,
         tier: LicenseTier::Community,
@@ -571,6 +580,7 @@ pub fn build_login_state(provider_hint: Option<&str>, now: DateTime<Utc>) -> Lic
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn apply_refresh_success(mut state: LicenseState, now: DateTime<Utc>) -> LicenseState {
     state.status = LicenseStatus::Active;
+    state.reauth_required = false;
     state.cached_at = now;
     state.last_validated_at = Some(now);
     state.expires_at = if matches!(state.tier, LicenseTier::Community) {
@@ -707,9 +717,11 @@ mod tests {
         state.user_id = Some("u1".to_string());
         state.email = Some("u1@example.com".to_string());
         state.status = LicenseStatus::Expired;
+        state.reauth_required = true;
 
         let next = apply_refresh_success(state, now);
         assert_eq!(next.status, LicenseStatus::Active);
+        assert!(!next.reauth_required);
         assert!(next.expires_at.is_some());
         assert!(next.last_validated_at.is_some());
     }
@@ -761,6 +773,7 @@ mod tests {
     fn telemetry_context_redacts_sensitive_fields() {
         let now = Utc.with_ymd_and_hms(2026, 2, 13, 12, 0, 0).unwrap();
         let state = LicenseState {
+            reauth_required: false,
             beta_access: None,
             usage_period: None,
             tier: LicenseTier::Enterprise,

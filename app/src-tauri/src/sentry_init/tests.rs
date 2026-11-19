@@ -117,6 +117,212 @@ struct TestTransport {
     flush_result: bool,
 }
 
+pub(crate) fn captured_runtime_events(work: impl FnOnce()) -> Vec<Event<'static>> {
+    let transport = Arc::new(TestTransport {
+        envelopes: Mutex::default(),
+        flush_result: true,
+    });
+    let mut options = sentry::ClientOptions::default();
+    options.dsn = Some("https://public@example.invalid/1".parse().unwrap());
+    options.transport = Some(Arc::new(transport.clone()));
+    options.before_send = Some(Arc::new(scrub_event));
+    let hub = Arc::new(sentry::Hub::new(
+        Some(Arc::new(sentry::Client::from_config(options))),
+        Arc::default(),
+    ));
+    sentry::Hub::run(hub, work);
+    let envelopes = transport.envelopes.lock().unwrap();
+    envelopes
+        .iter()
+        .flat_map(Envelope::items)
+        .filter_map(|item| match item {
+            EnvelopeItem::Event(event) => Some((**event).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn runtime_failures_are_closed_content_free_and_rate_limited() {
+    sentry::Hub::run(Arc::new(sentry::Hub::new(None, Arc::default())), || {
+        report_runtime_failure("PRIVATE");
+        report_runtime_failure("audio_stream");
+    });
+    let transport = Arc::new(TestTransport {
+        envelopes: Mutex::default(),
+        flush_result: true,
+    });
+    let mut options = sentry::ClientOptions::default();
+    options.dsn = Some("https://public@example.invalid/1".parse().unwrap());
+    options.transport = Some(Arc::new(transport.clone()));
+    options.before_send = Some(Arc::new(scrub_event));
+    let hub = Arc::new(sentry::Hub::new(
+        Some(Arc::new(sentry::Client::from_config(options))),
+        Arc::default(),
+    ));
+    sentry::Hub::run(hub, || {
+        report_runtime_failure("PRIVATE");
+        report_runtime_failure("audio_stream");
+        report_runtime_failure("audio_stream");
+        report_runtime_failure("previous_run_unclean");
+    });
+    let envelopes = transport.envelopes.lock().unwrap();
+    let events: Vec<_> = envelopes
+        .iter()
+        .flat_map(Envelope::items)
+        .filter_map(|item| match item {
+            EnvelopeItem::Event(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].tags["runtime_code"], "audio_stream");
+    assert_eq!(events[1].tags["runtime_code"], "previous_run_unclean");
+    for event in events {
+        assert_eq!(event.tags["event_kind"], "runtime_failure");
+        assert_eq!(event.fingerprint.len(), 1);
+        assert!(!serde_json::to_string(event).unwrap().contains("PRIVATE"));
+    }
+    let hostile: Event<'static> = serde_json::from_value(json!({"message":"PRIVATE", "tags":{
+        "runtime_code":"PRIVATE", "diagnostic_run_id":"PRIVATE", "event_kind":"runtime_failure"}}))
+    .unwrap();
+    assert!(!serde_json::to_string(&scrub_event(hostile).unwrap())
+        .unwrap()
+        .contains("PRIVATE"));
+    let valid: Event<'static> = serde_json::from_value(json!({"tags":{
+        "runtime_code":"audio_stream", "diagnostic_run_id":"00000000-0000-0000-0000-000000000001", "event_kind":"runtime_failure"}})).unwrap();
+    assert_eq!(
+        scrub_event(valid).unwrap().tags["diagnostic_run_id"],
+        "00000000-0000-0000-0000-000000000001"
+    );
+    for phase in [
+        "startup",
+        "idle",
+        "recording",
+        "transcribing",
+        "routing",
+        "rewriting",
+        "error",
+    ] {
+        let event: Event<'static> =
+            serde_json::from_value(json!({"tags":{"runtime_phase":phase}})).unwrap();
+        assert_eq!(scrub_event(event).unwrap().tags["runtime_phase"], phase);
+    }
+}
+
+#[test]
+fn output_and_window_failures_survive_scrubbing_and_are_deduplicated() {
+    let codes = [
+        "audio_output",
+        "main_window",
+        "preset_window",
+        "quick_ask_window",
+    ];
+    let events = captured_runtime_events(|| {
+        for code in codes {
+            report_runtime_failure(code);
+            report_runtime_failure(code);
+        }
+        report_runtime_failure("private device or window error");
+    });
+    assert_eq!(events.len(), codes.len());
+    for (event, code) in events.iter().zip(codes) {
+        assert_eq!(event.tags["runtime_code"], code);
+        assert_eq!(event.tags["event_kind"], "runtime_failure");
+        assert_eq!(event.fingerprint.len(), 1);
+        assert!(!serde_json::to_string(event)
+            .unwrap()
+            .contains("private device"));
+    }
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| &event.fingerprint)
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        codes.len()
+    );
+}
+
+#[test]
+fn account_failures_are_explicit_scrubbed_and_rate_limited() {
+    sentry::Hub::run(Arc::new(sentry::Hub::new(None, Arc::default())), || {
+        report_account_failure("session_refresh", "network", None);
+    });
+    let transport = Arc::new(TestTransport {
+        envelopes: Mutex::default(),
+        flush_result: true,
+    });
+    let mut options = sentry::ClientOptions::default();
+    options.dsn = Some("https://public@example.invalid/1".parse().unwrap());
+    options.transport = Some(Arc::new(transport.clone()));
+    options.before_send = Some(Arc::new(scrub_event));
+    let hub = Arc::new(sentry::Hub::new(
+        Some(Arc::new(sentry::Client::from_config(options))),
+        Arc::default(),
+    ));
+    sentry::Hub::run(hub, || {
+        report_account_failure("PRIVATE stage", "network", None);
+        report_account_failure("session_storage", "auth_session_save_failed", Some(999));
+        report_account_failure("session_storage", "auth_session_save_failed", Some(999));
+        report_account_failure("session_refresh", "refresh_token_not_found", Some(400));
+        report_account_failure("model_catalog", "PRIVATE response", Some(503));
+        let mut reports = ACCOUNT_REPORTS.lock().unwrap();
+        for (_, at) in reports.iter_mut() {
+            *at -= std::time::Duration::from_secs(301);
+        }
+        drop(reports);
+        report_account_failure("session_storage", "auth_session_save_failed", Some(999));
+    });
+    let envelopes = transport.envelopes.lock().unwrap();
+    let events: Vec<_> = envelopes
+        .iter()
+        .flat_map(Envelope::items)
+        .filter_map(|item| match item {
+            EnvelopeItem::Event(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(events.len(), 4);
+    for event in &events {
+        assert_eq!(event.level, sentry::Level::Error);
+        assert_eq!(event.tags["event_kind"], "account_failure");
+        assert_eq!(event.fingerprint.len(), 3);
+        assert!(!serde_json::to_string(event).unwrap().contains("PRIVATE"));
+    }
+    assert_eq!(events[0].tags["http_status"], "none");
+    assert_eq!(events[1].tags["account_code"], "refresh_token_not_found");
+    assert_eq!(events[2].tags["account_code"], "unknown");
+    let hostile: Event<'static> = serde_json::from_value(json!({
+        "message":"PRIVATE", "tags":{"event_kind":"account_failure", "account_stage":"PRIVATE", "account_code":"PRIVATE", "http_status":"0400"},
+        "fingerprint":["PRIVATE"], "extra":{"token":"PRIVATE"}
+    })).unwrap();
+    let scrubbed = scrub_event(hostile).unwrap();
+    assert!(!serde_json::to_string(&scrubbed)
+        .unwrap()
+        .contains("PRIVATE"));
+    assert_eq!(
+        scrubbed.fingerprint.as_ref(),
+        ["unknown", "unknown", "unknown"]
+    );
+    for code in [
+        "refresh_token_already_used",
+        "session_not_found",
+        "session_expired",
+        "user_banned",
+        "reauth_required",
+        "timeout",
+        "invalid_response",
+        "http_rejected",
+        "network",
+    ] {
+        assert!(safe_account_tag("account_code", code));
+    }
+    assert!(!safe_account_tag("http_status", "700"));
+    assert!(!safe_account_tag("http_status", "PRIVATE"));
+    assert!(safe_account_tag("account_stage", "entitlement"));
+}
+
 impl sentry::Transport for TestTransport {
     fn send_envelope(&self, envelope: Envelope) {
         self.envelopes.lock().unwrap().push(envelope);
@@ -130,6 +336,7 @@ impl sentry::Transport for TestTransport {
 fn smoke_requires_nonproduction_valid_surface_and_successful_flush() {
     sentry::Hub::run(Arc::new(sentry::Hub::new(None, Arc::default())), || {
         assert!(!capture_backend_smoke("main"));
+        assert!(flush_on_exit());
     });
     for (environment, surface, flush_result, expected_count, expected) in [
         ("test", "main", true, 1, true),
@@ -150,7 +357,10 @@ fn smoke_requires_nonproduction_valid_surface_and_successful_flush() {
         options.before_send = Some(Arc::new(scrub_event));
         let client = sentry::Client::from_config(options);
         let hub = Arc::new(sentry::Hub::new(Some(Arc::new(client)), Arc::default()));
-        sentry::Hub::run(hub, || assert_eq!(capture_backend_smoke(surface), expected));
+        sentry::Hub::run(hub, || {
+            assert_eq!(capture_backend_smoke(surface), expected);
+            assert_eq!(flush_on_exit(), flush_result);
+        });
         let envelopes = transport.envelopes.lock().unwrap();
         let events: Vec<_> = envelopes
             .iter()

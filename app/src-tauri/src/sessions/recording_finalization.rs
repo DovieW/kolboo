@@ -216,7 +216,8 @@ fn complete_current_request_with_cost_inner(
     }
 
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        stats::emit_cost_events_for_current_request_with_duration(app, status, duration);
+        let log_store = log_store.for_request(request_id.unwrap_or_default());
+        stats::emit_cost_events_for_log_store(app, status, duration, &log_store);
         emitted_with_log_store = true;
         log_store.complete_current();
     }
@@ -234,7 +235,9 @@ pub(crate) fn complete_current_request_without_cost(
     request_id: Option<&str>,
 ) {
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        log_store.complete_current();
+        log_store
+            .for_request(request_id.unwrap_or_default())
+            .complete_current();
     }
 
     end_ocr_session_for_request(pipeline, request_id);

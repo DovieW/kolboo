@@ -1,6 +1,6 @@
 [package]
 name = "kolboo"
-version = "0.3.3"
+version = "0.3.4"
 description = "Customizable AI-powered voice dictation tool"
 license = "AGPL-3.0"
 authors = ["kstonekuan"]
@@ -29,10 +29,10 @@ local-whisper = ["dep:whisper-rs", "dep:dirs"]
 local-whisper-cuda = ["local-whisper", "whisper-rs/cuda"]
 
 [build-dependencies]
-# Keep Rust-side Tauri crates on the 2.11/2.6 minor lines that the JS packages
-# in app/package.json are intentionally pinned to. Cargo's default caret ranges
-# can drift to newer minors and then `tauri build` rejects the mismatch.
-tauri-build = { version = "~2.6.3", features = [] }
+# Keep the Rust Tauri stack and the JS bridge on compatible minor versions.
+# Cargo's default caret ranges can drift and cause `tauri build` to reject
+# mismatched Rust and JavaScript packages.
+tauri-build = { version = "~2.7.6", features = [] }
 serde_json = "1.0.151"
 base64 = "0.22"
 url = "2.5.8"
@@ -42,7 +42,7 @@ url = "2.5.8"
 tempfile = "3"
 flate2 = "1"
 tar = "0.4"
-tauri = { version = "~2.11.5", default-features = false, features = [
+tauri = { version = "~2.12.7", default-features = false, features = [
     "wry",
     "compression",
     "common-controls-v6",
@@ -51,10 +51,11 @@ tauri = { version = "~2.11.5", default-features = false, features = [
     "image-png",
     "devtools",
 ] }
-tauri-utils = "~2.9.3"
+tauri-utils = "~2.10.4"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-store = "2.4.4"
-tauri-plugin-updater = "~2.10.1"
+tauri-plugin-updater = "~2.14.1"
+minisign-verify = "0.2.5"
 tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-cli = "~2.4.1"
 # IMPORTANT: Tauri CLI enforces that the JS package (@tauri-apps/plugin-dialog)
@@ -81,7 +82,7 @@ enigo = "0.6.1"
 arboard = "3.6.1"
 
 # Async runtime
-tokio = { version = "1.53.1", features = ["rt", "sync", "time", "net", "io-util"] }
+tokio = { version = "1.53.1", features = ["rt", "sync", "time", "net", "io-util", "fs"] }
 tokio-util = { version = "0.7.19", features = ["rt"] }  # CancellationToken
 
 # Settings and history
@@ -128,13 +129,14 @@ base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Zip archive creation (diagnostics export)
-zip = { version = "8.5.1", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
 # Async utilities
 async-trait = "0.1"
 
 # Lock-free queues (used to avoid allocations in realtime audio callbacks)
 crossbeam-queue = "0.3"
+crossbeam-channel = "0.5"
 
 # Error handling
 thiserror = "2.0"
@@ -200,7 +202,7 @@ keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-r
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["test-util"] }
-tauri = { version = "~2.11.5", default-features = false, features = ["test"] }
+tauri = { version = "~2.12.7", default-features = false, features = ["test"] }
 wiremock = "0.6.5"
 
 # Retain useful line information while avoiding the link-time and disk cost of

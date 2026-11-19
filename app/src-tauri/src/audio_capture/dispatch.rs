@@ -6,6 +6,7 @@ use std::sync::atomic::AtomicUsize;
 
 #[derive(Debug, Default)]
 pub(super) struct CaptureFence {
+    stream_failed: AtomicBool,
     generation: AtomicU64,
     state: AtomicU64,
     pending: AtomicUsize,
@@ -14,6 +15,20 @@ pub(super) struct CaptureFence {
 }
 
 impl CaptureFence {
+    #[cfg(target_os = "linux")]
+    pub(super) fn fail_stream(&self) {
+        self.stream_failed.store(true, Ordering::SeqCst);
+        self.fail_latest();
+    }
+    pub(super) fn stream_failed(&self) -> bool {
+        self.stream_failed.load(Ordering::SeqCst)
+    }
+    pub(super) fn fail_latest(&self) {
+        self.fail(self.generation.load(Ordering::SeqCst).saturating_sub(1));
+    }
+    pub(super) fn latest_failed(&self) -> bool {
+        self.failed(self.generation.load(Ordering::SeqCst).saturating_sub(1))
+    }
     pub(super) fn begin(&self) -> u64 {
         let epoch = self.generation.fetch_add(2, Ordering::SeqCst) + 1;
         self.state.store(epoch, Ordering::SeqCst);
@@ -38,7 +53,7 @@ impl CaptureFence {
         }
     }
     pub(super) fn failed(&self, epoch: u64) -> bool {
-        epoch != 0 && self.failed.load(Ordering::SeqCst) == epoch
+        epoch != 0 && (self.stream_failed() || self.failed.load(Ordering::SeqCst) == epoch)
     }
     pub(super) fn drain(&self, timeout: std::time::Duration) -> bool {
         let start = std::time::Instant::now();
@@ -84,13 +99,18 @@ pub(super) struct CapturedChunk {
 
 #[derive(Clone)]
 pub(super) struct CaptureDispatch {
+    pub(super) consumer: std::thread::Thread,
     pub(super) queue: Arc<ArrayQueue<CapturedChunk>>,
     pub(super) pool: Arc<ArrayQueue<Vec<f32>>>,
     pub(super) fence: Arc<CaptureFence>,
 }
 
 impl CaptureDispatch {
+    pub(super) fn fail_current(&self) {
+        self.fence.fail(self.fence.state.load(Ordering::SeqCst));
+    }
     pub(super) fn enqueue<T: Copy>(&self, data: &[T], convert: fn(T) -> f32) {
+        crate::runtime_diagnostics::audio_callback(self.queue.len());
         let _callback = CountPermit::new(&self.fence.callbacks);
         let epoch = self.fence.state.load(Ordering::SeqCst);
         let permit = if epoch & 1 != 0 {
@@ -101,6 +121,9 @@ impl CaptureDispatch {
         };
         let Some(mut samples) = self.pool.pop() else {
             self.fence.fail(epoch);
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioPoolExhausted,
+            ));
             return;
         };
         samples.clear();
@@ -112,8 +135,13 @@ impl CaptureDispatch {
         };
         if let Err(mut chunk) = self.queue.push(chunk) {
             self.fence.fail(epoch);
+            crate::runtime_diagnostics::record(crate::runtime_diagnostics::Event::Failure(
+                crate::runtime_diagnostics::Failure::AudioQueueOverflow,
+            ));
             chunk.samples.clear();
             let _ = self.pool.push(std::mem::take(&mut chunk.samples));
+        } else {
+            self.consumer.unpark();
         }
     }
 }
@@ -149,11 +177,33 @@ mod tests {
             pool.push(Vec::with_capacity(8)).unwrap();
         }
         CaptureDispatch {
+            consumer: std::thread::current(),
             pool,
             queue: Arc::new(ArrayQueue::new(1)),
             fence: Arc::new(CaptureFence::default()),
         }
     }
+    #[test]
+    fn enqueue_before_consumer_parks_retains_the_wake_and_the_first_chunk() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            // Force the missed-wakeup window deterministically: the enqueue
+            // completes before park, with no intervening library calls that
+            // could consume the thread's token. Native tests use real producers.
+            let d = dispatch(1);
+            let epoch = d.fence.begin();
+            d.enqueue(&[0.25, -0.5], std::convert::identity);
+            std::thread::park();
+            let chunk = d.queue.pop().unwrap();
+            assert_eq!(chunk.epoch, epoch);
+            tx.send(chunk.samples).unwrap();
+        });
+        let received = rx.recv_timeout(std::time::Duration::from_secs(3));
+        worker.thread().unpark();
+        worker.join().unwrap();
+        assert_eq!(received.unwrap(), [0.25, -0.5]);
+    }
+
     #[test]
     fn full_queues_and_empty_pools_fail_only_the_owned_recording_without_reordering() {
         for empty_pool in [false, true] {

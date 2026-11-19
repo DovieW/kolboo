@@ -11,9 +11,10 @@ export type EmailCodeSignInActions = {
     cancel: () => Promise<unknown>;
 };
 
-export function EmailCodeSignIn({ actions }: { actions: EmailCodeSignInActions }) {
+export function EmailCodeSignIn({ actions, initialEmail = "" }: { actions: EmailCodeSignInActions; initialEmail?: string }) {
     const [mode, setMode] = useState<"email" | "code" | "password">("email");
-    const [email, setEmail] = useState("");
+    const [enteredEmail, setEmail] = useState<string | null>(null);
+    const email = enteredEmail ?? initialEmail;
     const [code, setCode] = useState("");
     const [password, setPassword] = useState("");
     const [busy, setBusy] = useState(false);
@@ -63,34 +64,35 @@ export function EmailCodeSignIn({ actions }: { actions: EmailCodeSignInActions }
     function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         const address = email.trim();
+        setEmail(address);
         if (mode === "email") void perform(() => actions.requestCode(address), sent);
         else if (mode === "code") void perform(() => actions.verifyCode(address, code.trim()), () => setCode(""));
         else void perform(() => actions.passwordSignIn(address, password), () => setPassword(""));
     }
     const seconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
     return (
-        <Box component="form" onSubmit={submit}>
+        <Box component="form" onSubmit={submit} maw={440} w="100%">
             <Stack gap="md">
                 {error && <Alert color="red" role="alert">{error}</Alert>}
                 {notice && <Text size="sm" role="status">{notice}</Text>}
                 {mode === "code" ? <>
                     <Text size="sm" c="dimmed">Code sent to {email.trim()}</Text>
                     <TextInput label="Email code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={code} onChange={event => setCode(event.currentTarget.value)} required disabled={busy} autoFocus />
-                </> : <TextInput label="Email" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.currentTarget.value)} required disabled={busy} />}
+                </> : <TextInput label="Email" type="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={event => setEmail(event.currentTarget.value)} required withAsterisk={false} disabled={busy} />}
                 {mode === "password" && <>
                     <PasswordInput label="Password" autoComplete="current-password" value={password} onChange={event => setPassword(event.currentTarget.value)} required disabled={busy} />
                     <Button type="button" size="compact-sm" variant="subtle" disabled={busy || !email.trim()} onClick={() => void perform(() => actions.resetPassword(email.trim()), () => setNotice("Check your email for a password reset link."))}>Forgot password?</Button>
                 </>}
-                <Button type="submit" fullWidth loading={busy}>{mode === "email" ? "Continue with email" : mode === "code" ? "Verify code" : "Sign in"}</Button>
+                <Button type="submit" fullWidth loading={busy}>{mode === "email" ? "Send sign-in code" : mode === "code" ? "Verify code" : "Sign in"}</Button>
                 {mode === "code" ? <Group justify="space-between">
                     <Button type="button" variant="subtle" size="compact-sm" disabled={busy || seconds > 0} onClick={() => void perform(() => actions.requestCode(email.trim()), sent)}>{seconds > 0 ? `Resend in ${seconds}s` : "Resend code"}</Button>
                     <Button type="button" variant="subtle" size="compact-sm" onClick={reset}>{busy ? "Cancel" : "Change email"}</Button>
-                </Group> : <Group justify="center">
+                </Group> : <Group justify="flex-start" gap="xs">
                     <Button type="button" variant="subtle" color="gray" size="compact-sm" disabled={busy} onClick={() => { setMode(mode === "password" ? "email" : "password"); setPassword(""); setError(null); setNotice(null); }}>{mode === "password" ? "Use email code" : "Use password"}</Button>
                     <Button type="button" variant="subtle" color="gray" size="compact-sm" disabled={busy} onClick={() => void perform(actions.browserSignIn, () => setPassword(""))}>Use browser</Button>
                 </Group>}
                 {busy && mode !== "code" && <Button type="button" variant="subtle" size="compact-sm" onClick={reset}>Cancel</Button>}
-                {mode === "email" && <Text size="xs" c="dimmed" ta="center">New accounts are invite-only. Your own API keys work without an account.</Text>}
+                {mode === "email" && <Text size="xs" c="dimmed">New accounts are invite-only. Your own API keys work without an account.</Text>}
             </Stack>
         </Box>
     );

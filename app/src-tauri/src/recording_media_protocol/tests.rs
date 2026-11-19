@@ -1,6 +1,157 @@
 use super::*;
 
 #[test]
+fn exhausted_thread_resources_fail_startup_instead_of_returning_a_dead_url() {
+    let directory = tempfile::tempdir().unwrap();
+    let result = RecordingMediaServer::start_with_io(
+        directory.path().into(),
+        WorkerIo {
+            spawn: |_| {
+                Err(std::io::Error::other(
+                    "synthetic thread resource exhaustion",
+                ))
+            },
+            ..NATIVE_IO
+        },
+    );
+    assert!(matches!(result, Err(message) if message.contains("workers could not start")));
+    static STARTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    fn partly_available(task: Box<dyn FnOnce() + Send>) -> std::io::Result<JoinHandle<()>> {
+        if STARTS.fetch_add(1, Ordering::SeqCst) == 1 {
+            Err(std::io::Error::other("synthetic partial pool failure"))
+        } else {
+            spawn_request(task)
+        }
+    }
+    assert!(RecordingMediaServer::start_with_io(
+        directory.path().into(),
+        WorkerIo {
+            spawn: partly_available,
+            ..NATIVE_IO
+        }
+    )
+    .is_err());
+    assert_eq!(STARTS.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn unavailable_socket_descriptors_close_requests_and_listener_failure_releases_workers() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = RecordingMediaServer::start_with_io(
+        directory.path().into(),
+        WorkerIo {
+            duplicate: |_| Err(std::io::Error::other("synthetic descriptor exhaustion")),
+            ..NATIVE_IO
+        },
+    )
+    .unwrap();
+    let mut client = TcpStream::connect(server.address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    assert_eq!(client.read(&mut [0; 1]).unwrap(), 0);
+    assert!(server
+        .connections
+        .lock()
+        .unwrap()
+        .iter()
+        .all(Option::is_none));
+    drop(server);
+
+    let server = RecordingMediaServer::start_with_io(
+        directory.path().into(),
+        WorkerIo {
+            accept: |_| Err(std::io::Error::other("synthetic accept failure")),
+            ..NATIVE_IO
+        },
+    )
+    .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server
+        .worker
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .is_finished()
+    {
+        assert!(
+            Instant::now() < deadline,
+            "failed accept must release its fixed worker pool"
+        );
+        thread::yield_now();
+    }
+    drop(server);
+}
+
+#[test]
+fn poisoned_connection_metadata_does_not_disable_playback_or_shutdown() {
+    let directory = tempfile::tempdir().unwrap();
+    let server = RecordingMediaServer::start(directory.path().into()).unwrap();
+    let connections = server.connections.clone();
+    assert!(thread::spawn(move || {
+        let _guard = connections.lock().unwrap();
+        panic!("synthetic failure outside connection metadata mutation");
+    })
+    .join()
+    .is_err());
+    let mut client = TcpStream::connect(server.address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    client.write_all(b"GET /missing HTTP/1.1\r\n\r\n").unwrap();
+    let mut reply = String::new();
+    client.read_to_string(&mut reply).unwrap();
+    assert!(reply.starts_with("HTTP/1.1 404"));
+    drop(server);
+}
+
+#[test]
+fn absolute_header_deadline_is_not_extended_by_available_bytes() {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (stream, _) = listener.accept().unwrap();
+    client.write_all(b"still sending bytes").unwrap();
+    let mut expired = HeaderReader {
+        stream: &stream,
+        deadline: Instant::now(),
+    };
+    assert_eq!(
+        expired.read(&mut [0; 1]).unwrap_err().kind(),
+        std::io::ErrorKind::TimedOut
+    );
+}
+
+#[test]
+fn stalled_clients_have_a_fixed_worker_budget_and_shutdown_closes_them() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = RecordingMediaServer::start(temp.path().into()).unwrap();
+    let mut clients = Vec::new();
+    for _ in 0..MAX_CONNECTIONS {
+        clients.push(TcpStream::connect(server.address).unwrap());
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while server.connections.lock().unwrap().iter().flatten().count() < MAX_CONNECTIONS {
+        assert!(Instant::now() < deadline);
+        thread::yield_now();
+    }
+    for _ in 0..MAX_CONNECTIONS + 1 {
+        clients.push(TcpStream::connect(server.address).unwrap());
+    }
+    assert_eq!(server.connections.lock().unwrap().len(), MAX_CONNECTIONS);
+    drop(server);
+    for mut client in clients {
+        client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        match client.read(&mut [0; 1]) {
+            Ok(size) => assert_eq!(size, 0),
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset),
+        }
+    }
+}
+
+#[test]
 fn failed_shutdown_wakeup_does_not_join_a_blocked_listener() {
     let temp = tempfile::tempdir().unwrap();
     let mut server = RecordingMediaServer::start(temp.path().to_owned()).unwrap();

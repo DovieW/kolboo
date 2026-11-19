@@ -345,6 +345,13 @@ export const tauriAPI = {
 		return invoke("set_quick_ask_escape_enabled", { enabled });
 	},
 
+	cancelQuickAsk(requestId: string, dismiss = false): Promise<void> {
+		return invoke("cancel_quick_ask", {
+			requestId,
+			...(dismiss ? { dismiss: true } : {}),
+		});
+	},
+
 	async startDragging(): Promise<void> {
 		const window = getCurrentWindow();
 		return window.startDragging();

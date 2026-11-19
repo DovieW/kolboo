@@ -7,12 +7,67 @@
 
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tracing::Instrument;
 
 use crate::events;
 use crate::pipeline::{PipelineState, SharedPipeline};
 use crate::PipelineStateEvent;
+
+/// Own one bounded-lifetime watcher per capture epoch. Failures go through the
+/// normal stop/finalization path, including audio-side-effect restoration and
+/// incomplete-input refusal, not a second transcription or paste path.
+pub(crate) fn spawn_capture_health_monitor(app: AppHandle, pipeline: SharedPipeline, epoch: u64) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match pipeline.capture_failed_for_epoch(epoch) {
+                None => return,
+                Some(false) => tokio::time::sleep(Duration::from_millis(250)).await,
+                Some(true) => {
+                    let callback_app = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        handle_capture_failure(&callback_app, &pipeline, epoch)
+                    });
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn handle_capture_failure(app: &AppHandle, pipeline: &SharedPipeline, epoch: u64) {
+    if pipeline.capture_failed_for_epoch(epoch) != Some(true) {
+        return;
+    }
+    if pipeline.is_history_only_recording() {
+        if let Err(error) = pipeline.recording_progress() {
+            crate::recording_completion::emit_pipeline_error(app, &error.to_string(), None);
+            crate::set_escape_cancel_shortcut_enabled(app, false);
+        }
+    } else {
+        let state = app.state::<crate::state::AppState>();
+        crate::stop_recording(
+            app,
+            &state,
+            false,
+            crate::audio::AudioCue::from_str("kolboo"),
+            &app.try_state::<crate::audio_mute::AudioMuteManager>(),
+            crate::core::recording::get_playing_audio_handling(app),
+            "Audio capture failure",
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn native_assert_stale_capture_failure(
+    app: &AppHandle,
+    pipeline: &SharedPipeline,
+    epoch: u64,
+) {
+    assert_eq!(pipeline.state(), PipelineState::Recording);
+    handle_capture_failure(app, pipeline, epoch);
+    assert_eq!(pipeline.state(), PipelineState::Recording);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecordingPhaseWatcherBundle {

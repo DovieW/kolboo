@@ -230,6 +230,43 @@ end_of_record`,
 		]);
 	});
 
+	it("distinguishes literal-only Rust event declarations from executable or unknown source", () => {
+		const file = "app/src-tauri/src/events.rs";
+		const changed = new Map([[file, new Set([2])]]);
+		const evaluate = (source: unknown) =>
+			evaluatePatchCoverage(changed, new Map(), new Map([[file, source]]));
+		for (const source of [
+			'// event names\npub const EVENT_START: &str = "start";\n',
+			'const EVENT: &\'static str =\n "line\\n \\"quote\\" https://example.test";\n',
+			'pub(crate) const EVENT: &str = "data {not executable}";\n',
+		])
+			expect(evaluate(source).failures).toEqual([]);
+		for (const source of [
+			undefined,
+			"",
+			"// comments only\n",
+			"pub const EVENT: &str = compute_name();\n",
+			'pub const EVENT: &str = "event";\nfn executable() {}\n',
+			'pub const EVENT: &str = { panic!("side effect") };\n',
+			'#[cfg(windows)]\npub const EVENT: &str = "event";\n',
+			'pub const EVENT: &str = concat!("a", "b");\n',
+		])
+			expect(evaluate(source).failures).toEqual([
+				{ filePath: file, missingReport: true },
+			]);
+		const report = parseLcov(
+			`SF:${file}\nDA:2,0\nFN:2,_Rexecutable\nFNDA:0,_Rexecutable\nend_of_record`,
+			{ sourceRoot: repoRoot, repoRoot },
+		);
+		expect(
+			evaluatePatchCoverage(
+				changed,
+				report,
+				new Map([[file, 'pub const EVENT: &str = "event";\n']]),
+			).failures[0].uncoveredFunctions,
+		).toEqual([2]);
+	});
+
 	describe("approved Tauri metadata exception", () => {
 		const file = "app/src-tauri/src/commands/history.rs";
 		const source =

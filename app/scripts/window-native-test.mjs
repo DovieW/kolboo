@@ -38,21 +38,46 @@ if (!inside) {
 		"unshare",
 		"keyctl",
 		"python3",
+		"pulseaudio",
+		"pactl",
+		"parec",
 	]) {
 		if (!commandExists(tool, env)) {
 			console.error(
-				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils",
+				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils ffmpeg",
 			);
 			process.exit(1);
 		}
 	}
+	// Match the absolute helper path used by production, not a PATH shim.
+	const ffmpegExecutable = path.join("/usr", "bin", "ffmpeg");
+	const ffmpeg = spawnSync(ffmpegExecutable, ["-hide_banner", "-devices"], {
+		env,
+		encoding: "utf8",
+		timeout: 5000,
+	});
+	if (
+		ffmpeg.status !== 0 ||
+		!/^\s*D[ E]\s+pulse\b/mu.test(ffmpeg.stdout ?? "")
+	) {
+		console.error(
+			"Native capture tests require /usr/bin/ffmpeg with PulseAudio input support: sudo apt-get install ffmpeg",
+		);
+		process.exit(1);
+	}
 	const directory = mkdtempSync(path.join(tmpdir(), "kolboo-window-test-"));
 	for (const folder of ["data", "config", "cache", "runtime"])
 		mkdirSync(path.join(directory, folder), { mode: 0o700 });
+	mkdirSync(path.join(directory, "Downloads"), { mode: 0o700 });
+	writeFileSync(
+		path.join(directory, "config", "user-dirs.dirs"),
+		`XDG_DOWNLOAD_DIR="${path.join(directory, "Downloads")}"\n`,
+		{ mode: 0o600 },
+	);
 	// Native callback tests use ALSA's null PCM, never the operator's microphone.
 	writeFileSync(
 		path.join(directory, "asound.conf"),
-		"pcm.!default { type null }\n",
+		"ctl.hw { @args [ CARD ] @args.CARD { type string default 0 } type hw card $CARD }\npcm.!default { type null }\npcm.kolboo_alsa_fixture { type null hint { show on description KolbooTestALSA ioid Input } }\n",
 	);
 	let namespaceRunner = ["unshare", "--user", "--map-current-user", "--"];
 	if (env.KOLBOO_NATIVE_USER_NAMESPACE_RUNNER) {
@@ -102,6 +127,7 @@ if (!inside) {
 				KOLBOO_NATIVE_WINDOW_TEST: "1",
 				KOLBOO_NATIVE_WINDOW_DIRECTORY: directory,
 				ALSA_CONFIG_PATH: path.join(directory, "asound.conf"),
+				PULSE_SERVER: `unix:${path.join(directory, "runtime", "pulse-test")}`,
 				NO_AT_BRIDGE: "1",
 				GDK_BACKEND: "x11",
 				WINIT_UNIX_BACKEND: "x11",
@@ -143,7 +169,28 @@ const manager = spawn("openbox", ["--sm-disable"], {
 	env,
 	stdio: ["ignore", "ignore", "inherit"],
 });
+const pulse = spawn(
+	"pulseaudio",
+	[
+		"--daemonize=no",
+		"--use-pid-file=no",
+		"--exit-idle-time=-1",
+		"--disable-shm=yes",
+		"-n",
+		`--load=module-native-protocol-unix socket=${path.join(env.XDG_RUNTIME_DIR, "pulse-test")} auth-anonymous=1`,
+		"--load=module-null-source source_name=kolboo_test_a description=KolbooTestA",
+		"--load=module-null-source source_name=kolboo_test_b description=KolbooTestB",
+		"--load=module-null-sink sink_name=kolboo_test_output",
+	],
+	{ env, stdio: ["ignore", "ignore", "inherit"] },
+);
 try {
+	const pulseDeadline = Date.now() + 10000;
+	while (spawnSync("pactl", ["info"], { env, stdio: "ignore" }).status !== 0) {
+		if (pulse.exitCode !== null || Date.now() >= pulseDeadline)
+			throw new Error("Isolated sound server did not start");
+		await new Promise((resolve) => setTimeout(resolve, 30));
+	}
 	const deadline = Date.now() + 10000;
 	for (;;) {
 		const probe = spawnSync("xprop", ["-root", "_NET_SUPPORTING_WM_CHECK"], {
@@ -189,6 +236,66 @@ try {
 				main_window_close_behavior: "exit_program",
 			}),
 		);
+		const nativeRunEnv = {
+			...env,
+			CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:
+				env.KOLBOO_NATIVE_WINDOW_RUNNER ??
+				"unshare --user --map-current-user --net --",
+		};
+		// CLI initialization must not require a main window or an account. Both
+		// cases execute the actual binary in the same private offline fixture.
+		for (const [cliArgs, expectedCode] of [
+			[["settings", "get", "--key", "main_window_show_on_launch"], 0],
+			[["--"], 2],
+		]) {
+			const cli = spawnSync(
+				"cargo",
+				[
+					"llvm-cov",
+					"run",
+					"--no-report",
+					"--bin",
+					"kolboo",
+					"--manifest-path",
+					path.resolve("src-tauri/Cargo.toml"),
+					"--",
+					...cliArgs,
+				],
+				{
+					env: nativeRunEnv,
+					cwd: directory,
+					encoding: "utf8",
+					timeout: 120000,
+				},
+			);
+			if (cli.status !== expectedCode)
+				throw new Error(`Offline CLI ${cliArgs[0]} returned ${cli.status}`);
+			const start = cli.stdout.search(/\{\s*"success"\s*:/u);
+			if (start < 0)
+				throw new Error("Offline CLI omitted its structured result");
+			const response = JSON.parse(cli.stdout.slice(start));
+			if (
+				response.success !== (expectedCode === 0) ||
+				response.code !== expectedCode
+			)
+				throw new Error("Offline CLI result did not match its exit status");
+			if (expectedCode === 0 && response.data?.value !== true)
+				throw new Error("Offline CLI did not read the persisted setting");
+			if (expectedCode === 2 && !response.message?.includes("no subcommand"))
+				throw new Error(
+					"Empty CLI invocation did not explain the missing subcommand",
+				);
+		}
+		// A malformed non-secret setting must produce doctor diagnostics without
+		// preventing ordinary GUI startup and clean shutdown.
+		const startupSettings = JSON.parse(
+			readFileSync(path.join(data, "settings.json"), "utf8"),
+		);
+		startupSettings.quick_ask_hold_hotkey = 7;
+		writeFileSync(
+			path.join(data, "settings.json"),
+			JSON.stringify(startupSettings),
+		);
 		const log = openSync(path.join(directory, "startup.log"), "w");
 		const startup = spawn(
 			"cargo",
@@ -202,12 +309,7 @@ try {
 				path.resolve("src-tauri/Cargo.toml"),
 			],
 			{
-				env: {
-					...env,
-					CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER:
-						env.KOLBOO_NATIVE_WINDOW_RUNNER ??
-						"unshare --user --map-current-user --net --",
-				},
+				env: nativeRunEnv,
 				cwd: directory,
 				stdio: ["ignore", log, log],
 			},
@@ -261,6 +363,23 @@ try {
 				}),
 			]);
 			if (exited !== 0) throw new Error(`Native startup exited with ${exited}`);
+			const checkpoint = JSON.parse(
+				readFileSync(path.join(data, "diagnostics", "state.json"), "utf8"),
+			);
+			if (
+				checkpoint.phase !== "idle" ||
+				checkpoint.event.kind !== "shutdown" ||
+				checkpoint.clean_shutdown !== true
+			)
+				throw new Error(
+					"Orderly startup/exit must persist an idle, clean checkpoint",
+				);
+			if (
+				!readFileSync(path.join(directory, "startup.log"), "utf8").includes(
+					"Settings doctor: found",
+				)
+			)
+				throw new Error("Malformed private-fixture setting was not diagnosed");
 		} finally {
 			clearTimeout(exitTimer);
 			if (smoke && smoke.exitCode === null) smoke.kill("SIGTERM");
@@ -268,5 +387,6 @@ try {
 		}
 	}
 } finally {
+	pulse.kill("SIGTERM");
 	manager.kill("SIGTERM");
 }

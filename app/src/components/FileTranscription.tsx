@@ -15,6 +15,8 @@ import { Check, FileAudio, FolderOpen, History, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { formatErrorMessage } from "../lib/formatError";
 import {
+	fixedSttLanguage,
+	FIXED_HEBREW_NOTICE,
 	normalizeSttLanguage,
 	sttLanguageOptionsForModel,
 } from "../lib/sttLanguages";
@@ -70,12 +72,19 @@ export function FileTranscription({
 		enabled: active,
 		refetchInterval: 1000,
 	});
+	const fixedLanguage = fixedSttLanguage(
+		preferences?.meeting_model?.provider,
+		preferences?.meeting_model?.model,
+	);
 	const job = useMutation({
 		mutationFn: async () => {
 			if (recoveryId) return recordingControlsAPI.recover(recoveryId);
 			if (!path || !preferences)
 				throw new Error("Choose audio and transcription options first");
-			return recordingControlsAPI.importFile(path, preferences);
+			return recordingControlsAPI.importFile(path, {
+				...preferences,
+				language_hint: fixedLanguage ?? preferences.language_hint,
+			});
 		},
 		onSuccess: (result) => {
 			setRecoveryId(result.recovery_id);
@@ -235,29 +244,32 @@ export function FileTranscription({
 								});
 							}}
 						/>
-						{preferences && (
-							<Select
-								label="Language hint"
-								aria-label="File language hint"
-								description="Auto-detect unless you choose a hint. Retries keep this choice."
-								data={sttLanguageOptionsForModel(
-									preferences.meeting_model?.provider,
-									preferences.meeting_model?.model,
-									preferences.language_hint,
-								)}
-								value={preferences.language_hint ?? "auto"}
-								allowDeselect={false}
-								disabled={disabled || !!recoveryId || complete}
-								onChange={(value) =>
-									setPreferences({
-										...preferences,
-										mode: "meeting",
-										meeting_model: preferences.meeting_model,
-										language_hint: normalizeSttLanguage(value),
-									})
-								}
-							/>
-						)}
+						{preferences &&
+							(fixedLanguage ? (
+								<Text size="sm">{FIXED_HEBREW_NOTICE}</Text>
+							) : (
+								<Select
+									label="Language hint"
+									aria-label="File language hint"
+									description="Auto-detect unless you choose a hint. Retries keep this choice."
+									data={sttLanguageOptionsForModel(
+										preferences.meeting_model?.provider,
+										preferences.meeting_model?.model,
+										preferences.language_hint,
+									)}
+									value={preferences.language_hint ?? "auto"}
+									allowDeselect={false}
+									disabled={disabled || !!recoveryId || complete}
+									onChange={(value) =>
+										setPreferences({
+											...preferences,
+											mode: "meeting",
+											meeting_model: preferences.meeting_model,
+											language_hint: normalizeSttLanguage(value),
+										})
+									}
+								/>
+							))}
 						{initial.isError && !preferences && (
 							<Alert color="red">
 								Couldn’t load transcription options.{" "}

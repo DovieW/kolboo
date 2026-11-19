@@ -1,11 +1,12 @@
 use rodio::buffer::SamplesBuffer;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Source};
+use rodio::{Decoder, Source};
 use std::io::Cursor;
 use std::num::{NonZeroU16, NonZeroU32};
-use std::sync::Mutex;
-use std::sync::OnceLock;
-use std::thread;
 use std::time::Duration;
+
+mod cue_output;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use cue_output::tests::native_output as cue_output_native_test;
 
 /// Types of sounds that can be played
 #[derive(Debug, Clone, Copy)]
@@ -42,34 +43,6 @@ impl AudioCue {
 // Embed audio files at compile time
 const START_SOUND: &[u8] = include_bytes!("assets/start.mp3");
 const STOP_SOUND: &[u8] = include_bytes!("assets/stop.mp3");
-
-/// Global cue output stream.
-///
-/// Why: rapidly opening/closing default output streams (especially on Windows/WASAPI)
-/// can cause audible pops/cut-offs when the user starts/stops recordings quickly.
-/// Keeping a single stream alive and feeding the mixer tends to be much more stable.
-static CUE_STREAM: OnceLock<Mutex<Option<MixerDeviceSink>>> = OnceLock::new();
-
-fn cue_stream() -> Result<
-    std::sync::MutexGuard<'static, Option<MixerDeviceSink>>,
-    Box<dyn std::error::Error + Send + Sync>,
-> {
-    let cell = CUE_STREAM.get_or_init(|| Mutex::new(None));
-    let mut guard = cell.lock().map_err(|_| "Cue stream mutex poisoned")?;
-    if guard.is_none() {
-        *guard = Some(DeviceSinkBuilder::open_default_sink()?);
-    }
-    Ok(guard)
-}
-
-fn reset_cue_stream() {
-    if let Some(cell) = CUE_STREAM.get() {
-        if let Ok(mut guard) = cell.lock() {
-            // Dropping the old stream forces the next playback to re-open the default device.
-            *guard = None;
-        }
-    }
-}
 
 /// Best-effort estimate of how long a cue will be audible.
 ///
@@ -111,69 +84,16 @@ pub fn estimated_duration(sound_type: SoundType, cue: AudioCue) -> Duration {
 
 /// Play a sound effect (non-blocking)
 pub fn play_sound(sound_type: SoundType, cue: AudioCue) {
-    thread::spawn(move || {
-        if let Err(e) = play_sound_blocking(sound_type, cue) {
-            log::warn!("Failed to play sound: {}", e);
-        }
-    });
+    // Cues are best-effort. Saturation must not block UI work or create a
+    // second log flood; the owner reports actual device failures once.
+    let _ = cue_output::play(sound_type, cue, false);
 }
 
 pub(crate) fn play_sound_blocking(
     sound_type: SoundType,
     cue: AudioCue,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Some devices/backends take a moment to "wake" after being idle.
-    // Keep a small tail pad so cues don't clip (especially the first playback after idle).
-    const TAIL_PAD: Duration = Duration::from_millis(250);
-
-    match cue {
-        // Preserve the existing cue exactly (legacy MP3 assets).
-        AudioCue::Legacy => {
-            let sound_data = match sound_type {
-                SoundType::RecordingStart => START_SOUND,
-                SoundType::RecordingStop => STOP_SOUND,
-            };
-            let cursor = Cursor::new(sound_data);
-            let decoded = Decoder::new(cursor)?.amplify(0.3);
-
-            let duration = decoded
-                .total_duration()
-                .unwrap_or(Duration::from_millis(500));
-
-            {
-                let guard = cue_stream().or_else(|e| {
-                    // If the default device is in a bad state, a reset can help.
-                    // (Users have reported that switching the Windows default device "fixes" it,
-                    // which is effectively a reset at the OS level.)
-                    log::warn!("Failed to open cue stream (will reset and retry once): {e}");
-                    reset_cue_stream();
-                    cue_stream()
-                })?;
-                if let Some(stream) = guard.as_ref() {
-                    stream.mixer().add(decoded);
-                }
-            }
-            thread::sleep(duration + TAIL_PAD);
-        }
-
-        // New cues are synthesized at runtime (no extra audio assets needed).
-        _ => {
-            let (seq, duration) = build_synth_cue_source(sound_type, cue);
-            {
-                let guard = cue_stream().or_else(|e| {
-                    log::warn!("Failed to open cue stream (will reset and retry once): {e}");
-                    reset_cue_stream();
-                    cue_stream()
-                })?;
-                if let Some(stream) = guard.as_ref() {
-                    stream.mixer().add(seq);
-                }
-            }
-            thread::sleep(duration + TAIL_PAD);
-        }
-    }
-
-    Ok(())
+    cue_output::play(sound_type, cue, true).map_err(Into::into)
 }
 
 fn build_synth_cue_source(sound_type: SoundType, cue: AudioCue) -> (SamplesBuffer, Duration) {

@@ -141,6 +141,31 @@ The refreshed debug-profile Debian package built in 50.3 seconds; its contents
 include both the visible Kolboo launcher and hidden matching portal identity.
 It is an installable development package, not a published release artifact.
 
+## Resident-window lifecycle — 2026-11-17
+
+Tray-only startup no longer creates a hidden main webview. First-run onboarding
+and the Show on launch preference still open it; tray activation, the Show Window
+shortcut and second-instance activation share the same single-flight creation
+path. Each creation uses the configured window options and installs both geometry
+persistence and close behavior. Close-to-tray still destroys the main page, as it
+did before this change; the Exit preference exits on recreated windows too.
+
+Only the recording overlay is preloaded, preserving the recording hotkey's warm
+UI and early pipeline events. The preset hover page is created on first use,
+waits for a subscribed frontend before showing, and stops foreground/profile and
+session-lock polling while hidden. Its cached page is retained after first use;
+this is not an idle-unload policy. Quick Ask is also created on demand and owns
+request-scoped replay/cancellation so cold-page startup cannot discard a fast
+answer. Native utility construction stays off synchronous Windows event handlers;
+Linux GTK stacking configuration is dispatched back to the GUI thread.
+
+Tauri's background-throttling setting does not implement suspension on Linux or
+Windows. Resource improvements therefore come from avoiding unused pages and
+hidden work, not from claiming browser suspension on those platforms. Native
+acceptance should include tray-only/first-run launch, repeated open/close, F3
+recording/error/retry, hover enter/leave and preset selection, and cold Quick Ask
+streaming/dismissal across the supported monitor/DPI configurations.
+
 ## Main-window sizing and persistence — 2026-09-30
 
 The IdeaPad's main window was 1280 physical pixels wide while XSettings exposed

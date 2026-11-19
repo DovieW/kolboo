@@ -4,11 +4,28 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { licenseAPI } from "../tauri";
-import { useRequestLicenseEmailCode, useVerifyLicenseEmailCode } from "./license";
+import { useRequestLicenseEmailCode, useVerifyLicenseEmailCode, useRefreshLicenseEntitlement } from "./license";
 
 vi.mock("../tauri", () => ({ licenseAPI: {
-    requestEmailCode: vi.fn(), verifyEmailCode: vi.fn(),
+    requestEmailCode: vi.fn(), verifyEmailCode: vi.fn(), refreshEntitlement: vi.fn(),
 }, tauriAPI: {}, configAPI: {}, dataAPI: {}, llmAPI: {}, logsAPI: {}, recordingsAPI: {}, sttAPI: {} }));
+
+it("reloads persisted authentication and catalog state even when refresh rejects", async () => {
+    Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidations = vi.spyOn(client, "invalidateQueries").mockResolvedValue();
+    const root = createRoot(document.createElement("div"));
+    let refresh!: ReturnType<typeof useRefreshLicenseEntitlement>;
+    function Reader() { refresh = useRefreshLicenseEntitlement(); return null; }
+    try {
+        await act(async () => root.render(<QueryClientProvider client={client}><Reader /></QueryClientProvider>));
+        vi.mocked(licenseAPI.refreshEntitlement).mockRejectedValueOnce(new Error("Sign in again"));
+        await act(async () => { await expect(refresh.mutateAsync(false)).rejects.toThrow("Sign in again"); });
+        expect(invalidations.mock.calls.map(([options]) => options?.queryKey)).toEqual(expect.arrayContaining([
+            ["licenseState"], ["licenseAuthContext"], ["managedModels"],
+        ]));
+    } finally { await act(async () => root.unmount()); client.clear(); }
+});
 
 it("requests and verifies email codes through the adapter, invalidating account and managed access only on success", async () => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(desktop)]
 use std::sync::Mutex;
 
@@ -16,6 +16,19 @@ use crate::windows_uia::types::WindowsTextContextSource;
 
 #[derive(Default)]
 pub struct AppState {
+    /// Nonblocking ownership of on-demand native window construction. Never
+    /// wait for a creator: Wry may itself be waiting for the GUI thread.
+    pub main_window_creating: AtomicBool,
+    pub overlay_hover_creating: AtomicBool,
+    pub quick_ask_window_creating: AtomicBool,
+    /// One content-free failure report per window-creation/presentation episode.
+    pub main_window_failure_reported: AtomicBool,
+    pub overlay_hover_failure_reported: AtomicBool,
+    /// Requested hover visibility survives its first asynchronous page load.
+    pub overlay_hover_requested: AtomicBool,
+    /// Worker-only lock. GUI callbacks never take it: Wry native operations
+    /// synchronously dispatch back to that thread.
+    pub overlay_hover_lifecycle_lock: std::sync::Mutex<()>,
     /// Tracks if currently recording (for both toggle and hold modes)
     pub is_recording: AtomicBool,
     /// Monotonic token bumped every time we *show* the overlay window.
@@ -227,6 +240,36 @@ impl Default for QuickAskProbe {
 pub struct TrayKeepAlive {
     #[cfg(desktop)]
     pub tray: Mutex<Option<tauri::tray::TrayIcon<tauri::Wry>>>,
+    pub(crate) refresh: TrayRefresh,
+}
+
+/// Coalesce refresh notifications without keeping a lock across native GUI
+/// dispatch. The final handoff handles a notification racing worker shutdown.
+#[derive(Default)]
+pub(crate) struct TrayRefresh {
+    dirty: std::sync::atomic::AtomicBool,
+    running: std::sync::atomic::AtomicBool,
+}
+impl TrayRefresh {
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn is_running_for_test(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+    pub(crate) fn request(&self) -> bool {
+        self.dirty.store(true, Ordering::SeqCst);
+        !self.running.swap(true, Ordering::SeqCst)
+    }
+    pub(crate) fn begin(&self) {
+        self.dirty.store(false, Ordering::SeqCst);
+    }
+    pub(crate) fn finish(&self) -> bool {
+        self.running.store(false, Ordering::SeqCst);
+        self.dirty.load(Ordering::SeqCst)
+            && self
+                .running
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+    }
 }
 
 /// Backend-managed microphone test meter.

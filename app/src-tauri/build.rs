@@ -2,6 +2,34 @@
 mod public_config_validation;
 
 fn main() {
+    // HEAD usually names a branch: committing updates its ref, not HEAD itself.
+    // Ask Git for the paths so linked worktrees and packed refs work as well.
+    for name in ["HEAD", "refs", "packed-refs"] {
+        if let Ok(output) = std::process::Command::new("git")
+            .args(["rev-parse", "--git-path", name])
+            .output()
+        {
+            if output.status.success() {
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    String::from_utf8_lossy(&output.stdout).trim()
+                );
+            }
+        }
+    }
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+    {
+        let revision = String::from_utf8_lossy(&output.stdout);
+        let revision = revision.trim();
+        if output.status.success()
+            && revision.len() == 40
+            && revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            println!("cargo:rustc-env=KOLBOO_BUILD_REVISION={revision}");
+        }
+    }
     embed_public_cloud_config();
     // Ensure Cargo rebuilds the Windows resources (exe icon) when our icon assets change.
     // Without these, `build.rs` may not rerun and Windows can keep embedding the old icon.

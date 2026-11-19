@@ -29,6 +29,28 @@ Notes:
 
 ---
 
+## Managed ivritAI Hebrew Turbo
+
+When published by your Kolboo service, **ivritAI Hebrew Turbo** appears under
+**Kolboo Managed** for dictation, imported files, and meetings. Its provider ID
+is `ivritai`; the raw model ID is `ivrit-ai/whisper-large-v3-turbo`.
+It is batch transcription, not realtime. Selecting this Hebrew-only model
+automatically uses Hebrew; no separate language setting is needed. The language
+control explains this instead of offering incompatible hints. Your saved
+profile and meeting hints remain unchanged for multilingual models. Imported
+files snapshot Hebrew; meetings and older retry snapshots also resolve to Hebrew
+for this model, regardless of their saved hint. This is not a claim of tested
+Yiddish or mixed-language accuracy.
+
+This experimental route runs on Kolboo's resident GPU host and consumes your
+normal audio-second allowance. Availability depends on that host being awake
+and online. If it is warming, busy or offline, your recording is retained and
+the app does not silently switch providers. Failed uploads are not automatically
+replayed; use Retry explicitly because an interrupted response can follow actual
+processing. Only compatible app builds request
+this entry; older releases do not see an unusable choice. No model-host or
+Cloudflare credential is distributed with the app.
+
 ## Custom OpenAI-compatible providers
 
 In **Settings → Providers → Custom providers**, add a name, API base URL
@@ -74,6 +96,9 @@ They remain available under **Your models** for Managed accounts too.
   contains no keys.
 - Transcription, rewriting and ad-hoc LLM tools honor configured proxy/TLS settings,
   including manual proxy bypass rules and explicit No proxy mode.
+- Setup asks about proxy configuration before account/provider setup. “Set up proxy”
+  opens Settings → Network; “Continue setup guide” resumes onboarding afterward.
+  Selecting an empty Manual proxy opens an editable draft without activating it.
 - Removing a provider removes its saved key but does not replace saved model
   selections. Select another model before using a recording/profile that referred
   to the removed provider; it will fail safely instead of contacting another vendor.
@@ -298,3 +323,24 @@ this BYOK catalog does not grant service access or transmit managed credentials.
 Rewrite, Quick Ask and Quick Replace label automatic active-window OCR as
 **Always**. This is a wording correction: the stored value remains `auto`, existing
 settings are unchanged, and no additional screen capture is enabled on upgrade.
+
+## Quick Ask answers and tray controls
+
+Quick Ask displays genuine incremental answer text with Markdown and automatic
+text direction. OpenAI, Anthropic, Gemini, Cohere, Groq, Cerebras, Fireworks,
+Ollama and OpenAI-compatible custom endpoints use their own streaming protocols.
+Custom endpoints must support Chat Completions streaming; a rejected or interrupted
+stream is not silently resent as a paid batch request. Partial answers remain
+visible with an incomplete-answer notice. Dismissing the panel or starting another
+recording cancels local answer work; it cannot undo vendor processing or charges.
+
+Managed Quick Ask streams through Kolboo's authenticated Edge route when that
+backend advertises support. An older backend's discovery 404 retains the existing
+batch answer behavior without pretending to stream. Choosing a provider/model
+continues to preserve its payment source, profile inheritance and reasoning controls.
+
+The tray menu includes a **Microphone** submenu with System default, available
+devices and Refresh microphones. Duplicate device names are disambiguated, and a
+missing saved device remains visible. Selection updates the same saved setting as
+the Audio tab; recording or mic testing blocks device changes. Last profile and
+Last preset show the context actually used most recently, not unsaved settings edits.

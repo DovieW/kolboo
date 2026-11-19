@@ -344,6 +344,72 @@ struct TextFormat {
 
 #[async_trait]
 impl LlmProvider for OpenAiLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        use super::streaming::{self, Output};
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("openai".into()));
+        }
+        let effort = Self::supports_reasoning_effort(&self.model)
+            .then(|| self.validated_reasoning_effort())
+            .flatten();
+        let mut request = json!({"model":self.model,"input":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"max_output_tokens":4096,"stream":true,"store":false});
+        if let Some(effort) = &effort {
+            request["reasoning"] = json!({"effort":effort});
+        }
+        if Self::supports_temperature_param(&self.model, effort.as_deref()) {
+            request["temperature"] = 0.0.into();
+        }
+        let mut output = Output::default();
+        streaming::read(
+            self.client
+                .post(self.responses_url())
+                .bearer_auth(&self.api_key)
+                .json(&request),
+            self.timeout,
+            true,
+            &mut |data| {
+                let value = streaming::json(data)?;
+                match value.get("type").and_then(serde_json::Value::as_str) {
+                    Some("response.output_text.delta") => {
+                        output.push(
+                            value
+                                .get("delta")
+                                .and_then(serde_json::Value::as_str)
+                                .ok_or_else(|| streaming::invalid("Missing answer delta"))?,
+                            notify,
+                        )?;
+                    }
+                    Some("response.completed") => {
+                        if value
+                            .pointer("/response/status")
+                            .and_then(serde_json::Value::as_str)
+                            != Some("completed")
+                        {
+                            return Err(streaming::invalid("Provider did not complete the answer"));
+                        }
+                        output.usage =
+                            Some(json!({"usage":streaming::usage(&value["response"]["usage"])}));
+                        return Ok(true);
+                    }
+                    Some("error" | "response.failed" | "response.incomplete") => {
+                        return Err(streaming::invalid(
+                            "Model provider could not complete the answer",
+                        ))
+                    }
+                    _ => {}
+                }
+                Ok(false)
+            },
+        )
+        .await?;
+        output.finish(self.request_log_store.as_ref())
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey("openai".to_string()));

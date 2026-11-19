@@ -272,7 +272,7 @@ fn raise_overlay_without_focus(window: &tauri::WebviewWindow) -> Result<(), Stri
         SWP_SHOWWINDOW,
     };
 
-    let hwnd: HWND = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
 
     let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER;
 
@@ -541,15 +541,10 @@ pub async fn hide_overlay(app: AppHandle) -> CommandResult<()> {
         );
     }
 
-    // Best-effort: also hide the hover panel window so it doesn't orphan.
-    if let Some(window) = app.get_webview_window("overlay_hover") {
-        let visible_before = window.is_visible().ok();
-        log::debug!(
-            "[overlay_hover] hide via hide_overlay (visible_before={:?})",
-            visible_before
-        );
-        let _ = window.hide();
-    }
+    // Cancel a not-yet-mounted hover too, so it cannot appear after capture ends.
+    let state = app.state::<AppState>();
+    let _hover_guard = lock_hover_lifecycle(&state);
+    hide_hover_window(&app)?;
     Ok(())
 }
 
@@ -615,11 +610,13 @@ pub async fn overlay_frontend_ready(app: AppHandle) -> CommandResult<()> {
 pub async fn overlay_hover_frontend_ready(app: AppHandle) -> CommandResult<()> {
     #[cfg(desktop)]
     {
+        let state = app.state::<AppState>();
+        let _hover_guard = lock_hover_lifecycle(&state);
         let now_ms = now_ms();
         app.state::<AppState>()
             .overlay_hover_frontend_ready_at_ms
             .store(now_ms, Ordering::SeqCst);
-        log::trace!("[overlay_hover] frontend ready (ts={})", now_ms);
+        show_ready_hover(&app)?;
     }
 
     Ok(())
@@ -627,7 +624,9 @@ pub async fn overlay_hover_frontend_ready(app: AppHandle) -> CommandResult<()> {
 
 /// Notify backend that the Quick Ask frontend has mounted.
 #[tauri::command]
-pub async fn quick_ask_frontend_ready(app: AppHandle) -> CommandResult<()> {
+pub async fn quick_ask_frontend_ready(
+    app: AppHandle,
+) -> CommandResult<Option<crate::QuickAskStatePayload>> {
     #[cfg(desktop)]
     {
         let now_ms = now_ms();
@@ -637,45 +636,59 @@ pub async fn quick_ask_frontend_ready(app: AppHandle) -> CommandResult<()> {
         log::trace!("[quick_ask] frontend ready (ts={})", now_ms);
     }
 
-    Ok(())
+    Ok(app
+        .state::<crate::sessions::quick_ask::QuickAskSessions>()
+        .snapshot())
 }
 
 #[tauri::command]
 pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+    let _hover_guard = lock_hover_lifecycle(&state);
+    app.state::<AppState>()
+        .overlay_hover_epoch
+        .fetch_add(1, Ordering::SeqCst);
+    app.state::<AppState>()
+        .overlay_hover_requested
+        .store(true, Ordering::SeqCst);
+    // Keep-alive from mouse movement only invalidates a delayed hide. Native
+    // layout and stacking are needed once per visibility transition.
+    if app
+        .get_webview_window("overlay_hover")
+        .is_some_and(|window| window.is_visible().ok() == Some(true))
+    {
+        return Ok(());
+    }
+    crate::overlay::ensure_hover_window(&app).map_err(|error| error.to_string())?;
+    show_ready_hover(&app)
+}
+
+// Caller owns the worker-only lifecycle lock for the entire native transaction.
+fn show_ready_hover(app: &AppHandle) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+    if !state.overlay_hover_requested.load(Ordering::SeqCst)
+        || state
+            .overlay_hover_frontend_ready_at_ms
+            .load(Ordering::SeqCst)
+            == 0
+    {
+        return Ok(());
+    }
     let Some(overlay) = app.get_webview_window("overlay") else {
         return Err("Overlay window not found".to_string().into());
     };
+    if overlay.is_visible().ok() != Some(true) {
+        return hide_hover_window(app);
+    }
     let Some(hover) = app.get_webview_window("overlay_hover") else {
         return Err("Overlay hover window not found".to_string().into());
     };
 
-    app.state::<AppState>()
-        .overlay_hover_epoch
-        .fetch_add(1, Ordering::SeqCst);
-
-    log::debug!("[overlay_hover] show requested");
-
-    let last_ready_ms = app
-        .state::<AppState>()
-        .overlay_hover_frontend_ready_at_ms
-        .load(Ordering::SeqCst);
-    maybe_reload_overlay_webview(
-        &app,
-        "overlay_hover",
-        last_ready_ms,
-        Some(45_000),
-        "show_overlay_hover",
-    );
-
-    let overlay_pos = overlay.outer_position().map_err(|e| e.to_string())?;
-    let overlay_size = overlay.outer_size().map_err(|e| e.to_string())?;
-    let monitor = overlay
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| resolve_target_monitor(&overlay, &app))
-        .ok_or("No monitor found for overlay hover")?;
-    let (_native_scale, layout_scale) = overlay_display_scale(&app, &monitor);
+    let overlay_pos = overlay.outer_position().map_err(window_command_error)?;
+    let overlay_size = overlay.outer_size().map_err(window_command_error)?;
+    let monitor =
+        hover_target_monitor(&overlay, app).ok_or("No monitor found for overlay hover")?;
+    let (_native_scale, layout_scale) = overlay_display_scale(app, &monitor);
     let widget_rect = PhysicalRect::new(
         overlay_pos.x,
         overlay_pos.y,
@@ -696,50 +709,63 @@ pub async fn show_overlay_hover(app: AppHandle) -> CommandResult<()> {
             width: rect.width,
             height: rect.height,
         }))
-        .map_err(|e| e.to_string())?;
+        .map_err(window_command_error)?;
 
     hover
         .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
             x: rect.x,
             y: rect.y,
         }))
-        .map_err(|e| e.to_string())?;
+        .map_err(window_command_error)?;
 
     // Keep above other windows.
     let _ = hover.set_always_on_top(true);
-    hover.show().map_err(|e| e.to_string())?;
-
-    let visible_after = hover.is_visible().ok();
-    log::debug!(
-        "[overlay_hover] show complete (visible_after={:?}, rect={:?}, monitor={})",
-        visible_after,
-        rect,
-        format_monitor_summary(Some(&monitor))
-    );
+    hover.show().map_err(window_command_error)?;
+    let _ = hover.emit(events::EVENT_OVERLAY_HOVER_VISIBILITY_CHANGED, true);
 
     Ok(())
 }
 
+fn hover_target_monitor(overlay: &tauri::WebviewWindow, app: &AppHandle) -> Option<Monitor> {
+    overlay
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| resolve_target_monitor(overlay, app))
+}
+
+// Native setters may acknowledge queued work even after a page is destroyed.
+// Keep error translation independent of an individual setter's delivery timing;
+// all hover native failures retain the same renderer-facing command contract.
+fn window_command_error(error: tauri::Error) -> crate::commands::CommandError {
+    error.to_string().into()
+}
+
 #[tauri::command]
 pub async fn hide_overlay_hover(app: AppHandle) -> CommandResult<()> {
-    if let Some(window) = app.get_webview_window("overlay_hover") {
-        let visible_before = window.is_visible().ok();
-        log::trace!(
-            "[overlay_hover] hide requested (visible_before={:?})",
-            visible_before
-        );
-        window.hide().map_err(|e| e.to_string())?;
-        let visible_after = window.is_visible().ok();
-        log::trace!(
-            "[overlay_hover] hide complete (visible_after={:?})",
-            visible_after
-        );
-    }
+    let state = app.state::<AppState>();
+    let _hover_guard = lock_hover_lifecycle(&state);
+    hide_hover_window(&app)
+}
 
-    // Bump epoch so any pending hides are considered stale.
+fn lock_hover_lifecycle(state: &AppState) -> std::sync::MutexGuard<'_, ()> {
+    state
+        .overlay_hover_lifecycle_lock
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn hide_hover_window(app: &AppHandle) -> CommandResult<()> {
+    app.state::<AppState>()
+        .overlay_hover_requested
+        .store(false, Ordering::SeqCst);
     app.state::<AppState>()
         .overlay_hover_epoch
         .fetch_add(1, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window("overlay_hover") {
+        let _ = window.emit(events::EVENT_OVERLAY_HOVER_VISIBILITY_CHANGED, false);
+        window.hide().map_err(window_command_error)?;
+    }
 
     Ok(())
 }
@@ -762,6 +788,9 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Comma
         let delay = std::time::Duration::from_millis(delay_ms);
         tokio::time::sleep(delay).await;
 
+        let state = app_clone.state::<AppState>();
+        let _hover_guard = lock_hover_lifecycle(&state);
+
         let current_epoch = app_clone
             .state::<AppState>()
             .overlay_hover_epoch
@@ -771,15 +800,7 @@ pub async fn schedule_hide_overlay_hover(app: AppHandle, delay_ms: u64) -> Comma
             return;
         }
 
-        if let Some(window) = app_clone.get_webview_window("overlay_hover") {
-            let visible_before = window.is_visible().ok();
-            log::debug!(
-                "[overlay_hover] schedule hide firing (visible_before={:?}, epoch={})",
-                visible_before,
-                current_epoch
-            );
-            let _ = window.hide();
-        }
+        let _ = hide_hover_window(&app_clone);
     });
 
     Ok(())
@@ -954,22 +975,4 @@ pub fn position_quick_ask_to_target_monitor(app: &AppHandle) -> CommandResult<()
 }
 
 #[cfg(all(test, desktop))]
-mod tests {
-    use super::overlay_frontend_needs_reload;
-
-    #[test]
-    fn one_shot_ready_overlay_does_not_expire() {
-        assert!(!overlay_frontend_needs_reload(1, 120_000, None));
-    }
-
-    #[test]
-    fn heartbeat_overlay_expires_after_threshold() {
-        assert!(!overlay_frontend_needs_reload(1, 45_000, Some(45_000)));
-        assert!(overlay_frontend_needs_reload(1, 45_001, Some(45_000)));
-    }
-
-    #[test]
-    fn overlay_that_never_reported_ready_is_reloaded() {
-        assert!(overlay_frontend_needs_reload(0, 0, None));
-    }
-}
+pub(crate) mod tests;

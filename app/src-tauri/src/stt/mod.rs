@@ -10,6 +10,7 @@ mod elevenlabs;
 mod fireworks;
 mod groq;
 mod http;
+pub(crate) mod ivritai;
 pub(crate) mod language;
 #[cfg(test)]
 #[path = "tests/managed_selection.rs"]

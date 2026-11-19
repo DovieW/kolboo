@@ -1,5 +1,6 @@
 import type { HotkeyConfig, HotkeyShortcutCard } from "../hotkeys";
 import type {
+	QuickAskStatePayload as GeneratedQuickAskStatePayload,
 	RecordingPreferences as GeneratedRecordingPreferences,
 	MeetingModel,
 	ModelAction,
@@ -9,9 +10,11 @@ import type {
 export type {
 	ModelAction,
 	ModelSelection,
+	QuickAskPartialPayload,
 	SttInputMode,
 	SttPartialTranscriptPayload,
 } from "./types.generated";
+
 import type { SttInputMode } from "./types.generated";
 export type ModelSelections = Partial<Record<ModelAction, ModelSelection>>;
 
@@ -645,23 +648,33 @@ export interface AudioInputDeviceInfo {
 }
 
 export type QuickAskStartedPayload = {
-	question?: string;
-	provider?: string;
+	request_id?: string | null;
+	question?: string | null;
+	provider?: string | null;
 	model?: string | null;
 };
 
 export type QuickAskAnswerPayload =
 	| {
 			ok: true;
+			request_id?: string | null;
 			answer: string;
-			provider_used?: string;
-			model_used?: string;
-			duration_ms?: number;
+			provider_used?: string | null;
+			model_used?: string | null;
+			duration_ms?: number | null;
 	  }
 	| {
 			ok: false;
+			request_id?: string | null;
 			error: string;
 	  };
+
+export type QuickAskStatePayload = Omit<
+	GeneratedQuickAskStatePayload,
+	"answer"
+> & {
+	answer?: QuickAskAnswerPayload | null;
+};
 
 export type LocalWhisperComputeBackend = "cpu" | "cuda";
 

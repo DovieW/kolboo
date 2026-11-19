@@ -96,7 +96,8 @@ Tauri dependency during a clean development build.
 
 ## 5) Fast installable Linux test package
 
-Build a non-release Debian package with embedded frontend assets:
+Build a non-release Debian package with embedded frontend assets. First configure
+the package as either Community or service-enabled, as described below:
 
 ```sh
 pnpm -C app build:linux:fast
@@ -122,8 +123,15 @@ For managed-service testing, supply the verified public service configuration
 (`TAURI_API_BASE_URL`, `TAURI_MANAGED_INFERENCE_GATEWAY_URL`,
 `TAURI_SUPABASE_URL`, `TAURI_SUPABASE_PUBLISHABLE_KEY`, and
 `TAURI_PUBLIC_AUTH_PAGE_URL`) together with `TAURI_CLOUD_ENV=production` and
-`VITE_CLOUD_SERVICE_ENABLED=true`. Do not rely on the fast script's generic
-endpoint defaults or embed developer Cloudflare Access credentials. The updater
+`VITE_CLOUD_SERVICE_ENABLED=true`. Use the same verified `KOLBOO_PROD_*` repository
+variables as the release workflows; the legacy custom domain is not the desktop
+API endpoint. The script validates the complete configuration before building or
+copying anything. Missing auth configuration, mismatched frontend/backend modes,
+and developer Cloudflare Access credentials are rejected.
+
+For Community testing, set `TAURI_CLOUD_ENV=community` and
+`VITE_CLOUD_SERVICE_ENABLED=false`, and omit all five public service settings.
+No GitHub access or cloud connection is required for a Community build. The updater
 is disabled by default for these development packages. Copy promptly after
 checks, but finish dictation and quit the running app before installation and
 restart; preserve its settings and secure storage.

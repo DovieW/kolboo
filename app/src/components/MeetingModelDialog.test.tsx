@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
 	managed: false,
 	openai: false,
 	custom: false,
+	ivrit: false,
 	loadingProviders: false,
 	providerError: false,
 	catalogError: false,
@@ -26,6 +27,7 @@ vi.mock("../lib/queries/modelChoices", () => ({
    else if (!state.managed) {add("byok","local-whisper","base","Base");add("byok","local-whisper","small","Small");}
   }
   if (state.managed && state.openai && !state.catalogError) add("managed","openai","gpt-4o-transcribe-diarize","Speaker model");
+  if (state.ivrit) add("managed", "ivritai", "ivrit-ai/whisper-large-v3-turbo", "ivritAI Hebrew Turbo");
   const failedSources=[{label:"provider list",query:{isError:state.providerError,isFetching:false,refetch:state.refetchProviders}},{label:"managed models",query:{isError:state.managed && state.catalogError,isFetching:false,refetch:state.refetchCatalog}}].filter(({query})=>query.isError);
   return {choices,loading:state.loadingProviders,failedSources,managedMessage:state.managed?undefined:"Sign in for Managed",retry:()=>{void state.refetchProviders(); if(state.managed) void state.refetchCatalog();}};
  },
@@ -37,6 +39,7 @@ beforeEach(() => {
 	state.managed = false;
 	state.openai = false;
 	state.custom = false;
+	state.ivrit = false;
 	state.loadingProviders = false;
 	state.providerError = false;
 	state.catalogError = false;
@@ -70,6 +73,31 @@ async function render(
 		),
 	);
 }
+it("shows automatic Hebrew without overwriting the saved multilingual preference", async () => {
+	state.ivrit = true;
+	const preferences: RecordingPreferences = {
+		mode: "meeting",
+		language_hint: "en",
+		meeting_model: {
+			provider: "ivritai",
+			model: "ivrit-ai/whisper-large-v3-turbo",
+			use_managed: true,
+		},
+	};
+	await render(preferences);
+	expect(document.body.textContent).toContain(
+		"Hebrew is automatic for this model",
+	);
+	expect(
+		document.querySelector('[aria-label="Meeting language hint"]'),
+	).toBeNull();
+	const button = [...document.querySelectorAll("button")].find(
+		(button) => button.textContent === "Save",
+	);
+	await act(async () => button?.click());
+	expect(save).toHaveBeenCalledWith(preferences);
+	expect(preferences.language_hint).toBe("en");
+});
 it("lets meetings select another downloaded local model without changing dictation", async () => {
 	await render();
 	await act(async () =>

@@ -117,6 +117,45 @@ async function language(label: string) {
 	await settle();
 	expect(input?.value).toBe(label);
 }
+it("uses Hebrew for ivritAI uploads without mutating the saved hint", async () => {
+	const preferences: RecordingPreferences = {
+		...prefs,
+		language_hint: "en",
+		meeting_model: {
+			provider: "ivritai",
+			model: "ivrit-ai/whisper-large-v3-turbo",
+			use_managed: true,
+		},
+	};
+	client.setQueryData(["recording-preferences"], preferences);
+	await render();
+	expect(host.textContent).toContain("Hebrew is automatic for this model");
+	expect(host.querySelector('[aria-label="File language hint"]')).toBeNull();
+	await drop(["/synthetic/hebrew.wav"]);
+	await click("Transcribe");
+	expect(recordingControlsAPI.importFile).toHaveBeenCalledWith(
+		"/synthetic/hebrew.wav",
+		{ ...preferences, mode: "meeting", language_hint: "he" },
+	);
+	expect(preferences.language_hint).toBe("en");
+});
+it("restores the draft language when switching from ivritAI to a multilingual model", async () => {
+	client.setQueryData(["recording-preferences"], {
+		...prefs,
+		language_hint: "en",
+		meeting_model: {
+			provider: "ivritai",
+			model: "ivrit-ai/whisper-large-v3-turbo",
+			use_managed: true,
+		},
+	});
+	await render();
+	await click("Select speaker model");
+	expect(
+		host.querySelector<HTMLInputElement>('[aria-label="File language hint"]')
+			?.value,
+	).toBe("English");
+});
 beforeEach(async () => {
 	vi.useFakeTimers();
 	vi.clearAllMocks();

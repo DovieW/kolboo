@@ -31,6 +31,22 @@ vi.mock("./events", () => ({
 }));
 
 describe("tauri command wrappers", () => {
+	itWithImportTimeout(
+		"cancels only the requested Quick Ask session",
+		async () => {
+			const { tauriAPI } = await import("./commands");
+			invokeMock.mockResolvedValue(undefined);
+			await tauriAPI.cancelQuickAsk("request-one");
+			expect(invokeMock).toHaveBeenCalledWith("cancel_quick_ask", {
+				requestId: "request-one",
+			});
+			await tauriAPI.cancelQuickAsk("request-one", true);
+			expect(invokeMock).toHaveBeenLastCalledWith("cancel_quick_ask", {
+				requestId: "request-one",
+				dismiss: true,
+			});
+		},
+	);
     itWithImportTimeout("preserves action, source and preset context through completion and prompt-tool IPC",async()=>{
         const {llmAPI,configAPI}=await import("./commands");
         const selection={source:"byok" as const,provider_id:"custom_text",model_id:"raw/model"};

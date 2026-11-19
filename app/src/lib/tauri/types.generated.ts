@@ -424,6 +424,10 @@ export interface LicenseState {
   limits: TierLimits;
   org?: OrgContext | null;
   portal_available: boolean;
+  /**
+   * Session rejection is distinct from a transient entitlement/network outage.
+   */
+  reauth_required?: boolean;
   status: LicenseStatus;
   tier: LicenseTier;
   usage: UsageStats;
@@ -809,10 +813,19 @@ export interface QuickAskAnswerOkPayload {
   model_used?: string | null;
   ok: boolean;
   provider_used?: string | null;
+  request_id?: string | null;
 }
 export interface QuickAskAnswerErrorPayload {
   error: string;
   ok: boolean;
+  request_id?: string | null;
+}
+
+// From: quick-ask-partial-payload.schema.json
+export interface QuickAskPartialPayload {
+  request_id: string;
+  seq: number;
+  text: string;
 }
 
 // From: quick-ask-started-payload.schema.json
@@ -820,6 +833,15 @@ export interface QuickAskStartedPayload {
   model?: string | null;
   provider?: string | null;
   question?: string | null;
+  request_id?: string | null;
+}
+
+// From: quick-ask-state-payload.schema.json
+export interface QuickAskStatePayload {
+  answer?: QuickAskAnswerPayload | null;
+  partial?: QuickAskPartialPayload | null;
+  revision: number;
+  started?: QuickAskStartedPayload | null;
 }
 
 // From: recording-preferences.schema.json

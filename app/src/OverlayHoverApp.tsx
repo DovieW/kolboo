@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useModifierKeyForwarder } from "./hooks/useModifierKeyForwarder";
 import { useSettings } from "./lib/queries";
 import { tauriAPI } from "./lib/tauri";
+import { useHoverVisibility } from "./overlay/useHoverVisibility";
 
 type ActiveProfileInfo = {
 	profile_id: string | null;
@@ -20,6 +21,7 @@ export default function OverlayHoverApp() {
 	// Forward modifier-only key events (like AltRight) to the backend.
 	// WebView2 intercepts these before our keyboard hook sees them.
 	useModifierKeyForwarder();
+	const visible = useHoverVisibility();
 
 	const { data: settings } = useSettings();
 	const [activeProfile, setActiveProfile] = useState<ActiveProfileInfo | null>(
@@ -54,6 +56,10 @@ export default function OverlayHoverApp() {
 
 	// Resolve the active program profile periodically.
 	useEffect(() => {
+		if (!visible) {
+			setActiveProfile(null);
+			return;
+		}
 		let cancelled = false;
 		let interval: number | null = null;
 
@@ -78,10 +84,11 @@ export default function OverlayHoverApp() {
 			cancelled = true;
 			if (interval) window.clearInterval(interval);
 		};
-	}, []);
+	}, [visible]);
 
 	// Poll the current session preset lock (so both windows stay in sync).
 	useEffect(() => {
+		if (!visible) return;
 		let cancelled = false;
 		let interval: number | null = null;
 
@@ -106,7 +113,7 @@ export default function OverlayHoverApp() {
 			cancelled = true;
 			if (interval) window.clearInterval(interval);
 		};
-	}, []);
+	}, [visible]);
 
 	const activeProfilePresets = useMemo(() => {
 		if (!settings) return [];
@@ -167,10 +174,12 @@ export default function OverlayHoverApp() {
 	// Hard rule: hover overlay should never show unless the router is on, rewrite is enabled,
 	// and there are presets.
 	useEffect(() => {
-		if (!shouldShow) {
+		// Unknown hydration is not an explicit ineligible profile. In particular,
+		// first mount must not cancel the native pending-show intent.
+		if (visible && settings && activeProfile && !shouldShow) {
 			tauriAPI.hideOverlayHover().catch(() => {});
 		}
-	}, [shouldShow]);
+	}, [visible, settings, activeProfile, shouldShow]);
 
 	if (!shouldShow) {
 		return null;

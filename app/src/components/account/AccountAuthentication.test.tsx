@@ -13,7 +13,7 @@ vi.mock("../../lib/queries", () => ({
 }));
 vi.mock("../../lib/tauri", () => ({ licenseAPI: { cancelLogin: calls.cancel } }));
 let actions: EmailCodeSignInActions;
-vi.mock("./EmailCodeSignIn", () => ({ EmailCodeSignIn: (props: { actions: EmailCodeSignInActions }) => { actions = props.actions; return <form />; } }));
+vi.mock("./EmailCodeSignIn", () => ({ EmailCodeSignIn: (props: { actions: EmailCodeSignInActions; initialEmail: string }) => { actions = props.actions; return <form><input aria-label="Email" defaultValue={props.initialEmail} /></form>; } }));
 it("wires every sign-in action to its owned mutation, including cancellation", async () => {
     Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
     const host = document.createElement("div");
@@ -21,6 +21,9 @@ it("wires every sign-in action to its owned mutation, including cancellation", a
     try {
         await act(async () => root.render(<AccountAuthentication />));
         expect(host.querySelector("form")).not.toBeNull();
+        expect(host.querySelector<HTMLInputElement>("input")?.value).toBe("");
+        await act(async () => root.render(<AccountAuthentication initialEmail="person@example.test" />));
+        expect(host.querySelector<HTMLInputElement>("input")?.defaultValue).toBe("person@example.test");
         await actions.requestCode("person@example.test");
         await actions.verifyCode("person@example.test", "123456");
         await actions.passwordSignIn("person@example.test", "synthetic-password");

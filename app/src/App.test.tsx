@@ -7,6 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { useModelNavigation } from "./components/ModelNavigation";
 
+const guide = vi.hoisted(() => ({ state: "completed", settings: undefined as Record<string, unknown> | undefined }));
+const setGuideState = vi.hoisted(() => vi.fn());
 const resolveTelemetryDisclosure = vi.hoisted(() =>
 	vi.fn(async () => undefined),
 );
@@ -39,15 +41,28 @@ vi.mock("./components/settings", () => ({
 	},
 }));
 vi.mock("./components/settings/SettingsGuideOverlay", () => ({
-	SettingsGuideOverlay: () => null,
+	SettingsGuideOverlay: ({
+		opened,
+		onConfigureProxy,
+	}: {
+		opened: boolean;
+		onConfigureProxy: () => void;
+	}) =>
+		opened ? (
+			<button type="button" onClick={onConfigureProxy}>
+				Configure proxy from guide
+			</button>
+		) : null,
 }));
 vi.mock("./components/settings/TelemetryDisclosureModal", () => ({
 	TelemetryDisclosureModal: ({
+		opened,
 		onAllowAnalytics,
 	}: {
+		opened: boolean;
 		onAllowAnalytics: () => void;
 	}) => (
-		<button type="button" onClick={onAllowAnalytics}>
+		<button type="button" data-disclosure-opened={String(opened)} onClick={onAllowAnalytics}>
 			Choose linked analytics
 		</button>
 	),
@@ -81,9 +96,9 @@ vi.mock("./lib/modelOptions", async (importOriginal) => ({
 	listAllSttModelKeys: () => [],
 }));
 vi.mock("./lib/queries", () => ({
-	useSettings: () => ({ data: undefined }),
-	useSettingsGuideState: () => ({ data: "completed" }),
-	useSetSettingsGuideState: () => ({ mutate: vi.fn() }),
+	useSettings: () => ({ data: guide.settings }),
+	useSettingsGuideState: () => ({ data: guide.state }),
+	useSetSettingsGuideState: () => ({ mutate: setGuideState }),
 }));
 vi.mock("./lib/tauri", () => ({
 	getPolicyPathEnforcement: () => ({ enforced: false }),
@@ -101,6 +116,9 @@ let host: HTMLDivElement;
 let root: Root;
 let client: QueryClient;
 beforeEach(async () => {
+	guide.state = "completed";
+	guide.settings = undefined;
+	setGuideState.mockClear();
 	resolveTelemetryDisclosure.mockClear();
 	Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 	client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -132,6 +150,32 @@ async function navigate(label: string) {
 }
 
 describe("Desktop navigation", () => {
+	it("pauses pending onboarding at Network settings without marking setup complete, then resumes", async () => {
+		guide.settings = {};
+		await navigate("Settings");
+		expect(host.querySelector('[data-disclosure-opened="true"]')).not.toBeNull();
+		guide.state = "pending";
+		await navigate("Home");
+		await navigate("Settings");
+		const click = async (label: string) => {
+			const button = [...host.querySelectorAll("button")].find(
+				(item) => item.textContent === label,
+			);
+			expect(button).toBeDefined();
+			await act(async () => button?.click());
+		};
+		await click("Configure proxy from guide");
+		expect(setGuideState).not.toHaveBeenCalled();
+		expect(host.querySelector('[data-disclosure-opened="true"]')).toBeNull();
+		expect(host.querySelector("output")?.textContent).toBe("network:1");
+		await click("Continue setup guide");
+		expect(host.textContent).toContain("Configure proxy from guide");
+		await click("Configure proxy from guide");
+		expect(host.querySelector("output")?.textContent).toBe("network:2");
+		await navigate("Home");
+		await navigate("Settings");
+		expect(host.textContent).toContain("Configure proxy from guide");
+	});
 	it("routes picker setup to keys/local endpoints and opens account guidance without changing a model",async()=>{
 		await navigate("Settings");
 		for(const [index,provider] of ["openai","ollama","whisper-server","local-whisper"].entries()) {
@@ -143,13 +187,17 @@ describe("Desktop navigation", () => {
 		await act(async()=>account?.click());expect(host.querySelector("main")?.textContent).toContain("Account page");
 	});
 	it("describes the packaged update policy without a disruptive install button", async () => {
-		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
-			.toBe("View releases and download an update.");
+		expect(host.querySelector("footer a")?.getAttribute("aria-label")).toBe(
+			"View releases and download an update.",
+		);
 		vi.stubEnv("VITE_SIGNED_UPDATER_ENABLED", "true");
 		await navigate("Settings");
-		expect(host.querySelector("footer a")?.getAttribute("aria-label"))
-			.toBe("Updates download automatically and install when you quit Kolboo.");
-		expect(host.querySelector("footer a")?.getAttribute("target")).toBe("_blank");
+		expect(host.querySelector("footer a")?.getAttribute("aria-label")).toBe(
+			"Updates download automatically and install when you quit Kolboo.",
+		);
+		expect(host.querySelector("footer a")?.getAttribute("target")).toBe(
+			"_blank",
+		);
 	});
 	it("routes the linked analytics choice to an enabled disclosure resolution", async () => {
 		await act(async () =>

@@ -55,6 +55,19 @@ fn collecting_session() -> (
 }
 
 #[tokio::test]
+async fn quarantined_capture_rejects_live_attachment_without_locking_its_buffer() {
+    let mut capture = AudioCapture::new();
+    let buffer = capture.buffer.clone();
+    let held = buffer.lock().unwrap();
+    capture.recovery_shutdown_failed = true;
+    let (session, _) = collecting_session();
+    capture.set_live_audio_tx(Some(session.audio_tx.clone()));
+    capture.set_live_audio_tx(None);
+    drop(held);
+    assert!(matches!(session.finalize().await, Err(SttError::Audio(_))));
+}
+
+#[tokio::test]
 async fn late_attachment_replays_the_prefix_once_before_new_chunks() {
     for channels in [1, 2] {
         let mut capture = AudioCapture::new();

@@ -210,12 +210,26 @@ async fn fetch_license_state_from_api(
     .timeout(Duration::from_secs(20))
     .send()
     .await
-    .map_err(|_| {
+    .map_err(|error| {
+        crate::sentry_init::report_account_failure(
+            "entitlement",
+            if error.is_timeout() {
+                "timeout"
+            } else {
+                "network"
+            },
+            None,
+        );
         CommandError::new("Unable to reach the account service.", "auth")
             .with_code("license_state_unavailable")
     })?;
 
     if !response.status().is_success() {
+        crate::sentry_init::report_account_failure(
+            "entitlement",
+            "http_rejected",
+            Some(response.status().as_u16()),
+        );
         return Err(CommandError::new(
             "Account access could not be verified. Try Refresh access.",
             "auth",
@@ -224,6 +238,7 @@ async fn fetch_license_state_from_api(
     }
 
     let raw = response.json::<serde_json::Value>().await.map_err(|_| {
+        crate::sentry_init::report_account_failure("entitlement", "invalid_response", None);
         CommandError::new(
             "The account service returned an invalid access response.",
             "auth",
@@ -1036,6 +1051,7 @@ async fn refresh_supabase_session(
 
     let response = crate::network::build_plain_http_client_with_user_agent("kolboo-auth")
         .post(url)
+        .timeout(Duration::from_secs(20))
         .header("apikey", publishable_key)
         .header("content-type", "application/json")
         .json(&json!({
@@ -1043,28 +1059,67 @@ async fn refresh_supabase_session(
         }))
         .send()
         .await
-        .map_err(|_| {
+        .map_err(|error| {
+            crate::sentry_init::report_account_failure(
+                "session_refresh",
+                if error.is_timeout() {
+                    "timeout"
+                } else {
+                    "network"
+                },
+                None,
+            );
             CommandError::new("Unable to reach the session service.", "auth")
                 .with_code("auth_refresh_failed")
         })?;
 
     if !response.status().is_success() {
         let status = response.status();
-        let message = if status == StatusCode::BAD_REQUEST || status == StatusCode::UNAUTHORIZED {
-            "Invalid refresh token. Please sign in again."
-        } else {
-            "Session refresh is temporarily unavailable."
-        };
-        return Err(CommandError::new(message, "auth").with_code("auth_refresh_failed"));
+        let body = response.json::<SupabaseAuthErrorResponse>().await.ok();
+        let code = body
+            .as_ref()
+            .and_then(|body| body.error_code.as_deref())
+            .unwrap_or("unknown");
+        crate::sentry_init::report_account_failure("session_refresh", code, Some(status.as_u16()));
+        return Err(session_refresh_error(status, code));
     }
 
     response
         .json::<SupabaseRefreshAuthResponse>()
         .await
         .map_err(|_| {
+            crate::sentry_init::report_account_failure("session_refresh", "invalid_response", None);
             CommandError::new("The session service returned an invalid response.", "auth")
                 .with_code("auth_response_parse_failed")
         })
+}
+
+fn session_refresh_error(status: StatusCode, code: &str) -> CommandError {
+    if (status == StatusCode::BAD_REQUEST
+        || status == StatusCode::UNAUTHORIZED
+        || status == StatusCode::FORBIDDEN)
+        && matches!(
+            code,
+            "refresh_token_not_found"
+                | "refresh_token_already_used"
+                | "session_not_found"
+                | "session_expired"
+                | "user_banned"
+        )
+    {
+        CommandError::new(
+            "Your saved session is no longer valid. Please sign in again.",
+            "auth",
+        )
+        .with_code("reauth_required")
+    } else {
+        CommandError::new(
+            "Session refresh is temporarily unavailable. Please try again.",
+            "auth",
+        )
+        .with_code("auth_refresh_failed")
+        .with_retryable(true)
+    }
 }
 
 fn refresh_error_requires_reauthentication(detail: &str) -> bool {
@@ -1081,7 +1136,7 @@ fn build_license_refresh_failure_error(
 ) -> CommandError {
     let detail = detail.into();
 
-    if refresh_error_requires_reauthentication(&detail) {
+    if code == Some("reauth_required") || refresh_error_requires_reauthentication(&detail) {
         return CommandError::new(
             "Your saved session is no longer valid. Please sign in again to refresh managed access.",
             "auth",
@@ -1191,6 +1246,7 @@ fn build_auth_context(
     issuer: Option<String>,
 ) -> LicenseAuthContext {
     let session_usable = has_secure_session
+        && !state.reauth_required
         && matches!(state.status, LicenseStatus::Active | LicenseStatus::Grace)
         && state
             .user_id
@@ -1217,7 +1273,10 @@ fn build_auth_context(
         },
         reason_code: if session_usable {
             None
-        } else if !has_secure_session || matches!(state.status, LicenseStatus::SignedOut) {
+        } else if state.reauth_required
+            || !has_secure_session
+            || matches!(state.status, LicenseStatus::SignedOut)
+        {
             Some(AuthReasonCode::ReauthRequired)
         } else if matches!(state.status, LicenseStatus::Expired) {
             Some(AuthReasonCode::TokenInvalid)
@@ -1530,6 +1589,13 @@ pub async fn license_refresh_entitlement(
     simulate_failure: Option<bool>,
 ) -> CommandResult<LicenseState> {
     let _refresh = SESSION_REFRESH.lock().await;
+    refresh_entitlement_locked(app, simulate_failure).await
+}
+
+async fn refresh_entitlement_locked(
+    app: AppHandle,
+    simulate_failure: Option<bool>,
+) -> CommandResult<LicenseState> {
     let ticket = SESSION_OWNER.current();
     let Some(session) = load_session_material(&app) else {
         let state = LicenseState::signed_out(Utc::now());
@@ -1549,7 +1615,7 @@ pub async fn license_refresh_entitlement(
     let failed = simulate_failure.unwrap_or(false);
     let mut catalog_access_token = session.access_token.clone();
 
-    let (next, save_reason, refresh_error) = if failed {
+    let (mut next, save_reason, refresh_error) = if failed {
         (apply_refresh_failure(current, now), "refresh_failed", None)
     } else {
         match refresh_supabase_session(&session).await {
@@ -1564,6 +1630,11 @@ pub async fn license_refresh_entitlement(
 
                 SESSION_OWNER.commit(ticket, || {
                     persist_session_material(&app, &refreshed_session).map_err(|_| {
+                        crate::sentry_init::report_account_failure(
+                            "session_storage",
+                            "auth_session_save_failed",
+                            None,
+                        );
                         CommandError::new("Failed to persist refreshed session", "auth")
                             .with_code("auth_session_save_failed")
                     })
@@ -1594,7 +1665,8 @@ pub async fn license_refresh_entitlement(
                             error.message
                         );
 
-                        let fallback = apply_refresh_failure(current, now);
+                        let mut fallback = apply_refresh_failure(current, now);
+                        fallback.reauth_required = false;
                         let next =
                             merge_hydrated_identity(fallback, refreshed_user_id, refreshed_email);
                         let failure = build_license_refresh_failure_error(
@@ -1608,55 +1680,69 @@ pub async fn license_refresh_entitlement(
             }
             Err(err) => {
                 log::warn!("License refresh token exchange failed: {}", err.message);
-
-                // If the refresh token is stale but the existing access token is still
-                // usable, reuse it to hydrate the latest entitlement state so recent
-                // upgrades/downgrades can still land locally without pretending the
-                // session rotation succeeded.
-                match fetch_license_state_from_api(
-                    &session.access_token,
-                    Method::POST,
-                    "/v1/license/refresh",
-                )
-                .await
-                {
-                    Ok(hydrated) => {
-                        log::warn!(
+                if err.code.as_deref() == Some("reauth_required") {
+                    (
+                        apply_refresh_failure(current, now),
+                        "refresh_rejected",
+                        Some(err),
+                    )
+                } else {
+                    // If the refresh token is stale but the existing access token is still
+                    // usable, reuse it to hydrate the latest entitlement state so recent
+                    // upgrades/downgrades can still land locally without pretending the
+                    // session rotation succeeded.
+                    match fetch_license_state_from_api(
+                        &session.access_token,
+                        Method::POST,
+                        "/v1/license/refresh",
+                    )
+                    .await
+                    {
+                        Ok(hydrated) => {
+                            log::warn!(
                             "License refresh reused the existing access token because session rotation failed"
                         );
-                        (
-                            merge_hydrated_identity(
-                                hydrated,
-                                current.user_id.clone(),
-                                current.email.clone(),
-                            ),
-                            "refresh_success_existing_session",
-                            None,
-                        )
-                    }
-                    Err(hydration_error) => {
-                        log::warn!(
+                            (
+                                merge_hydrated_identity(
+                                    hydrated,
+                                    current.user_id.clone(),
+                                    current.email.clone(),
+                                ),
+                                "refresh_success_existing_session",
+                                None,
+                            )
+                        }
+                        Err(hydration_error) => {
+                            log::warn!(
                             "License refresh fallback hydration with existing access token failed: {}",
                             hydration_error.message
                         );
 
-                        let next = apply_refresh_failure(current, now);
-                        let detail = format!(
-                            "{}; fallback hydration with existing access token also failed: {}",
-                            err.message, hydration_error.message,
-                        );
-                        let failure = build_license_refresh_failure_error(
-                            detail,
-                            err.code.as_deref().or(hydration_error.code.as_deref()),
-                        );
+                            let next = apply_refresh_failure(current, now);
+                            let detail = format!(
+                                "{}; fallback hydration with existing access token also failed: {}",
+                                err.message, hydration_error.message,
+                            );
+                            let failure = build_license_refresh_failure_error(
+                                detail,
+                                err.code.as_deref().or(hydration_error.code.as_deref()),
+                            );
 
-                        (next, "refresh_failed", Some(failure))
+                            (next, "refresh_failed", Some(failure))
+                        }
                     }
                 }
             }
         }
     };
 
+    if let Some(error) = &refresh_error {
+        if error.code.as_deref() == Some("reauth_required") {
+            next.reauth_required = true;
+        }
+    } else if !failed {
+        next.reauth_required = false;
+    }
     let defaults = if refresh_error.is_none() && !failed {
         first_install_catalog(&app, &next, &catalog_access_token).await
     } else {
@@ -1680,6 +1766,53 @@ pub async fn license_refresh_entitlement(
     }
 
     Ok(next)
+}
+
+/// JWT expiry is only a refresh hint, never evidence of authorization. The server
+/// validates the token. Unknown/opaque tokens get one normal server attempt.
+fn access_token_needs_refresh(token: &str, now: i64) -> bool {
+    token
+        .split('.')
+        .nth(1)
+        .and_then(|payload| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(payload)
+                .ok()
+        })
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|claims| claims.get("exp").and_then(serde_json::Value::as_i64))
+        .is_some_and(|expiry| expiry <= now.saturating_add(60))
+}
+
+pub(crate) async fn managed_access_token(
+    app: &AppHandle,
+    rejected: Option<&str>,
+) -> CommandResult<String> {
+    // Re-read under the same lock used by startup/manual refresh. Concurrent
+    // catalog calls must not rotate the same refresh token twice.
+    let _refresh = SESSION_REFRESH.lock().await;
+    let state = load_license_state(app)?;
+    let session = load_session_material(app).ok_or_else(|| {
+        CommandError::new("Sign in to load Managed models.", "auth").with_code("reauth_required")
+    })?;
+    if state.reauth_required {
+        return Err(
+            CommandError::new("Sign in again to restore Managed access.", "auth")
+                .with_code("reauth_required"),
+        );
+    }
+    if rejected == Some(session.access_token.as_str())
+        || access_token_needs_refresh(&session.access_token, Utc::now().timestamp())
+    {
+        refresh_entitlement_locked(app.clone(), None).await?;
+        return load_session_material(app)
+            .map(|session| session.access_token)
+            .ok_or_else(|| {
+                CommandError::new("Sign in again to restore Managed access.", "auth")
+                    .with_code("reauth_required")
+            });
+    }
+    Ok(session.access_token)
 }
 
 #[tauri::command]
@@ -1718,6 +1851,81 @@ pub async fn license_get_management_url(app: AppHandle) -> CommandResult<String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn jwt_expiry_is_only_a_refresh_hint() {
+        use base64::Engine;
+        for (payload, expected) in [
+            (r#"{"exp":160}"#, true),
+            (r#"{"exp":161}"#, false),
+            (r#"{"exp":"secret"}"#, false),
+            ("{}", false),
+            ("not json", false),
+        ] {
+            let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload);
+            assert_eq!(
+                super::access_token_needs_refresh(&format!("header.{payload}.signature"), 100),
+                expected
+            );
+        }
+        assert!(!super::access_token_needs_refresh("opaque", 100));
+        assert!(!super::access_token_needs_refresh(
+            "header.!.signature",
+            100
+        ));
+    }
+
+    #[test]
+    fn session_rejection_is_distinct_from_service_failure_and_cached_allowance() {
+        for code in [
+            "refresh_token_not_found",
+            "refresh_token_already_used",
+            "session_not_found",
+            "session_expired",
+            "user_banned",
+        ] {
+            for status in [
+                StatusCode::BAD_REQUEST,
+                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
+            ] {
+                assert_eq!(
+                    super::session_refresh_error(status, code).code.as_deref(),
+                    Some("reauth_required")
+                );
+            }
+        }
+        for (status, code) in [
+            (StatusCode::BAD_REQUEST, "unknown"),
+            (StatusCode::SERVICE_UNAVAILABLE, "session_expired"),
+            (StatusCode::TOO_MANY_REQUESTS, "over_request_rate_limit"),
+        ] {
+            assert_eq!(
+                super::session_refresh_error(status, code).code.as_deref(),
+                Some("auth_refresh_failed")
+            );
+        }
+        let now = Utc::now();
+        let mut state = crate::licensing::build_login_state(None, now);
+        state.tier = LicenseTier::Personal;
+        state.user_id = Some("synthetic-user".into());
+        assert!(build_auth_context(&state, true, None).authenticated);
+        state.reauth_required = true;
+        let context = build_auth_context(&state, true, None);
+        assert!(!context.authenticated);
+        assert_eq!(
+            context.reason_code,
+            Some(crate::licensing::AuthReasonCode::ReauthRequired)
+        );
+        let restored = crate::licensing::normalize_license_state(
+            Some(serde_json::to_value(&state).unwrap()),
+            now,
+        );
+        assert!(restored.reauth_required);
+        assert_eq!(restored.tier, LicenseTier::Personal);
+        let mut legacy = serde_json::to_value(&state).unwrap();
+        legacy.as_object_mut().unwrap().remove("reauth_required");
+        assert!(!crate::licensing::normalize_license_state(Some(legacy), now).reauth_required);
+    }
     use chrono::{Duration, TimeZone, Utc};
     use reqwest::{StatusCode, Url};
 

@@ -106,6 +106,32 @@ impl GroqLlmProvider {
 
 #[async_trait]
 impl LlmProvider for GroqLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey(self.provider_name.into()));
+        }
+        let mut request = serde_json::json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true});
+        if self.provider_name != "custom" {
+            request["max_tokens"] = 4096.into();
+            request["temperature"] = 0.3.into();
+        }
+        super::openai_compat::stream(
+            self.client
+                .post(&self.api_base_url)
+                .bearer_auth(&self.api_key)
+                .json(&request),
+            self.timeout,
+            self.request_log_store.as_ref(),
+            notify,
+        )
+        .await
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey(self.provider_name.to_string()));

@@ -24,6 +24,7 @@ const DEFAULT_MODEL: &str = "gpt-oss-120b";
 /// Cerebras LLM provider using the OpenAI-compatible Chat Completions API.
 pub struct CerebrasLlmProvider {
     client: Client,
+    api_base_url: String,
     api_key: String,
     model: String,
     timeout: Option<Duration>,
@@ -37,6 +38,7 @@ impl CerebrasLlmProvider {
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
+            api_base_url: CEREBRAS_API_URL.into(),
             api_key,
             model: DEFAULT_MODEL.to_string(),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
@@ -50,6 +52,7 @@ impl CerebrasLlmProvider {
     pub fn with_model(api_key: String, model: String) -> Self {
         Self {
             client: Client::new(),
+            api_base_url: CEREBRAS_API_URL.into(),
             api_key,
             model,
             timeout: Some(DEFAULT_LLM_TIMEOUT),
@@ -63,6 +66,7 @@ impl CerebrasLlmProvider {
     pub fn with_client(client: Client, api_key: String, model: Option<String>) -> Self {
         Self {
             client,
+            api_base_url: CEREBRAS_API_URL.into(),
             api_key,
             model: model.unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             timeout: Some(DEFAULT_LLM_TIMEOUT),
@@ -73,6 +77,12 @@ impl CerebrasLlmProvider {
 
     pub fn with_request_log_store(mut self, store: Option<RequestLogStore>) -> Self {
         self.request_log_store = store;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base_url(mut self, url: String) -> Self {
+        self.api_base_url = url;
         self
     }
 
@@ -108,6 +118,31 @@ struct ChatRequest {
 
 #[async_trait]
 impl LlmProvider for CerebrasLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        notify: super::streaming::Delta<'_>,
+    ) -> Result<String, LlmError> {
+        if self.api_key.is_empty() {
+            return Err(LlmError::NoApiKey("cerebras".into()));
+        }
+        let mut request = serde_json::json!({"model":self.model,"messages":[{"role":"system","content":system_prompt},{"role":"user","content":user_message}],"stream":true,"max_tokens":4096,"temperature":0.3});
+        if let Some(effort) = &self.reasoning_effort {
+            request["reasoning_effort"] = effort.clone().into();
+        }
+        super::openai_compat::stream(
+            self.client
+                .post(&self.api_base_url)
+                .bearer_auth(&self.api_key)
+                .json(&request),
+            self.timeout,
+            self.request_log_store.as_ref(),
+            notify,
+        )
+        .await
+    }
+
     async fn complete(&self, system_prompt: &str, user_message: &str) -> Result<String, LlmError> {
         if self.api_key.is_empty() {
             return Err(LlmError::NoApiKey("cerebras".to_string()));
@@ -126,7 +161,7 @@ impl LlmProvider for CerebrasLlmProvider {
 
         let req = self
             .client
-            .post(CEREBRAS_API_URL)
+            .post(&self.api_base_url)
             .bearer_auth(&self.api_key)
             .json(&request);
 

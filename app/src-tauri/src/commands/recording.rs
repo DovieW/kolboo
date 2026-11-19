@@ -775,29 +775,6 @@ pub fn pipeline_start_recording(
     // Emit event to frontend
     recording_completion::emit_pipeline_recording_started(&AppEventSink(&app));
 
-    if history_only.unwrap_or(false) {
-        let monitor_pipeline = pipeline.inner().clone();
-        let monitor_app = app.clone();
-        let session_path = pipeline.recovery_path();
-        tauri::async_runtime::spawn(async move {
-            while monitor_pipeline.state() == PipelineState::Recording
-                && monitor_pipeline.recovery_path() == session_path
-            {
-                if let Err(error) = monitor_pipeline.recording_progress() {
-                    recording_completion::emit_pipeline_error(
-                        &monitor_app,
-                        &error.to_string(),
-                        None,
-                    );
-                    #[cfg(desktop)]
-                    crate::set_escape_cancel_shortcut_enabled(&monitor_app, false);
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-        });
-    }
-
     Ok(())
 }
 

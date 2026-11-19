@@ -87,6 +87,40 @@ beforeEach(() => {
 	fixture.whisper.data = [];
 });
 
+it("presents ivritAI only as Managed Hebrew batch transcription without claiming free pricing", () => {
+	fixture.enabled = true;
+	fixture.managed.data = [
+		{
+			id: "ivrit-ai/whisper-large-v3-turbo",
+			display_name: "ivritAI Hebrew Turbo",
+			provider: "ivritai",
+			capabilities: ["transcription"],
+		},
+	];
+	for (const purpose of ["dictation", "file", "meeting"] as const) {
+		const choices = read(purpose).choices;
+		expect(choices).toHaveLength(1);
+		const choice = choices[0];
+		if (!choice) throw new Error("Missing ivritAI choice");
+		expect(choice).toMatchObject({
+			providerName: "ivritAI",
+			displayName: "ivritAI Hebrew Turbo",
+			selection: {
+				source: "managed",
+				provider_id: "ivritai",
+				model_id: "ivrit-ai/whisper-large-v3-turbo",
+			},
+			capabilities: ["After recording"],
+		});
+		expect(choice.limitations).toContain("Auto uses Hebrew");
+		expect(choice.limitations).toContain("host being online");
+		expect(choice.pricing).toContain("not assumed free");
+	}
+	expect(read("llm").choices).toEqual([]);
+	fixture.enabled = false;
+	expect(read("dictation").choices).toEqual([]);
+});
+
 it("uses separate YiddishLabs key readiness and restricts Standard to uploaded files and meetings", () => {
 	fixture.providers.data = {
 		stt: [

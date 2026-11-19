@@ -3,12 +3,13 @@ use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
 use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
 
 // Synthetic fixture key only; never the release key. The private key is not
-// retained. The payload is deliberately not an installer or user content.
-const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1MkM0NDA3NDBCNDNFMjAKUldRZ1ByUkFCMFFzZFNvQkRQSEwwU2RrcklvVm1LL2thT2xFb05RampMQVIyZkw4RGNsdWp0Q0oK";
-const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRZ1ByUkFCMFFzZFFVYm5IYXNQTktDeXk4ZWFuMnFPZWZEbVowWHhTWUFDNWJNR1RHRkFkN2FKQkw1Y20vdHNSa3ZRbTAxajhKdHZpM3ZOcDcvQkVyV1Y0b1ZZVDhUWHdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNDIzMDY2CWZpbGU6a29sYm9vLXVwZGF0ZXItZml4dHVyZS50eHQKdERTVzBHMGsyQW5ma21RdXNyUW5zVkFZWU56dzB2SHJ1bURxOVhONDhXM2hIc1dIeE5LdzVzS2t6RWNmRktxRmloLzVON1hsTnRuYVh4cTE0blFKQkE9PQo=";
-const PAYLOAD: &[u8] = b"synthetic updater payload, not an executable\n";
+// retained. The ELF magic and length satisfy Tauri's Linux AppImage format
+// check, but the rest is plain text, not a runnable executable.
+pub(super) const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENCMjY2RjkyMEREMTYxNUIKUldSYllkRU5rbThteTdrbUN5enJzN3hUMElLVitTaGQxSGczckFBQy9rL0JzRlYveWdiNXpRaDgK";
+const SIGNATURE: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSYllkRU5rbThteXlNblh6aHYyOXNLQW5DTXlVMkl2Z1RMNTg4dFdLMDArVkVZVVlWbWtNTEZXRkV5N3J1Y1JBNWFweENqakdWeGxSSG4xdTM3aFVDYXFvQXYzV21Fa3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MDUyODQ1CWZpbGU6Zml4dHVyZS5BcHBJbWFnZQpoaHNPMDFsWWVTWFJWUEVtYWRNRkRNMG00NWszT1ZTOGtDQ3pFRlFSR2l5U1JhTUN3N1lsNXZtcGJSa3JmV3UwZnUwNmEzTHQyNG5DeTBlM1FpTjZCUT09Cg==";
+pub(super) const PAYLOAD: &[u8] = b"\x7fELFsynthetic updater payload, not a runnable executable\n";
 
-fn test_app(server: &MockServer) -> tauri::App<MockRuntime> {
+pub(super) fn test_app(server: &MockServer) -> tauri::App<MockRuntime> {
     let mut context = mock_context(noop_assets());
     configure_context(&mut context, server);
     mock_builder()
@@ -37,7 +38,7 @@ pub(crate) fn native_context() -> (tauri::Context<tauri::Wry>, MockServer) {
     (context, server)
 }
 
-async fn release(server: &MockServer, version: &str, body: &[u8]) {
+pub(super) async fn release(server: &MockServer, version: &str, body: &[u8]) {
     server.reset().await;
     Mock::given(path("/latest"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -53,6 +54,16 @@ async fn release(server: &MockServer, version: &str, body: &[u8]) {
         .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
         .mount(server)
         .await;
+}
+
+#[tokio::test]
+async fn a_missing_signing_key_fails_before_any_network_request() {
+    let app = mock_builder().build(mock_context(noop_assets())).unwrap();
+    assert!(stage(app.handle())
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("signing key unavailable"));
 }
 
 #[tokio::test]
@@ -79,7 +90,15 @@ async fn stages_only_signed_newer_versions_and_deduplicates_downloads() {
         1
     );
     assert_eq!(
-        pending.download.lock().unwrap().as_ref().unwrap().1,
+        pending
+            .download
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .1
+            .read_verified()
+            .unwrap(),
         PAYLOAD
     );
     release(&server, "99.0.1", b"tampered payload").await;
@@ -91,7 +110,15 @@ async fn stages_only_signed_newer_versions_and_deduplicates_downloads() {
     server.reset().await;
     assert!(stage(app.handle()).await.is_err());
     assert_eq!(
-        pending.download.lock().unwrap().as_ref().unwrap().1,
+        pending
+            .download
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .1
+            .read_verified()
+            .unwrap(),
         PAYLOAD
     );
     assert!(!pending.shutdown.is_cancelled());
@@ -162,7 +189,9 @@ async fn enabled_setup_starts_checks_without_creating_a_window() {
             .unwrap()
             .as_ref()
             .unwrap()
-            .1,
+            .1
+            .read_verified()
+            .unwrap(),
         PAYLOAD,
         "worker cancellation does not consume the staged update"
     );
@@ -328,7 +357,7 @@ fn native_manual(
             .executable_path(executable.with_file_name("missing.AppImage"))
             .build()
             .unwrap();
-        tauri::async_runtime::block_on(stage_update(updater, &pending)).unwrap();
+        tauri::async_runtime::block_on(stage_update(updater, &pending, PUBLIC_KEY)).unwrap();
         *pending.target.lock().unwrap() = target;
         assert!(matches!(
             native_invoke(app, "install_update"),
@@ -344,12 +373,54 @@ fn native_manual(
         assert!(result.can_install);
         assert!(!pipeline.is_recovering());
         assert_eq!(
-            pending.download.lock().unwrap().as_ref().unwrap().1,
+            pending
+                .download
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .1
+                .read_verified()
+                .unwrap(),
             PAYLOAD
         );
         pending.download.lock().unwrap().take();
     }
     *pending.target.lock().unwrap() = InstallTarget::Tauri;
+    let updater = updater_app
+        .updater_builder()
+        .executable_path(executable)
+        .build()
+        .unwrap();
+    tauri::async_runtime::block_on(stage_update(updater, &pending, PUBLIC_KEY)).unwrap();
+    pending
+        .download
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .1
+        .tamper_for_test();
+    assert!(matches!(
+        native_invoke(app, "install_update"),
+        tauri::ipc::InvokeResponse::Ok(_)
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while pending.operation.load(Ordering::SeqCst) {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(status(app).error.as_deref(), Some(INSTALL_FAILED));
+    assert!(pending
+        .download
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .1
+        .read_verified()
+        .is_err());
+    pending.download.lock().unwrap().take();
 }
 
 // Called from the isolated Wry fixture, where actual Quit events can be pumped
@@ -417,7 +488,12 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
         .executable_path(&executable)
         .build()
         .unwrap();
-    tauri::async_runtime::block_on(stage_update(updater, &app.state::<PendingUpdate>())).unwrap();
+    tauri::async_runtime::block_on(stage_update(
+        updater,
+        &app.state::<PendingUpdate>(),
+        PUBLIC_KEY,
+    ))
+    .unwrap();
     assert!(matches!(
         native_invoke(app.handle(), "install_update"),
         tauri::ipc::InvokeResponse::Ok(_)
@@ -456,7 +532,12 @@ pub(crate) fn native_quit(app: &mut tauri::App<tauri::Wry>, server: &MockServer)
         .executable_path(directory.path().join("missing.AppImage"))
         .build()
         .unwrap();
-    tauri::async_runtime::block_on(stage_update(updater, &app.state::<PendingUpdate>())).unwrap();
+    tauri::async_runtime::block_on(stage_update(
+        updater,
+        &app.state::<PendingUpdate>(),
+        PUBLIC_KEY,
+    ))
+    .unwrap();
     app.handle().exit(0);
     while quit_events.load(Ordering::SeqCst) < 3 {
         assert!(

@@ -2,10 +2,17 @@
 
 Kolboo works without signing in. Account login is optional and only enables managed account context.
 
-The signed-out Account page opens directly to a compact sign-in form. Choose
-**Create an account** to register, or **Continue in browser** for browser sign-in.
-**Forgot password?** opens the same browser flow, which includes password reset.
-Account/access summaries are shown only after signing in.
+The signed-out Account page opens directly to a compact, left-aligned sign-in
+form. Enter your email and choose **Send sign-in code**, then enter the emailed
+six-digit code. **Use password** and **Use browser** remain secondary options;
+**Forgot password?** under password sign-in sends a reset email. New accounts
+are invite-only. Your own API keys work without an account.
+
+If the saved session is rejected, **Restore your Kolboo session** replaces the
+account summary without implying a plan downgrade. The saved email is prefilled
+and editable; nothing is sent until you submit. **Sign out** remains under
+**Account details**. Refresh and management actions return after authentication.
+Transient offline grace still shows the account summary and **Refresh access**.
 
 ## States you may see
 

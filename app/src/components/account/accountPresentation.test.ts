@@ -139,7 +139,7 @@ describe("accountPresentation", () => {
 				signedIn: true,
 				reauthRequired: true,
 			}),
-		).toContain("Try Refresh access");
+		).toContain("Sign in again to restore Managed access");
 	});
 
 	it("uses caution color when reauthentication is required", () => {

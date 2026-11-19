@@ -16,6 +16,24 @@ use tokio_util::sync::CancellationToken;
 
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
+#[cfg(target_os = "linux")]
+mod quick_ask;
+
+#[cfg(target_os = "linux")]
+impl SharedPipeline {
+    pub(crate) fn set_runtime_state_for_native_test(&self, state: PipelineState) {
+        self.inner.lock().unwrap().state = state;
+    }
+    pub(crate) fn poison_runtime_for_native_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = self.inner.lock().unwrap();
+            panic!("synthetic interrupted runtime access");
+        }));
+    }
+    pub(crate) fn recover_runtime_for_native_test(&self) {
+        self.inner.clear_poison();
+    }
+}
 
 #[tokio::test]
 async fn meeting_uploads_receive_owned_job_context_and_completed_chunks_are_not_resubmitted() {
@@ -349,6 +367,32 @@ async fn incomplete_capture_retains_audio_and_never_submits_a_partial_batch() {
     assert!(p.clone_last_wav_bytes().is_some());
 }
 
+#[test]
+fn capture_health_is_nonblocking_and_scoped_to_its_recording_epoch() {
+    let mut capture = FakeAudioCapture::new();
+    capture.incomplete = true;
+    let p = SharedPipeline::new_for_tests(test_config_for_transcription(), Box::new(capture));
+    assert_eq!(p.capture_failed_for_epoch(0), None);
+    p.start_recording().unwrap();
+    let epoch = p.session_epoch().unwrap();
+    assert_eq!(p.capture_failed_for_epoch(epoch), Some(true));
+    assert_eq!(p.capture_failed_for_epoch(epoch + 1), None);
+    {
+        let _held = p.inner.lock().unwrap();
+        assert_eq!(p.capture_failed_for_epoch(epoch), Some(false));
+    }
+    p.cancel();
+    assert_eq!(p.capture_failed_for_epoch(epoch), None);
+    let inner = p.inner.clone();
+    assert!(std::thread::spawn(move || {
+        let _held = inner.lock().unwrap();
+        panic!("synthetic poisoned capture owner");
+    })
+    .join()
+    .is_err());
+    assert_eq!(p.capture_failed_for_epoch(epoch), None);
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
     use serde_json::json;
@@ -641,6 +685,7 @@ pub(crate) fn native_model_actions(app: &tauri::AppHandle) {
             );
         }
         pipeline.update_config(original_config).unwrap();
+        quick_ask::native_answers(app).await;
     });
     window.close().unwrap();
 }
@@ -869,6 +914,7 @@ pub(super) struct FakeAudioCapture {
     cancellation_calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
     fail_recovery_finish: bool,
     incomplete: bool,
+    health_polls: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl FakeAudioCapture {
@@ -887,6 +933,7 @@ impl FakeAudioCapture {
             cancellation_calls: Arc::new(std::sync::Mutex::new(Vec::new())),
             fail_recovery_finish: false,
             incomplete: false,
+            health_polls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
@@ -989,6 +1036,8 @@ impl AudioCaptureBackend for FailingStartAudioCapture {
 
 impl AudioCaptureBackend for FakeAudioCapture {
     fn recording_progress(&self) -> (f64, bool) {
+        self.health_polls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         (0.5, self.incomplete)
     }
     fn recovery_path(&self) -> Option<std::path::PathBuf> {
@@ -1118,6 +1167,7 @@ struct MockSttProvider {
     behavior: MockBehavior,
     realtime_only: bool,
     batch_calls: Arc<std::sync::atomic::AtomicUsize>,
+    pending: bool,
 }
 
 impl MockSttProvider {
@@ -1127,6 +1177,7 @@ impl MockSttProvider {
             behavior: MockBehavior::default(),
             realtime_only: false,
             batch_calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            pending: false,
         }
     }
 
@@ -1149,6 +1200,9 @@ impl SttProvider for MockSttProvider {
     ) -> Result<String, crate::stt::SttError> {
         self.batch_calls
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.pending {
+            return std::future::pending().await;
+        }
         if let Some(delay) = self.behavior.delay {
             tokio::time::sleep(delay).await;
         }
@@ -1203,6 +1257,14 @@ impl ConditionalOcrLlmProvider {
 
 #[async_trait]
 impl crate::llm::LlmProvider for MockLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(
         &self,
         _system_prompt: &str,
@@ -1228,6 +1290,14 @@ impl crate::llm::LlmProvider for MockLlmProvider {
 
 #[async_trait]
 impl crate::llm::LlmProvider for ConditionalOcrLlmProvider {
+    async fn complete_streaming(
+        &self,
+        system_prompt: &str,
+        user_message: &str,
+        _notify: crate::llm::streaming::Delta<'_>,
+    ) -> Result<String, crate::llm::LlmError> {
+        self.complete(system_prompt, user_message).await
+    }
     async fn complete(
         &self,
         _system_prompt: &str,
@@ -1723,6 +1793,185 @@ pub(crate) fn native_recording_output(app: &tauri::AppHandle) {
             store.delete(key);
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(deprecated)]
+pub(crate) fn native_capture_health(app: &mut tauri::App<tauri::Wry>) {
+    use tauri::Manager;
+    let pipeline = app.state::<SharedPipeline>().inner().clone();
+    let original_config = pipeline.config();
+    let original_capture = {
+        let mut inner = pipeline.inner.lock().unwrap();
+        assert_eq!(inner.state, PipelineState::Idle);
+        std::mem::replace(&mut inner.audio_capture, Box::new(FakeAudioCapture::new()))
+    };
+    let old_app = pipeline.app_handle.lock().unwrap().clone();
+    pipeline.set_app_handle(app.handle().clone());
+    pipeline
+        .update_config(test_config_for_transcription())
+        .unwrap();
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut provider = MockSttProvider::new("must not upload");
+    provider.batch_calls = calls.clone();
+    pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+    for history_only in [true, false] {
+        let capture = FakeAudioCapture::new();
+        let health_polls = capture.health_polls.clone();
+        pipeline.inner.lock().unwrap().audio_capture = Box::new(capture);
+        pipeline
+            .start_recording_with_output(history_only, None, false)
+            .unwrap();
+        let old_epoch = pipeline.inner.lock().unwrap().session_epoch;
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while health_polls.load(std::sync::atomic::Ordering::SeqCst) < 2 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "healthy capture must be monitored without stopping"
+            );
+            app.run_iteration(|_, _| {});
+        }
+        assert_eq!(pipeline.state(), PipelineState::Recording);
+        pipeline.force_reset();
+        let mut capture = FakeAudioCapture::new();
+        capture.incomplete = true;
+        pipeline.inner.lock().unwrap().audio_capture = Box::new(capture);
+        let request_id = (!history_only).then(|| {
+            app.state::<crate::RequestLogStore>()
+                .start_request("mock".into(), None)
+        });
+        pipeline
+            .start_recording_with_output(history_only, None, false)
+            .unwrap();
+        crate::recording_orchestration::native_assert_stale_capture_failure(
+            app.handle(),
+            &pipeline,
+            old_epoch,
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        while pipeline.state() != PipelineState::Error {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "failed capture must leave Recording without a user stopping it"
+            );
+            app.run_iteration(|_, _| {});
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        if !history_only {
+            assert!(!app
+                .state::<crate::state::AppState>()
+                .is_recording
+                .load(std::sync::atomic::Ordering::SeqCst));
+            while app
+                .state::<crate::RequestLogStore>()
+                .with_current_id(request_id.as_deref().unwrap(), |_| ())
+                .is_some()
+            {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "failed recording must finish its own log"
+                );
+                app.run_iteration(|_, _| {});
+            }
+        }
+        pipeline.force_reset();
+    }
+    for cancelled in [false, true] {
+        let mut config = test_config_for_transcription();
+        config.llm_config.enabled = false;
+        pipeline.update_config(config).unwrap();
+        pipeline.inner.lock().unwrap().audio_capture = Box::new(FakeAudioCapture::new());
+        let mut provider = MockSttProvider::new(""); // No real text insertion in the fixture.
+        provider.pending = cancelled;
+        let entered = provider.batch_calls.clone();
+        pipeline.inject_stt_provider_for_tests(MOCK_PROVIDER, None, None, Arc::new(provider));
+        let logs = app.state::<crate::RequestLogStore>();
+        let id = logs.start_request("mock".into(), None);
+        pipeline
+            .start_recording_with_output(false, None, false)
+            .unwrap();
+        crate::stop_recording(
+            app.handle(),
+            &app.state::<crate::state::AppState>(),
+            false,
+            crate::audio::AudioCue::from_str("kolboo"),
+            &None,
+            crate::PlayingAudioHandling::None,
+            "Native finalization fixture",
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        if cancelled {
+            while entered.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+                assert!(std::time::Instant::now() < deadline);
+                app.run_iteration(|_, _| {});
+            }
+            pipeline
+                .inner
+                .lock()
+                .unwrap()
+                .cancel_token
+                .as_ref()
+                .unwrap()
+                .cancel();
+        }
+        while app
+            .state::<crate::RequestLogStore>()
+            .with_current_id(&id, |_| ())
+            .is_some()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "normal finalization must finish its own log"
+            );
+            app.run_iteration(|_, _| {});
+        }
+        let log = app
+            .state::<crate::RequestLogStore>()
+            .get_logs(None)
+            .into_iter()
+            .find(|log| log.id == id)
+            .unwrap();
+        assert_eq!(
+            log.status,
+            if cancelled {
+                crate::request_log::RequestStatus::Cancelled
+            } else {
+                crate::request_log::RequestStatus::Success
+            }
+        );
+        assert_eq!(entered.load(std::sync::atomic::Ordering::SeqCst), 1);
+        pipeline.force_reset();
+        let next = app
+            .state::<crate::RequestLogStore>()
+            .start_request("new-owner".into(), None);
+        crate::sessions::recording_finalization::complete_current_request_without_cost(
+            app.handle(),
+            &pipeline,
+            Some(&id),
+        );
+        crate::sessions::recording_finalization::complete_current_request_with_duration(
+            app.handle(),
+            &pipeline,
+            Some(&id),
+            crate::stats::EventStatus::Error,
+            Some(1.0),
+        );
+        crate::sessions::recording_finalization::complete_current_request_without_cost(
+            app.handle(),
+            &pipeline,
+            None,
+        );
+        assert!(app
+            .state::<crate::RequestLogStore>()
+            .with_current_id(&next, |log| assert_eq!(
+                log.status,
+                crate::request_log::RequestStatus::InProgress
+            ))
+            .is_some());
+    }
+    pipeline.inner.lock().unwrap().audio_capture = original_capture;
+    *pipeline.app_handle.lock().unwrap() = old_app;
+    pipeline.update_config(original_config).unwrap();
 }
 
 #[cfg(target_os = "linux")]

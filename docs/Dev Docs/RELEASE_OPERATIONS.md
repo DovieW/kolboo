@@ -199,9 +199,15 @@ the pipeline's exclusive lease and refuses while recording, transcription,
 import or retry owns it. **Check for updates** uses the same backend owner as
 background checks, reports status, and downloads/verifies a newer package.
 Closing to tray does not install, and OS shutdown is not delayed. The standard
-Windows updater handoff restarts the updated application. Staged downloads are
-memory-only; if the process is killed or the machine shuts down before Quit,
-the next launch checks/downloads again.
+Windows updater handoff restarts the updated application. Downloads are streamed
+to private temporary files with a 256 MiB compressed-package limit, enforced on
+both declared size and actual streamed bytes. Minisign verification uses the
+same key/signature contract as Tauri; staged bytes are verified again immediately
+before installation. Prehashed signatures verify incrementally; legacy signatures
+use the same bounded reader as installation. No unverified package is published
+as Ready. Installation temporarily reads at most the package limit into memory
+for Tauri's installer API. Cancellation removes normal staging files; interrupted
+processes do not resume them, and the next launch checks/downloads again.
 
 Linux AppImage updates replace the writable installed image. Debian updates
 use one OS-owned `pkexec /usr/bin/dpkg --install` approval prompt; cancellation

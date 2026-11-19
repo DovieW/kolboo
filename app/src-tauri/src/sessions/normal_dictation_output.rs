@@ -150,7 +150,7 @@ fn finalize_request_log_after_output(
     }
 
     if let Some(log_store) = app.try_state::<RequestLogStore>() {
-        log_store.with_current(|log| {
+        log_store.with_current_id(request.request_id.unwrap_or_default(), |log| {
             if log.status == RequestStatus::InProgress {
                 log.complete_success();
             }
