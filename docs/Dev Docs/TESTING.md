@@ -150,6 +150,12 @@ after merging to master. This grandfathers pre-policy code, **not subsequent
 committed or working-tree changes**. Untracked production files are included.
 Use `coverage:patch` for a fresh sequential frontend/Rust run: V8 clears its
 report directory, so running the two writers concurrently can delete Rust LCOV.
+CI pins the coverage compiler to Rust 1.98.1 (LLVM 22.1.8) so source and
+function counters are reproducible. To reproduce that gate locally, use
+`RUSTUP_TOOLCHAIN=1.98.1 pnpm -C app coverage:patch` with that toolchain's
+`llvm-tools-preview` component installed. Ordinary Rust checks and release
+builds still use current stable; a coverage compiler update needs its own
+counter and exception review.
 
 On 2026-09-24 the maintainer authorized necessary exceptions for the accumulated
 desktop patch. `app/scripts/patch-coverage-exceptions.json` records exact Rust

@@ -312,7 +312,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
     let result = run_capture_thread_with_builder(
         args,
         Instant::now() - Duration::from_secs(3),
-        |device, config, format, start, clock, dispatch| {
+        &mut |device, config, format, start, clock, dispatch| {
             calls += 1;
             match calls {
                 1 => {

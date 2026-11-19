@@ -272,7 +272,7 @@ fn raise_overlay_without_focus(window: &tauri::WebviewWindow) -> Result<(), Stri
         SWP_SHOWWINDOW,
     };
 
-    let hwnd: HWND = window.hwnd().map_err(|e| e.to_string())?;
+    let hwnd = HWND(window.hwnd().map_err(|e| e.to_string())?.0);
 
     let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOOWNERZORDER;
 

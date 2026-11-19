@@ -22,7 +22,7 @@
 		"lines": [525, 526, 527, 896, 897, 898],
 		"functions": [],
 		"instantiations": [],
-		"sha256": "b4ac9599e18b1d97a3162eae7a26bef57157816af10e707ea6781bb9f329d589"
+		"sha256": "fa679150b3909388616b3fba4101fa86572aa6bdb9c0bd19051e1a8ee2ea250c"
 	},
 	{
 		"filePath": "app/src-tauri/src/commands/recording.rs",

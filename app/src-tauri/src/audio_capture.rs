@@ -2109,7 +2109,8 @@ fn build_stream(
 fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> {
     let ready = args.ready.as_ref().map(|(sender, _)| sender.clone());
     let fence = args.capture_fence.clone();
-    let result = run_capture_thread_with_builder(args, std::time::Instant::now(), build_stream);
+    let result =
+        run_capture_thread_with_builder(args, std::time::Instant::now(), &mut build_stream);
     if let Err(error) = &result {
         fence.fail_latest();
         if let Some(ready) = ready {
@@ -2119,22 +2120,23 @@ fn run_capture_thread(args: CaptureThreadArgs) -> Result<(), AudioCaptureError> 
     result
 }
 
-// Keep native stream creation at one boundary; recovery owns its state machine.
-fn run_capture_thread_with_builder<F>(
-    args: CaptureThreadArgs,
-    start: std::time::Instant,
-    mut build_stream: F,
-) -> Result<(), AudioCaptureError>
-where
-    F: FnMut(
+// Stream construction is a cold boundary. Share one state machine between
+// live capture and native fault injection rather than monomorphizing it.
+type StreamBuilder<'a> = dyn FnMut(
         &InputDevice,
         &cpal::StreamConfig,
         SampleFormat,
         std::time::Instant,
         Arc<AtomicU64>,
         &CaptureDispatch,
-    ) -> Result<InputStream, AudioCaptureError>,
-{
+    ) -> Result<InputStream, AudioCaptureError>
+    + 'a;
+
+fn run_capture_thread_with_builder(
+    args: CaptureThreadArgs,
+    start: std::time::Instant,
+    build_stream: &mut StreamBuilder<'_>,
+) -> Result<(), AudioCaptureError> {
     use std::time::Duration;
 
     let CaptureThreadArgs {

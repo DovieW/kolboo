@@ -182,7 +182,7 @@ pub(super) fn native_stream_errors() {
                         let result = run_capture_thread_with_builder(
                             args,
                             Instant::now(),
-                            |device, config, format, start, clock, dispatch| {
+                            &mut |device, config, format, start, clock, dispatch| {
                                 let stream =
                                     build_stream(device, config, format, start, clock, dispatch)?;
                                 let InputStream::Cpal { fault, .. } = &stream else {
