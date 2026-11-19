@@ -16,8 +16,10 @@ use tokio_util::sync::CancellationToken;
 
 const MOCK_PROVIDER: &str = "mock";
 const MOCK_API_KEY: &str = "test-key";
+#[cfg(target_os = "linux")]
 mod quick_ask;
 
+#[cfg(target_os = "linux")]
 impl SharedPipeline {
     pub(crate) fn set_runtime_state_for_native_test(&self, state: PipelineState) {
         self.inner.lock().unwrap().state = state;

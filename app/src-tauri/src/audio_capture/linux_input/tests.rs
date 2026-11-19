@@ -250,7 +250,9 @@ fn native_recovery(selected: &str) {
         "failed",
         "active",
         "never-ready",
+        "empty-input",
         "cancel-start",
+        "disconnect",
         "retired",
     ] {
         native_recovery_outcome(selected, outcome);
@@ -262,6 +264,19 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
     use cpal::traits::HostTrait;
     let audio = AudioCapture::new();
     let (command_tx, command_rx) = crossbeam_channel::bounded(1);
+    let command_tx = if outcome == "disconnect" {
+        drop(command_tx);
+        None
+    } else {
+        Some(command_tx)
+    };
+    let request_stop = || {
+        command_tx
+            .as_ref()
+            .unwrap()
+            .send(CaptureCommand::Stop)
+            .unwrap()
+    };
     let (event_tx, _) = std::sync::mpsc::channel();
     let config = cpal::StreamConfig {
         channels: 2,
@@ -290,7 +305,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
         audio.capture_fence.fail_stream();
     }
     let args = CaptureThreadArgs {
-        ready: matches!(outcome, "never-ready" | "cancel-start")
+        ready: matches!(outcome, "never-ready" | "empty-input" | "cancel-start")
             .then_some((ready_tx, Instant::now() + Duration::from_millis(500))),
         capture_fence: audio.capture_fence.clone(),
         device,
@@ -317,7 +332,10 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
             match calls {
                 1 => {
                     if outcome == "cancel-start" {
-                        command_tx.send(CaptureCommand::Stop).unwrap();
+                        request_stop();
+                    }
+                    if outcome == "empty-input" {
+                        dispatch.enqueue(&[] as &[f32], std::convert::identity);
                     }
                     if outcome != "never-ready" {
                         clock.store(1, Ordering::Relaxed);
@@ -326,7 +344,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
                         .map(InputStream::Pulse)
                 }
                 2 if outcome == "rebuild" => {
-                    command_tx.send(CaptureCommand::Stop).unwrap();
+                    request_stop();
                     build_stream(device, config, format, start, clock, dispatch)
                 }
                 2 => Err(AudioCaptureError::StreamBuild(
@@ -336,7 +354,7 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
                     assert!(
                         matches!(device, InputDevice::Pulse(source) if source == &source_name(selected).unwrap())
                     );
-                    command_tx.send(CaptureCommand::Stop).unwrap();
+                    request_stop();
                     if outcome == "failed" {
                         return Err(AudioCaptureError::StreamBuild(
                             "synthetic rebind failure".into(),
@@ -348,13 +366,22 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
             }
         },
     );
-    if outcome == "cancel-start" {
+    if matches!(outcome, "cancel-start" | "disconnect") {
         result.unwrap();
         assert_eq!(calls, 1);
         assert!(ready_rx.try_recv().is_err());
         return;
     }
-    if outcome == "active" || outcome == "never-ready" || outcome == "retired" {
+    if matches!(outcome, "never-ready" | "empty-input") {
+        assert!(
+            matches!(result, Err(AudioCaptureError::StreamStart(message))
+            if message == "Microphone opened but delivered no audio")
+        );
+        assert_eq!(calls, 1);
+        assert!(ready_rx.try_recv().is_err());
+        return;
+    }
+    if matches!(outcome, "active" | "retired") {
         assert!(result.is_err());
         assert_eq!(
             calls, 1,
@@ -362,10 +389,8 @@ fn native_recovery_outcome(selected: &str, outcome: &str) {
         );
         if outcome == "active" {
             assert!(audio.capture_fence.latest_failed());
-        } else if outcome == "retired" {
-            assert!(audio.capture_fence.stream_failed());
         } else {
-            assert!(ready_rx.try_recv().is_err());
+            assert!(audio.capture_fence.stream_failed());
         }
         return;
     }

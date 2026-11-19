@@ -251,6 +251,7 @@ pub(crate) mod tests {
         assert!(!private_persist_error(error).contains("PRIVATE"));
         assert_eq!(std::fs::read(destination).unwrap(), b"existing evidence");
     }
+    #[cfg(target_os = "linux")]
     pub(crate) fn native_private_archive(app: &AppHandle) {
         use std::io::Read;
         let fixture = PathBuf::from(

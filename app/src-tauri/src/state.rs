@@ -251,7 +251,7 @@ pub(crate) struct TrayRefresh {
     running: std::sync::atomic::AtomicBool,
 }
 impl TrayRefresh {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn is_running_for_test(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }

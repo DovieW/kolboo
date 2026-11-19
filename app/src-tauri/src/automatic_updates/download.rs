@@ -34,7 +34,7 @@ pub(super) struct VerifiedArchive {
     signature: String,
 }
 impl VerifiedArchive {
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(super) fn tamper_for_test(&self) {
         std::fs::write(self.file.path(), b"synthetic tampering").unwrap();
     }

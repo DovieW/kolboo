@@ -15,6 +15,7 @@ pub(super) struct CaptureFence {
 }
 
 impl CaptureFence {
+    #[cfg(target_os = "linux")]
     pub(super) fn fail_stream(&self) {
         self.stream_failed.store(true, Ordering::SeqCst);
         self.fail_latest();

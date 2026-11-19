@@ -82,6 +82,7 @@ fn tray_reads_latest_used_context_without_changing_settings() {
     );
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn native_controls(app: &AppHandle) {
     assert_eq!(
         std::env::var("KOLBOO_NATIVE_WINDOW_TEST").as_deref(),

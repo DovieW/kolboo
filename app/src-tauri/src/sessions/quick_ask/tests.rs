@@ -263,6 +263,7 @@ fn scope_only_mutates_and_completes_its_own_request() {
     assert!(background.with_current_id(&id, |_| ()).is_some());
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn native_cancel(app: &AppHandle) {
     struct Unserializable;
     impl serde::Serialize for Unserializable {
