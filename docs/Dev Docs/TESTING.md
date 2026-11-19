@@ -304,7 +304,7 @@ timeouts name the operation so a geometry failure is diagnosable in CI logs.
 On Ubuntu/Kubuntu install the optional acceptance prerequisites:
 
 ```sh
-sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils
+sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils ffmpeg
 pnpm cargo:test:window-native
 ```
 

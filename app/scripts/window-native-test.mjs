@@ -44,10 +44,24 @@ if (!inside) {
 	]) {
 		if (!commandExists(tool, env)) {
 			console.error(
-				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils",
+				"Install native window test prerequisites: sudo apt-get install xvfb openbox x11-utils xauth keyutils pulseaudio pulseaudio-utils ffmpeg",
 			);
 			process.exit(1);
 		}
+	}
+	const ffmpeg = spawnSync("/usr/bin/ffmpeg", ["-hide_banner", "-devices"], {
+		env,
+		encoding: "utf8",
+		timeout: 5000,
+	});
+	if (
+		ffmpeg.status !== 0 ||
+		!/^\s*D[ E]\s+pulse\b/mu.test(ffmpeg.stdout ?? "")
+	) {
+		console.error(
+			"Native capture tests require /usr/bin/ffmpeg with PulseAudio input support: sudo apt-get install ffmpeg",
+		);
+		process.exit(1);
 	}
 	const directory = mkdtempSync(path.join(tmpdir(), "kolboo-window-test-"));
 	for (const folder of ["data", "config", "cache", "runtime"])
